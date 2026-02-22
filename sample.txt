@@ -1,0 +1,27 @@
+1	6	2	Josef Newgarden	Team Penske	225	60	4	01:54:50.6727	156.342	Running	51
+2	4	10	Alex Palou	Chip Ganassi Racing	225	11	4	01:54:51.1748	156.330	Running	41
+3	7	3	Scott McLaughlin	Team Penske	225	7	4	01:54:51.4030	156.325	Running	36
+4	8	8	Kyffin Simpson	Chip Ganassi Racing	225	--	4	01:54:51.6480	156.320	Running	32
+5	24	76	Conor Daly	Juncos Hollinger Racing	225	2	4	01:54:52.9191	156.291	Running	31
+6	11	27	Kyle Kirkwood	Andretti Global	225	--	4	01:54:53.3805	156.280	Running	28
+7	9	60	Felix Rosenqvist	Meyer Shank w/ Curb-Agajanian	225	--	4	01:54:53.9970	156.266	Running	26
+8	12	14	Santino Ferrucci	A.J. Foyt Enterprises	225	--	4	01:54:54.7552	156.249	Running	24
+9	18	90	Callum Ilott	PREMA Racing	225	--	5	01:54:56.1356	156.218	Running	22
+10	19	20	Alexander Rossi	ECR	225	16	5	01:54:57.8861	156.178	Running	21
+11	13	26	Colton Herta	Andretti Global w/ Curb-Agajanian	225	3	5	01:54:58.5068	156.164	Running	20
+12	5	9	Scott Dixon	Chip Ganassi Racing	225	1	5	01:54:59.1382	156.150	Running	19
+13	26	18	Rinus VeeKay	Dale Coyne Racing	225	2	5	01:54:59.6483	156.138	Running	18
+14	17	83	Robert Shwartzman	PREMA Racing	224	--	4	01:54:57.3910	155.495	Running	16
+15	15	28	Marcus Ericsson	Andretti Global	224	--	4	01:55:00.0004	155.437	Running	15
+16	20	77	Sting Ray Robb	Juncos Hollinger Racing	224	--	4	01:55:00.3255	155.429	Running	14
+17	16	6	Nolan Siegel	Arrow McLaren	224	--	5	01:55:00.9229	155.416	Running	13
+18	22	30	Devlin DeFrancesco	Rahal Letterman Lanigan Racing	224	--	5	01:55:01.2523	155.408	Running	12
+19	14	66	Marcus Armstrong	Meyer Shank w/ Curb-Agajanian	224	1	5	01:55:16.3704	155.069	Running	12
+20	23	45	Louis Foster	Rahal Letterman Lanigan Racing	223	--	4	01:55:14.0061	154.429	Running	10
+21	10	12	Will Power	Team Penske	222	5	5	01:55:02.8309	153.986	Running	10
+22	21	15	Graham Rahal	Rahal Letterman Lanigan Racing	220	--	5	01:55:07.3476	152.498	Running	8
+23	27	51	Jacob Abel	Dale Coyne Racing	215	--	5	01:52:40.2624	152.275	Retired	7
+24	1	5	Pato O'Ward	Arrow McLaren	126	116	2	01:04:01.8950	157.029	Contact	10
+25	3	7	Christian Lundgaard	Arrow McLaren	123	--	2	01:31:17.4740	107.517	Mechanical	5
+26	2	4	David Malukas	A.J. Foyt Enterprises	82	1	1	00:37:46.7321	173.208	Contact	6
+27	25	21	Christian Rasmussen	ECR	--	--	--	00:00:01.8378	0.000	Contact	5

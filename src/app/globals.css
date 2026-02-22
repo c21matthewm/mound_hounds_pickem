@@ -1,0 +1,147 @@
+@import "tailwindcss";
+
+:root {
+  color-scheme: light;
+  --bg-base: #f3f7ff;
+  --bg-cool: #dfeaff;
+  --bg-warm: #ffe8e8;
+  --ink-strong: #0f172a;
+  --ink-muted: #334155;
+  --panel-bg: rgba(255, 255, 255, 0.92);
+  --panel-border: #d7e2f4;
+  --brand-700: #1148a8;
+  --brand-800: #0d2e74;
+  --brand-600: #1f5dcb;
+  --brand-750: #113f99;
+  --secondary-bg: #ecf3ff;
+  --secondary-border: #bfd2f5;
+  --secondary-ink: #27406e;
+  --success-bg: #ecfdf3;
+  --success-border: #a7f3d0;
+  --success-ink: #166534;
+  --error-bg: #fef2f2;
+  --error-border: #fecaca;
+  --error-ink: #b91c1c;
+  --warn-bg: #fffbeb;
+  --warn-border: #fde68a;
+  --warn-ink: #92400e;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background:
+    radial-gradient(1300px 520px at 100% -120px, var(--bg-cool) 0%, transparent 62%),
+    radial-gradient(900px 420px at -120px 120px, var(--bg-warm) 0%, transparent 58%),
+    var(--bg-base);
+  color: var(--ink-strong);
+  font-family: "Avenir Next", "Segoe UI Variable", "Trebuchet MS", "Verdana", sans-serif;
+}
+
+a,
+button,
+input,
+select,
+textarea {
+  transition:
+    background-color 180ms ease,
+    border-color 180ms ease,
+    box-shadow 180ms ease,
+    color 180ms ease,
+    transform 180ms ease;
+}
+
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  outline: 2px solid #1d4ed8;
+  outline-offset: 2px;
+}
+
+.border.border-slate-200.bg-white,
+.border.border-slate-200.bg-slate-50 {
+  background-color: var(--panel-bg) !important;
+  border-color: var(--panel-border) !important;
+  box-shadow: 0 12px 26px -20px rgba(18, 38, 88, 0.55);
+}
+
+.border-dashed.border-slate-300.bg-slate-50 {
+  background-color: #f4f8ff !important;
+  border-color: #c9d9f3 !important;
+}
+
+button.bg-slate-900,
+a.bg-slate-900 {
+  background-image: linear-gradient(135deg, var(--brand-700), var(--brand-800));
+  background-color: var(--brand-700) !important;
+  box-shadow: 0 8px 16px -10px rgba(17, 72, 168, 0.65);
+}
+
+button.bg-slate-900:hover,
+a.bg-slate-900:hover {
+  background-image: linear-gradient(135deg, var(--brand-600), var(--brand-750));
+  transform: translateY(-1px);
+}
+
+button.border.border-slate-300,
+a.border.border-slate-300 {
+  background-color: var(--secondary-bg);
+  border-color: var(--secondary-border) !important;
+  color: var(--secondary-ink) !important;
+}
+
+button.border.border-slate-300:hover,
+a.border.border-slate-300:hover {
+  background-color: #dfe9ff;
+}
+
+.border-red-200.bg-red-50 {
+  background-color: var(--error-bg) !important;
+  border-color: var(--error-border) !important;
+  color: var(--error-ink) !important;
+}
+
+.border-emerald-200.bg-emerald-50 {
+  background-color: var(--success-bg) !important;
+  border-color: var(--success-border) !important;
+  color: var(--success-ink) !important;
+}
+
+.border-amber-200.bg-amber-50 {
+  background-color: var(--warn-bg) !important;
+  border-color: var(--warn-border) !important;
+  color: var(--warn-ink) !important;
+}
+
+thead.bg-slate-50 {
+  background-color: #eaf1ff !important;
+}
+
+tbody tr {
+  transition: background-color 160ms ease;
+}
+
+tbody tr:hover {
+  background-color: #f5f9ff;
+}
+
+input,
+select,
+textarea {
+  border-color: #cbd5e1;
+}
+
+input:focus,
+select:focus,
+textarea:focus {
+  border-color: #93c5fd;
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.16);
+  outline: none;
+}
+
+.text-slate-600,
+.text-slate-700 {
+  color: var(--ink-muted);
+}
