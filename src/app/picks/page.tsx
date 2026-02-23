@@ -242,6 +242,18 @@ export default async function PicksPage({ searchParams }: PageProps) {
             </p>
           </div>
           <p className="mt-2 text-xs text-slate-200">All race times shown in {LEAGUE_TIME_ZONE}.</p>
+          <p className="mt-1 text-xs text-slate-200">
+            Please visit the{" "}
+            <a
+              className="font-semibold text-cyan-200 underline decoration-cyan-300/70 underline-offset-2 hover:text-cyan-100"
+              href="https://www.indycar.com/"
+              rel="noreferrer"
+              target="_blank"
+            >
+              official INDYCAR website
+            </a>{" "}
+            for additional information.
+          </p>
         </div>
       </section>
 
