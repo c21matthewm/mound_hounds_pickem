@@ -76,40 +76,60 @@ const driverGroupForIndex = (index: number): number => {
 };
 
 async function refreshDriverStandingsAndGroups(supabase: SupabaseClient) {
-  const { data: orderedDrivers, error: orderedDriversError } = await supabase
+  const { data: activeDrivers, error: activeDriversError } = await supabase
     .from("drivers")
-    .select("id,is_active,championship_points,current_standing,driver_name")
+    .select("id,championship_points,current_standing,driver_name")
+    .eq("is_active", true)
     .order("championship_points", { ascending: false })
     .order("current_standing", { ascending: true })
     .order("driver_name", { ascending: true });
 
-  if (orderedDriversError) {
-    throw new Error(orderedDriversError.message);
+  if (activeDriversError) {
+    throw new Error(activeDriversError.message);
   }
 
-  const driverRows = orderedDrivers ?? [];
-  let activeIndex = 0;
+  const { data: inactiveDrivers, error: inactiveDriversError } = await supabase
+    .from("drivers")
+    .select("id,current_standing,driver_name")
+    .eq("is_active", false)
+    .order("current_standing", { ascending: true })
+    .order("driver_name", { ascending: true });
 
-  const updateResponses = await Promise.all(
-    driverRows.map((driver, index) => {
-      const nextStanding = index + 1;
-      const nextGroupNumber = driver.is_active ? driverGroupForIndex(activeIndex) : 6;
+  if (inactiveDriversError) {
+    throw new Error(inactiveDriversError.message);
+  }
 
-      if (driver.is_active) {
-        activeIndex += 1;
-      }
+  const rankedActiveDrivers = activeDrivers ?? [];
+  const inactiveDriverRows = inactiveDrivers ?? [];
 
-      return supabase
+  const activeUpdateResponses = await Promise.all(
+    rankedActiveDrivers.map((driver, index) =>
+      supabase
         .from("drivers")
         .update({
-          current_standing: nextStanding,
-          group_number: nextGroupNumber
+          current_standing: index + 1,
+          group_number: driverGroupForIndex(index)
         })
-        .eq("id", driver.id);
-    })
+        .eq("id", driver.id)
+    )
   );
 
-  const failed = updateResponses.find((result) => result.error);
+  const inactiveUpdateResponses = await Promise.all(
+    inactiveDriverRows.map((driver, index) =>
+      supabase
+        .from("drivers")
+        .update({
+          // Keep inactive drivers after active drivers for deterministic ordering.
+          current_standing: rankedActiveDrivers.length + index + 1,
+          group_number: 6
+        })
+        .eq("id", driver.id)
+    )
+  );
+
+  const failed = [...activeUpdateResponses, ...inactiveUpdateResponses].find(
+    (result) => result.error
+  );
 
   if (failed?.error) {
     throw new Error(failed.error.message);

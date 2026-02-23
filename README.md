@@ -75,3 +75,30 @@ Race winners are fantasy league winners (team/profile), not INDYCAR race-winning
 - Recommended scheduler: Supabase Cron (`pg_cron` + `pg_net`) every 5 minutes
 
 Set `CRON_SECRET` in Vercel and locally to protect cron route calls.
+
+## Pick reminder automation
+
+Cron endpoint: `/api/cron/pick-reminders`
+
+Behavior:
+
+- Targets the next unarchived race where qualifying has not started.
+- Sends reminders only to participants who have not submitted picks for that race.
+- Reminder windows:
+  - 4 days before qualifying deadline
+  - 2 days before qualifying deadline
+  - 2 hours before qualifying deadline
+- Sends email reminders to participant account emails.
+- Sends SMS reminders through carrier email gateways when `phone_number` and a supported
+  `phone_carrier` are present.
+- Uses `public.pick_reminders` to dedupe sends (no duplicate sends per user/race/window/channel).
+
+Required env vars:
+
+- `RESEND_API_KEY`
+- `RESEND_FROM_EMAIL`
+- `CRON_SECRET`
+
+Optional:
+
+- `RESEND_REPLY_TO`
