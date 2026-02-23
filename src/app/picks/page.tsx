@@ -1,8 +1,8 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { signOutAction } from "@/app/actions/auth";
 import { MobileBottomNav } from "@/components/mobile-bottom-nav";
 import { PickSubmissionSnapshot } from "@/components/pick-submission-snapshot";
+import { SignOutButton } from "@/components/sign-out-button";
 import { saveWeeklyPickAction } from "@/app/picks/actions";
 import { PickemForm } from "@/components/pickem-form";
 import { isProfileComplete, type ProfileRow } from "@/lib/profile";
@@ -122,16 +122,11 @@ export default async function PicksPage({ searchParams }: PageProps) {
   if (!upcomingRace) {
     return (
       <main className="mx-auto flex min-h-screen max-w-4xl flex-col px-6 py-16">
-        <header className="flex flex-wrap items-center justify-between gap-3">
+        <header className="relative flex flex-wrap items-center justify-between gap-3">
           <h1 className="text-3xl font-semibold tracking-tight">Pick&apos;em Form</h1>
-          <form action={signOutAction}>
-            <button
-              className="rounded-md border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100"
-              type="submit"
-            >
-              Sign out
-            </button>
-          </form>
+          <div className="flex items-center gap-2">
+            <SignOutButton />
+          </div>
         </header>
         <p className="mt-4 rounded-md border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
           No future race is scheduled yet for the {seasonRange.seasonYear} season. Add a race in
@@ -208,7 +203,7 @@ export default async function PicksPage({ searchParams }: PageProps) {
 
   return (
     <main className="mx-auto flex min-h-screen max-w-6xl flex-col px-6 py-10 pb-24 md:pb-10">
-      <header className="flex flex-wrap items-start justify-between gap-4">
+      <header className="relative flex flex-wrap items-start justify-between gap-4">
         <div>
           <p className="inline-flex rounded-full border border-cyan-200 bg-cyan-50 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-cyan-700">
             Race Picks
@@ -232,14 +227,7 @@ export default async function PicksPage({ searchParams }: PageProps) {
           >
             Leaderboard
           </Link>
-          <form action={signOutAction}>
-            <button
-              className="rounded-md border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100"
-              type="submit"
-            >
-              Sign out
-            </button>
-          </form>
+          <SignOutButton />
         </div>
       </header>
 

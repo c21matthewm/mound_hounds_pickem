@@ -15,10 +15,12 @@ export default async function LoginPage({ searchParams }: PageProps) {
   return (
     <main className="mx-auto flex min-h-screen max-w-md flex-col justify-center px-6 py-16">
       <p className="inline-flex w-fit rounded-full border border-blue-200 bg-blue-50 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-blue-700">
-        Mound Hounds Fantasy
+        Mound Hounds Pick&apos;em League
       </p>
       <h1 className="mt-4 text-3xl font-semibold tracking-tight">Sign in</h1>
-      <p className="mt-2 text-sm text-slate-600">Access your INDYCAR fantasy league account.</p>
+      <p className="mt-2 text-sm text-slate-600">
+        Access your Mound Hounds Pick&apos;em League account.
+      </p>
 
       {error ? (
         <p className="mt-4 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">

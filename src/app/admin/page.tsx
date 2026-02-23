@@ -1,5 +1,4 @@
 import Link from "next/link";
-import { signOutAction } from "@/app/actions/auth";
 import {
   cleanupTestFlowDataAction,
   createDriverAction,
@@ -16,6 +15,7 @@ import {
 } from "@/app/admin/actions";
 import { AdminResultsImportForm } from "@/components/admin-results-import-form";
 import { ConfirmSubmitButton } from "@/components/confirm-submit-button";
+import { SignOutButton } from "@/components/sign-out-button";
 import { requireAdmin } from "@/lib/admin";
 import { feedbackCategoryLabel, feedbackTypeLabel } from "@/lib/feedback";
 import { queryStringParam } from "@/lib/query";
@@ -166,7 +166,7 @@ export default async function AdminPage({ searchParams }: PageProps) {
 
   return (
     <main className="mx-auto flex min-h-screen max-w-7xl flex-col px-6 py-10">
-      <header className="flex flex-wrap items-start justify-between gap-4">
+      <header className="relative flex flex-wrap items-start justify-between gap-4">
         <div>
           <p className="inline-flex rounded-full border border-blue-200 bg-blue-50 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-blue-700">
             League Ops
@@ -186,14 +186,7 @@ export default async function AdminPage({ searchParams }: PageProps) {
           >
             Back to dashboard
           </Link>
-          <form action={signOutAction}>
-            <button
-              className="rounded-md border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100"
-              type="submit"
-            >
-              Sign out
-            </button>
-          </form>
+          <SignOutButton />
         </div>
       </header>
 

@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation";
 import Link from "next/link";
-import { signOutAction } from "@/app/actions/auth";
 import { MobileBottomNav } from "@/components/mobile-bottom-nav";
+import { SignOutButton } from "@/components/sign-out-button";
 import { isProfileComplete, type ProfileRow } from "@/lib/profile";
 import { queryStringParam } from "@/lib/query";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
@@ -35,7 +35,7 @@ export default async function DashboardPage({ searchParams }: PageProps) {
 
   return (
     <main className="mx-auto flex min-h-screen max-w-4xl flex-col px-6 py-16 pb-24 md:pb-16">
-      <header className="flex flex-wrap items-start justify-between gap-4">
+      <header className="relative flex flex-wrap items-start justify-between gap-4">
         <div>
           <p className="inline-flex rounded-full border border-blue-200 bg-blue-50 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-blue-700">
             Team Hub
@@ -45,14 +45,9 @@ export default async function DashboardPage({ searchParams }: PageProps) {
             Signed in as <span className="font-semibold">{profile.team_name}</span>.
           </p>
         </div>
-        <form action={signOutAction}>
-          <button
-            className="rounded-md border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100"
-            type="submit"
-          >
-            Sign out
-          </button>
-        </form>
+        <div className="flex items-center gap-2">
+          <SignOutButton />
+        </div>
       </header>
 
       {message ? (
@@ -80,22 +75,14 @@ export default async function DashboardPage({ searchParams }: PageProps) {
             <dt className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Email</dt>
             <dd className="mt-0.5 break-all font-medium text-slate-900">{user.email ?? "-"}</dd>
           </div>
-          <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2">
-            <dt className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
-              Phone Number
-            </dt>
-            <dd className="mt-0.5 font-medium text-slate-900">{profile.phone_number ?? "-"}</dd>
-          </div>
-          <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2">
-            <dt className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
-              Phone Carrier
-            </dt>
-            <dd className="mt-0.5 font-medium text-slate-900">{profile.phone_carrier ?? "-"}</dd>
-          </div>
-          <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2">
-            <dt className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Role</dt>
-            <dd className="mt-0.5 font-medium capitalize text-slate-900">{profile.role}</dd>
-          </div>
+          {profile.role === "admin" ? (
+            <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2">
+              <dt className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                Role
+              </dt>
+              <dd className="mt-0.5 font-medium capitalize text-slate-900">{profile.role}</dd>
+            </div>
+          ) : null}
         </dl>
       </section>
 
