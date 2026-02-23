@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { formatLeagueDateTime, LEAGUE_TIME_ZONE } from "@/lib/timezone";
+import { formatLeagueDateTime } from "@/lib/timezone";
 
 type SavedPickItem = {
   driverName: string;
@@ -52,10 +52,6 @@ export function PickSubmissionSnapshot({
   }, [qualifyingStartAt]);
 
   const isLocked = remainingMs <= 0;
-  const deadlineText = useMemo(
-    () => formatLeagueDateTime(qualifyingStartAt, { dateStyle: "full", timeStyle: "short" }),
-    [qualifyingStartAt]
-  );
   const latestSavedText = useMemo(() => {
     if (!latestSavedAt) {
       return "No submission yet";
@@ -84,15 +80,7 @@ export function PickSubmissionSnapshot({
         </p>
       </div>
 
-      <dl className="mt-3 grid gap-2 text-sm sm:grid-cols-2">
-        <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2">
-          <dt className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
-            Pick Lock (Qualifying)
-          </dt>
-          <dd className="mt-0.5 font-medium text-slate-900">
-            {deadlineText} ({LEAGUE_TIME_ZONE})
-          </dd>
-        </div>
+      <dl className="mt-3 grid gap-2 text-sm">
         <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2">
           <dt className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
             Latest Saved

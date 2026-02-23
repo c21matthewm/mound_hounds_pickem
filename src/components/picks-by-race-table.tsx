@@ -21,6 +21,12 @@ type Props = {
   rows: PicksByRaceTableRow[];
 };
 
+type TieBreakRow = {
+  averageSpeed: number;
+  teamName: string;
+  userId: string;
+};
+
 type SortDirection = "asc" | "desc";
 
 type SortKey =
@@ -144,12 +150,16 @@ const compareText = (a: string, b: string, direction: SortDirection): number =>
 const filterInputClassName =
   "w-full rounded border border-slate-300 px-1.5 py-1 text-[11px] leading-tight text-slate-700 placeholder:text-slate-400";
 
+const formatAverageSpeed = (value: number | null): string =>
+  value !== null ? value.toFixed(3) : "-";
+
 export function PicksByRaceTable({ resultsPosted, rows }: Props) {
   const [filters, setFilters] = useState<ColumnFilters>(DEFAULT_FILTERS);
   const [sortKey, setSortKey] = useState<SortKey>(resultsPosted ? "rank" : "teamName");
   const [sortDirection, setSortDirection] = useState<SortDirection>(
     defaultSortDirection(resultsPosted ? "rank" : "teamName")
   );
+  const [selectedRow, setSelectedRow] = useState<PicksByRaceTableRow | null>(null);
 
   const onSort = (key: SortKey) => {
     if (sortKey === key) {
@@ -236,191 +246,360 @@ export function PicksByRaceTable({ resultsPosted, rows }: Props) {
     return sorted;
   }, [filters, rows, sortDirection, sortKey]);
 
-  return (
-    <section className="mt-6 overflow-x-auto rounded-lg border border-slate-200 bg-white">
-      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 bg-slate-50 px-3 py-2">
-        <p className="text-xs text-slate-600">
-          Showing <span className="font-semibold text-slate-900">{filteredAndSortedRows.length}</span>{" "}
-          of {rows.length} participant row(s)
-        </p>
-        <button
-          className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-100"
-          data-testid="picks-table-reset"
-          onClick={resetView}
-          type="button"
-        >
-          Reset filters & sort
-        </button>
-      </div>
+  const tieBreakRows = useMemo(() => {
+    if (!resultsPosted || !selectedRow || selectedRow.totalPoints === null) {
+      return [] as TieBreakRow[];
+    }
 
-      <table className="min-w-full text-left text-sm">
-        <thead className="bg-slate-50 text-slate-700">
-          <tr>
-            <th className="px-3 py-2 font-semibold">
-              <button className="inline-flex items-center gap-1" onClick={() => onSort("rank")} type="button">
-                Rank {sortIndicator("rank", sortKey, sortDirection)}
-              </button>
-            </th>
-            <th className="px-3 py-2 font-semibold">
-              <button
-                className="inline-flex items-center gap-1"
-                onClick={() => onSort("teamName")}
-                type="button"
-              >
-                Team Name {sortIndicator("teamName", sortKey, sortDirection)}
-              </button>
-            </th>
-            <th className="px-3 py-2 font-semibold">
-              <button
-                className="inline-flex items-center gap-1"
-                data-testid="picks-sort-total-score"
-                onClick={() => onSort("totalPoints")}
-                type="button"
-              >
-                Total Score {sortIndicator("totalPoints", sortKey, sortDirection)}
-              </button>
-            </th>
-            <th className="px-3 py-2 font-semibold">
-              <button
-                className="inline-flex items-center gap-1"
-                onClick={() => onSort("averageSpeed")}
-                type="button"
-              >
-                Average Speed {sortIndicator("averageSpeed", sortKey, sortDirection)}
-              </button>
-            </th>
-            {Array.from({ length: 6 }, (_, index) => index + 1).map((groupNumber) => (
-              <th key={`group-${groupNumber}`} className="px-3 py-2 font-semibold">
-                <button
-                  className="inline-flex items-center gap-1"
-                  onClick={() => onSort(`driver${groupNumber}` as SortKey)}
-                  type="button"
-                >
-                  Group {groupNumber}{" "}
-                  {sortIndicator(`driver${groupNumber}` as SortKey, sortKey, sortDirection)}
-                </button>
-              </th>
-            ))}
-            {Array.from({ length: 6 }, (_, index) => index + 1).map((groupNumber) => (
-              <th key={`group-score-${groupNumber}`} className="px-3 py-2 font-semibold">
-                <button
-                  className="inline-flex items-center gap-1"
-                  onClick={() => onSort(`score${groupNumber}` as SortKey)}
-                  type="button"
-                >
-                  Group {groupNumber} (Score){" "}
-                  {sortIndicator(`score${groupNumber}` as SortKey, sortKey, sortDirection)}
-                </button>
-              </th>
-            ))}
-          </tr>
-          <tr>
-            <th className="px-3 py-2">
-              <input
-                className={filterInputClassName}
-                onChange={(event) => updateFilter("rank", event.target.value)}
-                placeholder="<=5"
-                type="text"
-                value={filters.rank}
-              />
-            </th>
-            <th className="px-3 py-2">
-              <input
-                className={filterInputClassName}
-                data-testid="picks-filter-team"
-                onChange={(event) => updateFilter("teamName", event.target.value)}
-                placeholder="Team contains..."
-                type="text"
-                value={filters.teamName}
-              />
-            </th>
-            <th className="px-3 py-2">
-              <input
-                className={filterInputClassName}
-                onChange={(event) => updateFilter("totalPoints", event.target.value)}
-                placeholder=">=200"
-                type="text"
-                value={filters.totalPoints}
-              />
-            </th>
-            <th className="px-3 py-2">
-              <input
-                className={filterInputClassName}
-                onChange={(event) => updateFilter("averageSpeed", event.target.value)}
-                placeholder="175-180"
-                type="text"
-                value={filters.averageSpeed}
-              />
-            </th>
-            {Array.from({ length: 6 }, (_, index) => index + 1).map((groupNumber) => (
-              <th key={`driver-filter-${groupNumber}`} className="px-3 py-2">
-                <input
-                  className={filterInputClassName}
-                  onChange={(event) =>
-                    updateFilter(`driver${groupNumber}` as SortKey, event.target.value)
-                  }
-                  placeholder="Driver contains..."
-                  type="text"
-                  value={filters[`driver${groupNumber}` as SortKey]}
-                />
-              </th>
-            ))}
-            {Array.from({ length: 6 }, (_, index) => index + 1).map((groupNumber) => (
-              <th key={`score-filter-${groupNumber}`} className="px-3 py-2">
-                <input
-                  className={filterInputClassName}
-                  onChange={(event) =>
-                    updateFilter(`score${groupNumber}` as SortKey, event.target.value)
-                  }
-                  placeholder=">=30"
-                  type="text"
-                  value={filters[`score${groupNumber}` as SortKey]}
-                />
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {filteredAndSortedRows.length === 0 ? (
+    const tiedRows: TieBreakRow[] = rows
+      .filter(
+        (row) =>
+          row.totalPoints === selectedRow.totalPoints &&
+          row.averageSpeed !== null &&
+          row.userId !== "benchmark_high" &&
+          row.userId !== "benchmark_low"
+      )
+      .map((row) => ({
+        averageSpeed: row.averageSpeed as number,
+        teamName: row.teamName,
+        userId: row.userId
+      }))
+      .sort((a, b) => a.averageSpeed - b.averageSpeed || a.teamName.localeCompare(b.teamName));
+
+    return tiedRows;
+  }, [resultsPosted, rows, selectedRow]);
+
+  const selectedTieBreakRank = useMemo(() => {
+    if (!selectedRow) {
+      return null;
+    }
+
+    const index = tieBreakRows.findIndex((row) => row.userId === selectedRow.userId);
+    return index >= 0 ? index + 1 : null;
+  }, [selectedRow, tieBreakRows]);
+
+  return (
+    <>
+      <section className="mt-6 overflow-x-auto rounded-lg border border-slate-200 bg-white">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 bg-slate-50 px-3 py-2">
+          <p className="text-xs text-slate-600">
+            Showing <span className="font-semibold text-slate-900">{filteredAndSortedRows.length}</span>{" "}
+            of {rows.length} participant row(s). Click a participant name for score breakdown.
+          </p>
+          <button
+            className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-100"
+            data-testid="picks-table-reset"
+            onClick={resetView}
+            type="button"
+          >
+            Reset filters & sort
+          </button>
+        </div>
+
+        <table className="min-w-full text-left text-sm">
+          <thead className="bg-slate-50 text-slate-700">
             <tr>
-              <td className="px-3 py-4 text-sm text-slate-600" colSpan={16}>
-                No rows match your current filters.
-              </td>
+              <th className="px-3 py-2 font-semibold">
+                <button className="inline-flex items-center gap-1" onClick={() => onSort("rank")} type="button">
+                  Rank {sortIndicator("rank", sortKey, sortDirection)}
+                </button>
+              </th>
+              <th className="px-3 py-2 font-semibold">
+                <button
+                  className="inline-flex items-center gap-1"
+                  onClick={() => onSort("teamName")}
+                  type="button"
+                >
+                  Team Name {sortIndicator("teamName", sortKey, sortDirection)}
+                </button>
+              </th>
+              <th className="px-3 py-2 font-semibold">
+                <button
+                  className="inline-flex items-center gap-1"
+                  data-testid="picks-sort-total-score"
+                  onClick={() => onSort("totalPoints")}
+                  type="button"
+                >
+                  Total Score {sortIndicator("totalPoints", sortKey, sortDirection)}
+                </button>
+              </th>
+              <th className="px-3 py-2 font-semibold">
+                <button
+                  className="inline-flex items-center gap-1"
+                  onClick={() => onSort("averageSpeed")}
+                  type="button"
+                >
+                  Average Speed {sortIndicator("averageSpeed", sortKey, sortDirection)}
+                </button>
+              </th>
+              {Array.from({ length: 6 }, (_, index) => index + 1).map((groupNumber) => (
+                <th key={`group-${groupNumber}`} className="px-3 py-2 font-semibold">
+                  <button
+                    className="inline-flex items-center gap-1"
+                    onClick={() => onSort(`driver${groupNumber}` as SortKey)}
+                    type="button"
+                  >
+                    Group {groupNumber}{" "}
+                    {sortIndicator(`driver${groupNumber}` as SortKey, sortKey, sortDirection)}
+                  </button>
+                </th>
+              ))}
+              {Array.from({ length: 6 }, (_, index) => index + 1).map((groupNumber) => (
+                <th key={`group-score-${groupNumber}`} className="px-3 py-2 font-semibold">
+                  <button
+                    className="inline-flex items-center gap-1"
+                    onClick={() => onSort(`score${groupNumber}` as SortKey)}
+                    type="button"
+                  >
+                    Group {groupNumber} (Score){" "}
+                    {sortIndicator(`score${groupNumber}` as SortKey, sortKey, sortDirection)}
+                  </button>
+                </th>
+              ))}
             </tr>
-          ) : (
-            filteredAndSortedRows.map((row) => (
-              <tr key={row.userId} className="border-t border-slate-200">
-                <td className="px-3 py-2 font-semibold">
-                  {resultsPosted ? (row.rank ?? "-") : "-"}
+            <tr>
+              <th className="px-3 py-2">
+                <input
+                  className={filterInputClassName}
+                  onChange={(event) => updateFilter("rank", event.target.value)}
+                  placeholder="<=5"
+                  type="text"
+                  value={filters.rank}
+                />
+              </th>
+              <th className="px-3 py-2">
+                <input
+                  className={filterInputClassName}
+                  data-testid="picks-filter-team"
+                  onChange={(event) => updateFilter("teamName", event.target.value)}
+                  placeholder="Team contains..."
+                  type="text"
+                  value={filters.teamName}
+                />
+              </th>
+              <th className="px-3 py-2">
+                <input
+                  className={filterInputClassName}
+                  onChange={(event) => updateFilter("totalPoints", event.target.value)}
+                  placeholder=">=200"
+                  type="text"
+                  value={filters.totalPoints}
+                />
+              </th>
+              <th className="px-3 py-2">
+                <input
+                  className={filterInputClassName}
+                  onChange={(event) => updateFilter("averageSpeed", event.target.value)}
+                  placeholder="175-180"
+                  type="text"
+                  value={filters.averageSpeed}
+                />
+              </th>
+              {Array.from({ length: 6 }, (_, index) => index + 1).map((groupNumber) => (
+                <th key={`driver-filter-${groupNumber}`} className="px-3 py-2">
+                  <input
+                    className={filterInputClassName}
+                    onChange={(event) =>
+                      updateFilter(`driver${groupNumber}` as SortKey, event.target.value)
+                    }
+                    placeholder="Driver contains..."
+                    type="text"
+                    value={filters[`driver${groupNumber}` as SortKey]}
+                  />
+                </th>
+              ))}
+              {Array.from({ length: 6 }, (_, index) => index + 1).map((groupNumber) => (
+                <th key={`score-filter-${groupNumber}`} className="px-3 py-2">
+                  <input
+                    className={filterInputClassName}
+                    onChange={(event) =>
+                      updateFilter(`score${groupNumber}` as SortKey, event.target.value)
+                    }
+                    placeholder=">=30"
+                    type="text"
+                    value={filters[`score${groupNumber}` as SortKey]}
+                  />
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {filteredAndSortedRows.length === 0 ? (
+              <tr>
+                <td className="px-3 py-4 text-sm text-slate-600" colSpan={16}>
+                  No rows match your current filters.
                 </td>
-                <td className="px-3 py-2">{row.teamName}</td>
-                <td className="px-3 py-2 font-semibold">
-                  {resultsPosted ? (row.totalPoints ?? 0) : "-"}
-                </td>
-                <td className="px-3 py-2">
-                  {row.averageSpeed !== null ? row.averageSpeed.toFixed(3) : "-"}
-                </td>
-                {Array.from({ length: 6 }, (_, offset) => offset + 1).map((groupNumber) => {
-                  const groupCell = row.drivers[groupNumber - 1];
-                  return (
-                    <td key={`${row.userId}-driver-${groupNumber}`} className="px-3 py-2">
-                      {groupCell?.driverName ?? "No pick submitted"}
-                    </td>
-                  );
-                })}
-                {Array.from({ length: 6 }, (_, offset) => offset + 1).map((groupNumber) => {
-                  const groupCell = row.drivers[groupNumber - 1];
-                  return (
-                    <td key={`${row.userId}-score-${groupNumber}`} className="px-3 py-2">
-                      {resultsPosted && groupCell?.driverName ? (groupCell.points ?? 0) : "-"}
-                    </td>
-                  );
-                })}
               </tr>
-            ))
-          )}
-        </tbody>
-      </table>
-    </section>
+            ) : (
+              filteredAndSortedRows.map((row) => (
+                <tr key={row.userId} className="border-t border-slate-200">
+                  <td className="px-3 py-2 font-semibold">
+                    {resultsPosted ? (row.rank ?? "-") : "-"}
+                  </td>
+                  <td className="px-3 py-2">
+                    <button
+                      className="font-semibold text-slate-900 underline decoration-slate-300 underline-offset-2 hover:text-slate-700"
+                      onClick={() => setSelectedRow(row)}
+                      type="button"
+                    >
+                      {row.teamName}
+                    </button>
+                  </td>
+                  <td className="px-3 py-2 font-semibold">
+                    {resultsPosted ? (row.totalPoints ?? 0) : "-"}
+                  </td>
+                  <td className="px-3 py-2">{formatAverageSpeed(row.averageSpeed)}</td>
+                  {Array.from({ length: 6 }, (_, offset) => offset + 1).map((groupNumber) => {
+                    const groupCell = row.drivers[groupNumber - 1];
+                    return (
+                      <td key={`${row.userId}-driver-${groupNumber}`} className="px-3 py-2">
+                        {groupCell?.driverName ?? "No pick submitted"}
+                      </td>
+                    );
+                  })}
+                  {Array.from({ length: 6 }, (_, offset) => offset + 1).map((groupNumber) => {
+                    const groupCell = row.drivers[groupNumber - 1];
+                    return (
+                      <td key={`${row.userId}-score-${groupNumber}`} className="px-3 py-2">
+                        {resultsPosted && groupCell?.driverName ? (groupCell.points ?? 0) : "-"}
+                      </td>
+                    );
+                  })}
+                </tr>
+              ))
+            )}
+          </tbody>
+        </table>
+      </section>
+
+      {selectedRow ? (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4"
+          onClick={() => setSelectedRow(null)}
+          role="presentation"
+        >
+          <section
+            className="max-h-[90vh] w-full max-w-3xl overflow-y-auto rounded-lg border border-slate-200 bg-white p-5"
+            onClick={(event) => event.stopPropagation()}
+            role="dialog"
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <h3 className="text-lg font-semibold text-slate-900">{selectedRow.teamName}</h3>
+                <p className="mt-1 text-sm text-slate-600">Picks breakdown and tiebreak context</p>
+              </div>
+              <button
+                className="rounded-md border border-slate-300 px-2 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-100"
+                onClick={() => setSelectedRow(null)}
+                type="button"
+              >
+                Close
+              </button>
+            </div>
+
+            <dl className="mt-3 grid gap-2 text-sm sm:grid-cols-3">
+              <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2">
+                <dt className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Rank</dt>
+                <dd className="mt-0.5 font-medium text-slate-900">
+                  {resultsPosted ? (selectedRow.rank ?? "-") : "-"}
+                </dd>
+              </div>
+              <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2">
+                <dt className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                  Total Score
+                </dt>
+                <dd className="mt-0.5 font-medium text-slate-900">
+                  {resultsPosted ? (selectedRow.totalPoints ?? 0) : "-"}
+                </dd>
+              </div>
+              <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2">
+                <dt className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                  Average Speed
+                </dt>
+                <dd className="mt-0.5 font-medium text-slate-900">
+                  {formatAverageSpeed(selectedRow.averageSpeed)}
+                </dd>
+              </div>
+            </dl>
+
+            <section className="mt-4 rounded-md border border-slate-200 bg-slate-50 p-3">
+              <h4 className="text-sm font-semibold text-slate-900">Tiebreak Comparison</h4>
+              {!resultsPosted ? (
+                <p className="mt-2 text-sm text-slate-600">
+                  Tiebreak only applies after results are posted.
+                </p>
+              ) : tieBreakRows.length <= 1 ? (
+                <p className="mt-2 text-sm text-slate-600">
+                  No tie on total score for this row. Tiebreak not needed.
+                </p>
+              ) : (
+                <>
+                  <p className="mt-2 text-sm text-slate-700">
+                    Teams tied at <span className="font-semibold">{selectedRow.totalPoints}</span> points
+                    are ordered by lower average-speed prediction.
+                  </p>
+                  <p className="mt-1 text-xs text-slate-600">
+                    {selectedTieBreakRank
+                      ? `${selectedRow.teamName} is tiebreak position #${selectedTieBreakRank} of ${tieBreakRows.length}.`
+                      : "Selected team is not in the tiebreak group."}
+                  </p>
+                  <div className="mt-2 overflow-x-auto rounded-md border border-slate-200 bg-white">
+                    <table className="min-w-full text-left text-sm">
+                      <thead className="bg-slate-50 text-slate-700">
+                        <tr>
+                          <th className="px-3 py-2 font-semibold">Tiebreak Rank</th>
+                          <th className="px-3 py-2 font-semibold">Team</th>
+                          <th className="px-3 py-2 font-semibold">Average Speed</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {tieBreakRows.map((row, index) => (
+                          <tr
+                            key={`tiebreak-${row.userId}`}
+                            className={`border-t border-slate-200 ${
+                              row.userId === selectedRow.userId ? "bg-cyan-50" : ""
+                            }`}
+                          >
+                            <td className="px-3 py-2">{index + 1}</td>
+                            <td className="px-3 py-2">{row.teamName}</td>
+                            <td className="px-3 py-2">{row.averageSpeed.toFixed(3)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </>
+              )}
+            </section>
+
+            <section className="mt-4">
+              <h4 className="text-sm font-semibold text-slate-900">Per-Driver Scoring</h4>
+              <div className="mt-2 overflow-x-auto rounded-md border border-slate-200">
+                <table className="min-w-full text-left text-sm">
+                  <thead className="bg-slate-50 text-slate-700">
+                    <tr>
+                      <th className="px-3 py-2 font-semibold">Group</th>
+                      <th className="px-3 py-2 font-semibold">Driver</th>
+                      <th className="px-3 py-2 font-semibold">Points</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {selectedRow.drivers.map((driver, index) => (
+                      <tr key={`${selectedRow.userId}-modal-driver-${index + 1}`} className="border-t border-slate-200">
+                        <td className="px-3 py-2">Group {index + 1}</td>
+                        <td className="px-3 py-2">{driver.driverName ?? "No pick submitted"}</td>
+                        <td className="px-3 py-2">
+                          {resultsPosted && driver.driverName ? (driver.points ?? 0) : "-"}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </section>
+          </section>
+        </div>
+      ) : null}
+    </>
   );
 }

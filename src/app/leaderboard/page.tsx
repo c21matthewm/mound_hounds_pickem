@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { signOutAction } from "@/app/actions/auth";
+import { MobileBottomNav } from "@/components/mobile-bottom-nav";
 import {
   PicksByRaceTable,
   type PicksByRaceTableRow
@@ -142,7 +143,7 @@ export default async function LeaderboardPage({ searchParams }: PageProps) {
     : [];
 
   return (
-    <main className="mx-auto flex min-h-screen max-w-[1200px] flex-col px-6 py-10">
+    <main className="mx-auto flex min-h-screen max-w-[1200px] flex-col px-6 py-10 pb-24 md:pb-10">
       <header className="flex flex-wrap items-start justify-between gap-4">
         <div>
           <p className="inline-flex rounded-full border border-blue-200 bg-blue-50 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-blue-700">
@@ -305,6 +306,8 @@ export default async function LeaderboardPage({ searchParams }: PageProps) {
           </>
         )
       ) : null}
+
+      <MobileBottomNav />
     </main>
   );
 }

@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import Link from "next/link";
 import { signOutAction } from "@/app/actions/auth";
+import { MobileBottomNav } from "@/components/mobile-bottom-nav";
 import { isProfileComplete, type ProfileRow } from "@/lib/profile";
 import { queryStringParam } from "@/lib/query";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
@@ -33,7 +34,7 @@ export default async function DashboardPage({ searchParams }: PageProps) {
   }
 
   return (
-    <main className="mx-auto flex min-h-screen max-w-4xl flex-col px-6 py-16">
+    <main className="mx-auto flex min-h-screen max-w-4xl flex-col px-6 py-16 pb-24 md:pb-16">
       <header className="flex flex-wrap items-start justify-between gap-4">
         <div>
           <p className="inline-flex rounded-full border border-blue-200 bg-blue-50 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-blue-700">
@@ -159,6 +160,8 @@ export default async function DashboardPage({ searchParams }: PageProps) {
           </div>
         ) : null}
       </section>
+
+      <MobileBottomNav />
     </main>
   );
 }

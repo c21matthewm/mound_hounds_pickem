@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { signOutAction } from "@/app/actions/auth";
+import { MobileBottomNav } from "@/components/mobile-bottom-nav";
 import { PickSubmissionSnapshot } from "@/components/pick-submission-snapshot";
 import { saveWeeklyPickAction } from "@/app/picks/actions";
 import { PickemForm } from "@/components/pickem-form";
@@ -206,7 +207,7 @@ export default async function PicksPage({ searchParams }: PageProps) {
   }));
 
   return (
-    <main className="mx-auto flex min-h-screen max-w-6xl flex-col px-6 py-10">
+    <main className="mx-auto flex min-h-screen max-w-6xl flex-col px-6 py-10 pb-24 md:pb-10">
       <header className="flex flex-wrap items-start justify-between gap-4">
         <div>
           <p className="inline-flex rounded-full border border-cyan-200 bg-cyan-50 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-cyan-700">
@@ -256,11 +257,18 @@ export default async function PicksPage({ searchParams }: PageProps) {
           <h2 className="text-2xl font-semibold">{upcomingRace.race_name}</h2>
           <div className="mt-4 grid gap-2 text-sm md:grid-cols-2 lg:grid-cols-4">
             <p>
+              <span className="font-semibold">Pick Deadline:</span>{" "}
+              {formatRaceDate(upcomingRace.qualifying_start_at)}
+            </p>
+            <p>
               <span className="font-semibold">Race Start:</span>{" "}
               {formatRaceDate(upcomingRace.race_date)}
             </p>
             <p>
               <span className="font-semibold">Payout:</span> ${Number(upcomingRace.payout).toFixed(2)}
+            </p>
+            <p>
+              <span className="font-semibold">Status:</span> {picksLocked ? "Locked" : "Open"}
             </p>
           </div>
           <p className="mt-2 text-xs text-slate-200">All race times shown in {LEAGUE_TIME_ZONE}.</p>
@@ -307,6 +315,8 @@ export default async function PicksPage({ searchParams }: PageProps) {
         raceId={upcomingRace.id}
         savedSelection={selectedMap}
       />
+
+      <MobileBottomNav />
     </main>
   );
 }
