@@ -146,9 +146,9 @@ select cron.schedule(
   '*/5 * * * *',
   $$
   select net.http_post(
-    url := 'https://your-project-name.vercel.app/api/cron/fantasy-winner',
+    url := 'https://moundhoundspickem.vercel.app/api/cron/fantasy-winner',
     headers := jsonb_build_object(
-      'authorization', 'Bearer YOUR_CRON_SECRET',
+      'authorization', 'Bearer NqrliPfzjAUkqRVcVnxVDF6+OoxctvUi9Jn962th9m49dhpDxZTEojPD7NwtQY+a',
       'content-type', 'application/json'
     ),
     body := '{}'::jsonb
