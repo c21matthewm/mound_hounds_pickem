@@ -25,6 +25,14 @@ type DriverSeed = {
   id: number;
 };
 
+type DriverBaseline = {
+  championship_points: number;
+  current_standing: number;
+  group_number: number;
+  id: number;
+  is_active: boolean;
+};
+
 type RaceSeed = {
   id: number;
   is_archived: boolean;
@@ -259,6 +267,43 @@ const getRaceByName = async (raceName: string): Promise<RaceSeed> => {
   return data as RaceSeed;
 };
 
+const loadDriverBaseline = async (): Promise<DriverBaseline[]> => {
+  const { data, error } = await supabase
+    .from("drivers")
+    .select("id,championship_points,current_standing,group_number,is_active");
+
+  if (error) {
+    throw new Error(`Failed loading driver baseline: ${error.message}`);
+  }
+
+  return (data ?? []) as DriverBaseline[];
+};
+
+const restoreDriverBaseline = async (baseline: DriverBaseline[]) => {
+  if (baseline.length === 0) {
+    return;
+  }
+
+  const restoreResponses = await Promise.all(
+    baseline.map((row) =>
+      supabase
+        .from("drivers")
+        .update({
+          championship_points: row.championship_points,
+          current_standing: row.current_standing,
+          group_number: row.group_number,
+          is_active: row.is_active
+        })
+        .eq("id", row.id)
+    )
+  );
+
+  const failed = restoreResponses.find((response) => response.error);
+  if (failed?.error) {
+    throw new Error(`Failed restoring driver baseline: ${failed.error.message}`);
+  }
+};
+
 const submitPicks = async (
   page: Page,
   raceName: string,
@@ -283,6 +328,7 @@ test.describe.serial("Full App Flow", () => {
   const createdRaceIds: number[] = [];
   const clientIssues: string[] = [];
   const findings: string[] = [];
+  let baselineDrivers: DriverBaseline[] = [];
 
   let adminUser: SeedUser;
   let participant1: SeedUser;
@@ -304,6 +350,10 @@ test.describe.serial("Full App Flow", () => {
       await supabase.from("drivers").delete().in("id", createdDriverIds);
     }
 
+    if (baselineDrivers.length > 0) {
+      await restoreDriverBaseline(baselineDrivers);
+    }
+
     for (const userId of createdUserIds) {
       await supabase.auth.admin.deleteUser(userId);
     }
@@ -314,6 +364,8 @@ test.describe.serial("Full App Flow", () => {
       browserName !== "chromium" || isMobile,
       "Heavy mutation flow is limited to desktop Chromium. Cross-browser/mobile smoke is covered separately."
     );
+
+    baselineDrivers = await loadDriverBaseline();
 
     adminUser = await createSeedUser("Admin", "admin");
     participant1 = await createSeedUser("Participant1", "participant");
