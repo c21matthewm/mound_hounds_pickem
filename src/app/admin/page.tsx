@@ -14,6 +14,7 @@ import {
   updateDriverAction,
   upsertResultAction
 } from "@/app/admin/actions";
+import { AdminResultsImportForm } from "@/components/admin-results-import-form";
 import { ConfirmSubmitButton } from "@/components/confirm-submit-button";
 import { requireAdmin } from "@/lib/admin";
 import { feedbackCategoryLabel, feedbackTypeLabel } from "@/lib/feedback";
@@ -810,62 +811,11 @@ export default async function AdminPage({ searchParams }: PageProps) {
           </p>
         ) : null}
 
-        <form
+        <AdminResultsImportForm
           action={importIndycarResultsAction}
-          className="mt-5 rounded-md border border-slate-200 bg-slate-50 p-4"
-          data-testid="admin-results-import-form"
-        >
-          <input name="tab" type="hidden" value="results" />
-          <h3 className="text-sm font-semibold text-slate-900">Bulk Import (INDYCAR Paste)</h3>
-          <p className="mt-1 text-xs text-slate-600">
-            Paste copied INDYCAR results rows (Pos, Start Pos, No., Driver, Team, ..., Points). The
-            importer maps by driver name and upserts points.
-          </p>
-
-          <div className="mt-3 grid gap-3 md:grid-cols-4">
-            <label className="block md:col-span-1">
-              <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-600">
-                Race
-              </span>
-              <select
-                required
-                className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
-                data-testid="admin-results-import-race-select"
-                name="race_id"
-              >
-                <option value="">{activeRaces.length > 0 ? "Select race" : "No active races"}</option>
-                {activeRaces.map((race) => (
-                  <option key={race.id} value={String(race.id)}>
-                    {race.race_name}
-                  </option>
-                ))}
-              </select>
-            </label>
-
-            <label className="block md:col-span-3">
-              <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-600">
-                Pasted results table
-              </span>
-              <textarea
-                required
-                className="h-40 w-full rounded-md border border-slate-300 px-3 py-2 font-mono text-xs"
-                data-testid="admin-results-import-paste"
-                name="results_paste"
-                placeholder={
-                  "1\t6\t2\tJosef Newgarden\tTeam Penske\t225\t60\t4\t01:54:50.6727\t156.342\tRunning\t51"
-                }
-              />
-            </label>
-          </div>
-
-          <button
-            className="mt-3 rounded-md bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-700"
-            data-testid="admin-results-import-submit"
-            type="submit"
-          >
-            Import pasted results
-          </button>
-        </form>
+          activeRaces={activeRaces.map((race) => ({ id: race.id, raceName: race.race_name }))}
+          drivers={drivers.map((driver) => ({ driverName: driver.driver_name, id: driver.id }))}
+        />
 
         <form
           action={upsertResultAction}

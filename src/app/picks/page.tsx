@@ -1,6 +1,8 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { signOutAction } from "@/app/actions/auth";
+import { MobileBottomNav } from "@/components/mobile-bottom-nav";
+import { PickSubmissionSnapshot } from "@/components/pick-submission-snapshot";
 import { saveWeeklyPickAction } from "@/app/picks/actions";
 import { PickemForm } from "@/components/pickem-form";
 import { isProfileComplete, type ProfileRow } from "@/lib/profile";
@@ -40,6 +42,7 @@ type PickRow = {
   driver_group5_id: number;
   driver_group6_id: number;
   id: number;
+  updated_at: string;
 };
 
 type PageProps = {
@@ -62,7 +65,6 @@ const selectedByGroup = (pick: PickRow | null): Record<number, number | null> =>
 
 export default async function PicksPage({ searchParams }: PageProps) {
   const params = await searchParams;
-  const message = queryStringParam(params.message);
   const error = queryStringParam(params.error);
 
   const supabase = await createServerSupabaseClient();
@@ -152,7 +154,7 @@ export default async function PicksPage({ searchParams }: PageProps) {
     supabase
       .from("picks")
       .select(
-        "id,driver_group1_id,driver_group2_id,driver_group3_id,driver_group4_id,driver_group5_id,driver_group6_id,average_speed"
+        "id,driver_group1_id,driver_group2_id,driver_group3_id,driver_group4_id,driver_group5_id,driver_group6_id,average_speed,updated_at"
       )
       .eq("race_id", upcomingRace.id)
       .eq("user_id", user.id)
@@ -163,6 +165,23 @@ export default async function PicksPage({ searchParams }: PageProps) {
   const existingPick = existingPickResponse.data ?? null;
   const selectedMap = selectedByGroup(existingPick);
   const picksLocked = Date.parse(upcomingRace.qualifying_start_at) <= now.getTime();
+  const driverNameById = new Map<number, string>();
+  activeDrivers.forEach((driver) => {
+    driverNameById.set(driver.id, driver.driver_name);
+  });
+  const savedPickSummary = GROUP_NUMBERS.flatMap((groupNumber) => {
+    const driverId = selectedMap[groupNumber];
+    if (!driverId) {
+      return [];
+    }
+
+    return [
+      {
+        driverName: driverNameById.get(driverId) ?? `Driver #${driverId}`,
+        groupNumber
+      }
+    ];
+  });
 
   const driversByGroup = new Map<number, DriverRow[]>();
   GROUP_NUMBERS.forEach((groupNumber) => driversByGroup.set(groupNumber, []));
@@ -188,7 +207,7 @@ export default async function PicksPage({ searchParams }: PageProps) {
   }));
 
   return (
-    <main className="mx-auto flex min-h-screen max-w-6xl flex-col px-6 py-10">
+    <main className="mx-auto flex min-h-screen max-w-6xl flex-col px-6 py-10 pb-24 md:pb-10">
       <header className="flex flex-wrap items-start justify-between gap-4">
         <div>
           <p className="inline-flex rounded-full border border-cyan-200 bg-cyan-50 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-cyan-700">
@@ -268,25 +287,18 @@ export default async function PicksPage({ searchParams }: PageProps) {
         </div>
       </section>
 
-      {message ? (
-        <p className="mt-6 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
-          {message}
-        </p>
-      ) : null}
-
       {error ? (
         <p className="mt-6 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
           {error}
         </p>
       ) : null}
 
-      {picksLocked ? (
-        <p className="mt-6 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
-          {existingPick
-            ? "Qualifying has started. Your latest saved submission is now locked for this race."
-            : "Qualifying has started. Picks are now locked for this race."}
-        </p>
-      ) : null}
+      <PickSubmissionSnapshot
+        latestSavedAt={existingPick?.updated_at ?? null}
+        qualifyingStartAt={upcomingRace.qualifying_start_at}
+        savedAverageSpeed={existingPick ? String(existingPick.average_speed) : null}
+        savedPicks={savedPickSummary}
+      />
 
       {missingGroups.length > 0 ? (
         <p className="mt-6 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
@@ -303,6 +315,8 @@ export default async function PicksPage({ searchParams }: PageProps) {
         raceId={upcomingRace.id}
         savedSelection={selectedMap}
       />
+
+      <MobileBottomNav />
     </main>
   );
 }

@@ -26,8 +26,8 @@ const parsePositiveDecimal = (value: string): number | null => {
   return parsed;
 };
 
-const picksRedirect = (key: "error" | "message", message: string): never => {
-  const params = new URLSearchParams({ [key]: message });
+const picksErrorRedirect = (message: string): never => {
+  const params = new URLSearchParams({ error: message });
   redirect(`/picks?${params.toString()}`);
 };
 
@@ -63,16 +63,13 @@ export async function saveWeeklyPickAction(formData: FormData) {
   ];
 
   if (!raceId || !averageSpeed || groupSelections.some((value) => value === null)) {
-    picksRedirect(
-      "error",
-      "A race, average speed, and one driver from each group are required."
-    );
+    picksErrorRedirect("A race, average speed, and one driver from each group are required.");
   }
 
   const selectedDriverIds = groupSelections as number[];
   const uniqueCount = new Set(selectedDriverIds).size;
   if (uniqueCount !== 6) {
-    picksRedirect("error", "You must select 6 different drivers (one per group).");
+    picksErrorRedirect("You must select 6 different drivers (one per group).");
   }
 
   const { data: race, error: raceError } = await supabase
@@ -82,17 +79,17 @@ export async function saveWeeklyPickAction(formData: FormData) {
     .maybeSingle();
 
   if (raceError || !race) {
-    picksRedirect("error", "Selected race not found.");
+    picksErrorRedirect("Selected race not found.");
   }
   const raceIsArchived = (race as { is_archived: boolean }).is_archived;
   if (raceIsArchived) {
-    picksRedirect("error", "This race has been archived and no longer accepts picks.");
+    picksErrorRedirect("This race has been archived and no longer accepts picks.");
   }
   const qualifyingStartAt = (race as { qualifying_start_at: string }).qualifying_start_at;
 
   const qualifyingTime = new Date(qualifyingStartAt);
   if (qualifyingTime.getTime() <= Date.now()) {
-    picksRedirect("error", "Picks are locked because qualifying has already started.");
+    picksErrorRedirect("Picks are locked because qualifying has already started.");
   }
 
   const { error: upsertError } = await supabase.from("picks").upsert(
@@ -111,9 +108,9 @@ export async function saveWeeklyPickAction(formData: FormData) {
   );
 
   if (upsertError) {
-    picksRedirect("error", upsertError.message);
+    picksErrorRedirect(upsertError.message);
   }
 
   revalidatePath("/picks");
-  picksRedirect("message", "Pick'em form saved.");
+  redirect("/picks");
 }

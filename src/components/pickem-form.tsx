@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useState } from "react";
 
 type SelectionMap = Record<number, number | null>;
 
@@ -27,31 +27,6 @@ type Props = {
   savedSelection: SelectionMap;
 };
 
-const GROUP_NUMBERS = [1, 2, 3, 4, 5, 6] as const;
-
-const normalizeNumberString = (value: string): string => {
-  const trimmed = value.trim();
-  if (!trimmed) {
-    return "";
-  }
-
-  const parsed = Number(trimmed);
-  return Number.isFinite(parsed) ? String(parsed) : trimmed;
-};
-
-const buildDriverNameById = (groups: DriverGroup[]): Map<number, string> => {
-  const byId = new Map<number, string>();
-  groups.forEach((group) => {
-    group.drivers.forEach((driver) => {
-      byId.set(driver.id, driver.driverName);
-    });
-  });
-  return byId;
-};
-
-const sameSelections = (left: SelectionMap, right: SelectionMap): boolean =>
-  GROUP_NUMBERS.every((groupNumber) => (left[groupNumber] ?? null) === (right[groupNumber] ?? null));
-
 export function PickemForm({
   action,
   canSubmit,
@@ -64,86 +39,9 @@ export function PickemForm({
   const [draftSelection, setDraftSelection] = useState<SelectionMap>(() => ({ ...savedSelection }));
   const [draftAverageSpeed, setDraftAverageSpeed] = useState(existingAverageSpeed);
 
-  const driverNameById = useMemo(() => buildDriverNameById(groups), [groups]);
-
-  const savedAverageSpeedNormalized = normalizeNumberString(existingAverageSpeed);
-  const draftAverageSpeedNormalized = normalizeNumberString(draftAverageSpeed);
-  const hasAnySavedPick = GROUP_NUMBERS.some((groupNumber) => savedSelection[groupNumber] !== null);
-
-  const hasUnsavedChanges =
-    !sameSelections(draftSelection, savedSelection) ||
-    draftAverageSpeedNormalized !== savedAverageSpeedNormalized;
-
-  const nameForDriver = (driverId: number | null): string => {
-    if (!driverId) {
-      return "No pick selected";
-    }
-
-    return driverNameById.get(driverId) ?? `Driver #${driverId}`;
-  };
-
   return (
     <form action={action} className="mt-6 space-y-6">
       <input name="race_id" type="hidden" value={String(raceId)} />
-
-      <section className="rounded-lg border border-slate-200 bg-white p-6">
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <h3 className="text-lg font-semibold text-slate-900">Pick Status</h3>
-            <p className="mt-1 text-sm text-slate-600">
-              Compare your saved picks with your current form selections before you submit.
-            </p>
-          </div>
-          <p
-            className={`rounded-full border px-3 py-1 text-xs font-semibold uppercase tracking-wide ${
-              hasUnsavedChanges
-                ? "border-amber-300 bg-amber-100 text-amber-800"
-                : "border-emerald-200 bg-emerald-50 text-emerald-700"
-            }`}
-          >
-            {hasUnsavedChanges ? "Unsaved changes" : "Matches saved picks"}
-          </p>
-        </div>
-
-        <div className="mt-4 grid gap-4 md:grid-cols-2">
-          <section className="rounded-md border border-emerald-200 bg-emerald-50 p-4">
-            <h4 className="text-sm font-semibold text-emerald-900">Currently Saved Picks</h4>
-            <ul className="mt-2 space-y-1 text-sm text-emerald-900">
-              {GROUP_NUMBERS.map((groupNumber) => (
-                <li key={`saved-${groupNumber}`}>
-                  <span className="font-semibold">G{groupNumber}:</span>{" "}
-                  {nameForDriver(savedSelection[groupNumber] ?? null)}
-                </li>
-              ))}
-            </ul>
-            <p className="mt-2 text-xs text-emerald-800">
-              Avg Speed: {savedAverageSpeedNormalized || "Not saved"}
-            </p>
-          </section>
-
-          <section className="rounded-md border border-cyan-200 bg-cyan-50 p-4">
-            <h4 className="text-sm font-semibold text-cyan-900">Current Form Picks</h4>
-            <ul className="mt-2 space-y-1 text-sm text-cyan-900">
-              {GROUP_NUMBERS.map((groupNumber) => (
-                <li key={`current-${groupNumber}`}>
-                  <span className="font-semibold">G{groupNumber}:</span>{" "}
-                  {nameForDriver(draftSelection[groupNumber] ?? null)}
-                </li>
-              ))}
-            </ul>
-            <p className="mt-2 text-xs text-cyan-800">
-              Avg Speed: {draftAverageSpeedNormalized || "Not entered"}
-            </p>
-          </section>
-        </div>
-
-        {!hasAnySavedPick ? (
-          <p className="mt-3 text-xs text-slate-600">
-            You have not saved picks for this race yet. Your picks are not official until you click
-            Save Pick&apos;em Form.
-          </p>
-        ) : null}
-      </section>
 
       <fieldset className="space-y-6 disabled:opacity-80" disabled={picksLocked}>
         <section className="rounded-lg border border-slate-200 bg-white p-6">
