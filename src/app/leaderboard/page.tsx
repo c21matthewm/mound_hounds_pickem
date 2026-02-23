@@ -1,13 +1,18 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { signOutAction } from "@/app/actions/auth";
+import {
+  PicksByRaceTable,
+  type PicksByRaceTableRow
+} from "@/components/picks-by-race-table";
+import {
+  StandingsTable,
+  type StandingsTableRaceColumn,
+  type StandingsTableRow
+} from "@/components/standings-table";
 import { isProfileComplete, type ProfileRow } from "@/lib/profile";
 import { queryStringParam } from "@/lib/query";
-import {
-  buildLeagueScoringSnapshot,
-  buildPicksByRaceSnapshot,
-  type PicksByRaceParticipantRow
-} from "@/lib/scoring";
+import { buildLeagueScoringSnapshot, buildPicksByRaceSnapshot } from "@/lib/scoring";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
 import { formatLeagueDateTime, LEAGUE_TIME_ZONE } from "@/lib/timezone";
 
@@ -38,18 +43,6 @@ const parseRaceId = (value: string | undefined): number | undefined => {
   return parsed;
 };
 
-const trendSymbol = (trend: "down" | "flat" | "up"): string => {
-  if (trend === "up") return "▲";
-  if (trend === "down") return "▼";
-  return "→";
-};
-
-const changeText = (value: number): string => {
-  if (value > 0) return `+${value}`;
-  if (value < 0) return `${value}`;
-  return "0";
-};
-
 const tabHref = (tab: LeaderboardTab, raceId?: number): string => {
   const params = new URLSearchParams({ tab });
 
@@ -59,12 +52,6 @@ const tabHref = (tab: LeaderboardTab, raceId?: number): string => {
 
   return `/leaderboard?${params.toString()}`;
 };
-
-const groupCellFor = (
-  row: PicksByRaceParticipantRow,
-  groupNumber: number
-): { driverName: string | null; points: number | null } | null =>
-  row.driverCells.find((driverCell) => driverCell.groupNumber === groupNumber) ?? null;
 
 export default async function LeaderboardPage({ searchParams }: PageProps) {
   const params = await searchParams;
@@ -113,6 +100,46 @@ export default async function LeaderboardPage({ searchParams }: PageProps) {
       </main>
     );
   }
+
+  const picksTableRows: PicksByRaceTableRow[] = picksSnapshot
+    ? picksSnapshot.rows.map((row, index) => ({
+      averageSpeed: row.averageSpeed,
+      drivers: row.driverCells.map((cell) => ({
+        driverName: cell.driverName,
+        points: cell.points
+      })),
+      rank: picksSnapshot.resultsPosted ? index + 1 : null,
+      teamName: row.teamName,
+      totalPoints: row.totalPoints,
+      userId: row.userId
+    }))
+    : [];
+
+  const standingsRaceColumns: StandingsTableRaceColumn[] = standingsSnapshot
+    ? standingsSnapshot.raceColumns.map((column) => ({
+      raceId: column.raceId,
+      raceName: column.raceName
+    }))
+    : [];
+
+  const standingsTableRows: StandingsTableRow[] = standingsSnapshot
+    ? standingsSnapshot.leaderboardRows.map((row) => ({
+      change: row.change,
+      currentStanding: row.currentStanding,
+      previousStanding: row.previousStanding,
+      racePointsByRaceId: standingsSnapshot.raceColumns.reduce<Record<number, number>>(
+        (accumulator, column) => {
+          accumulator[column.raceId] = row.raceBreakdown.get(column.raceId) ?? 0;
+          return accumulator;
+        },
+        {}
+      ),
+      teamName: row.teamName,
+      totalPoints: row.totalPoints,
+      trend: row.trend,
+      userId: row.userId
+    }))
+    : [];
 
   return (
     <main className="mx-auto flex min-h-screen max-w-[1200px] flex-col px-6 py-10">
@@ -183,42 +210,7 @@ export default async function LeaderboardPage({ searchParams }: PageProps) {
           </p>
         ) : (
           <>
-            <section className="mt-6 overflow-x-auto rounded-lg border border-slate-200 bg-white">
-              <table className="min-w-full text-left text-sm">
-                <thead className="bg-slate-50 text-slate-700">
-                  <tr>
-                    <th className="px-3 py-2 font-semibold">Trend</th>
-                    <th className="px-3 py-2 font-semibold">Prev</th>
-                    <th className="px-3 py-2 font-semibold">Current</th>
-                    <th className="px-3 py-2 font-semibold">Change</th>
-                    <th className="px-3 py-2 font-semibold">Team</th>
-                    <th className="px-3 py-2 font-semibold">Total</th>
-                    {standingsSnapshot.raceColumns.map((race) => (
-                      <th key={race.raceId} className="px-3 py-2 font-semibold">
-                        {race.raceName}
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {standingsSnapshot.leaderboardRows.map((row) => (
-                    <tr key={row.userId} className="border-t border-slate-200">
-                      <td className="px-3 py-2 font-semibold">{trendSymbol(row.trend)}</td>
-                      <td className="px-3 py-2">{row.previousStanding ?? "-"}</td>
-                      <td className="px-3 py-2 font-semibold">{row.currentStanding}</td>
-                      <td className="px-3 py-2">{changeText(row.change)}</td>
-                      <td className="px-3 py-2">{row.teamName}</td>
-                      <td className="px-3 py-2 font-semibold">{row.totalPoints}</td>
-                      {standingsSnapshot.raceColumns.map((race) => (
-                        <td key={race.raceId} className="px-3 py-2">
-                          {row.raceBreakdown.get(race.raceId) ?? 0}
-                        </td>
-                      ))}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </section>
+            <StandingsTable raceColumns={standingsRaceColumns} rows={standingsTableRows} />
 
             {standingsSnapshot.latestRaceScoreboard ? (
               <section className="mt-8 rounded-lg border border-slate-200 bg-white p-6">
@@ -309,63 +301,7 @@ export default async function LeaderboardPage({ searchParams }: PageProps) {
                 </div>
               ) : null}
             </section>
-
-            <section className="mt-6 overflow-x-auto rounded-lg border border-slate-200 bg-white">
-              <table className="min-w-full text-left text-sm">
-                <thead className="bg-slate-50 text-slate-700">
-                  <tr>
-                    <th className="px-3 py-2 font-semibold">Rank</th>
-                    <th className="px-3 py-2 font-semibold">Team Name</th>
-                    <th className="px-3 py-2 font-semibold">Total Score</th>
-                    <th className="px-3 py-2 font-semibold">Average Speed</th>
-                    {Array.from({ length: 6 }, (_, index) => index + 1).map((groupNumber) => (
-                      <th key={`group-${groupNumber}`} className="px-3 py-2 font-semibold">
-                        Group {groupNumber}
-                      </th>
-                    ))}
-                    {Array.from({ length: 6 }, (_, index) => index + 1).map((groupNumber) => (
-                      <th key={`group-score-${groupNumber}`} className="px-3 py-2 font-semibold">
-                        Group {groupNumber} (Score)
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {picksSnapshot.rows.map((row, index) => (
-                    <tr key={row.userId} className="border-t border-slate-200">
-                      <td className="px-3 py-2 font-semibold">
-                        {picksSnapshot.resultsPosted ? index + 1 : "-"}
-                      </td>
-                      <td className="px-3 py-2">{row.teamName}</td>
-                      <td className="px-3 py-2 font-semibold">
-                        {picksSnapshot.resultsPosted ? (row.totalPoints ?? 0) : "-"}
-                      </td>
-                      <td className="px-3 py-2">
-                        {row.averageSpeed !== null ? row.averageSpeed.toFixed(3) : "-"}
-                      </td>
-                      {Array.from({ length: 6 }, (_, offset) => offset + 1).map((groupNumber) => {
-                        const groupCell = groupCellFor(row, groupNumber);
-                        return (
-                          <td key={`${row.userId}-driver-${groupNumber}`} className="px-3 py-2">
-                            {groupCell?.driverName ?? "No pick submitted"}
-                          </td>
-                        );
-                      })}
-                      {Array.from({ length: 6 }, (_, offset) => offset + 1).map((groupNumber) => {
-                        const groupCell = groupCellFor(row, groupNumber);
-                        return (
-                          <td key={`${row.userId}-score-${groupNumber}`} className="px-3 py-2">
-                            {picksSnapshot.resultsPosted && groupCell?.driverName
-                              ? (groupCell.points ?? 0)
-                              : "-"}
-                          </td>
-                        );
-                      })}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </section>
+            <PicksByRaceTable resultsPosted={picksSnapshot.resultsPosted} rows={picksTableRows} />
           </>
         )
       ) : null}

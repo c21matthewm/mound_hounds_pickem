@@ -2,6 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { signOutAction } from "@/app/actions/auth";
 import { saveWeeklyPickAction } from "@/app/picks/actions";
+import { PickemForm } from "@/components/pickem-form";
 import { isProfileComplete, type ProfileRow } from "@/lib/profile";
 import { queryStringParam } from "@/lib/query";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
@@ -175,6 +176,16 @@ export default async function PicksPage({ searchParams }: PageProps) {
     (groupNumber) => (driversByGroup.get(groupNumber) ?? []).length === 0
   );
   const canSubmit = missingGroups.length === 0 && !picksLocked;
+  const pickGroups = GROUP_NUMBERS.map((groupNumber) => ({
+    drivers: (driversByGroup.get(groupNumber) ?? []).map((driver) => ({
+      championshipPoints: driver.championship_points,
+      driverName: driver.driver_name,
+      id: driver.id,
+      imageUrl: driver.image_url
+    })),
+    groupNumber,
+    isTopGroup: groupNumber <= 5
+  }));
 
   return (
     <main className="mx-auto flex min-h-screen max-w-6xl flex-col px-6 py-10">
@@ -242,6 +253,18 @@ export default async function PicksPage({ searchParams }: PageProps) {
             </p>
           </div>
           <p className="mt-2 text-xs text-slate-200">All race times shown in {LEAGUE_TIME_ZONE}.</p>
+          <p className="mt-1 text-xs text-slate-200">
+            Please visit the{" "}
+            <a
+              className="font-semibold text-cyan-200 underline decoration-cyan-300/70 underline-offset-2 hover:text-cyan-100"
+              href="https://www.indycar.com/"
+              rel="noreferrer"
+              target="_blank"
+            >
+              official INDYCAR website
+            </a>{" "}
+            for additional information.
+          </p>
         </div>
       </section>
 
@@ -271,94 +294,15 @@ export default async function PicksPage({ searchParams }: PageProps) {
           {missingGroups.map((group) => `Group ${group}`).join(", ")}. Update drivers in admin.
         </p>
       ) : null}
-
-      <form action={saveWeeklyPickAction} className="mt-6 space-y-6">
-        <input name="race_id" type="hidden" value={String(upcomingRace.id)} />
-
-        <fieldset className="space-y-6 disabled:opacity-80" disabled={picksLocked}>
-          <section className="rounded-lg border border-slate-200 bg-white p-6">
-            <label className="block max-w-xs">
-              <span className="mb-1 block text-sm font-medium text-slate-700">
-                Average Speed Tie-breaker
-              </span>
-              <input
-                required
-                className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
-                defaultValue={existingPick ? String(existingPick.average_speed) : ""}
-                min={1}
-                name="average_speed"
-                step="0.001"
-                type="number"
-              />
-            </label>
-          </section>
-
-          {GROUP_NUMBERS.map((groupNumber) => {
-            const groupDrivers = driversByGroup.get(groupNumber) ?? [];
-            const isTopGroup = groupNumber <= 5;
-
-            return (
-              <section key={groupNumber} className="rounded-lg border border-slate-200 bg-white p-6">
-                <h3 className="text-lg font-semibold text-slate-900">
-                  Group {groupNumber}
-                  <span className="ml-2 text-sm font-normal text-slate-500">
-                    {isTopGroup ? "(Pick 1 of 4)" : "(Pick 1)"}
-                  </span>
-                </h3>
-
-                {groupDrivers.length === 0 ? (
-                  <p className="mt-3 text-sm text-slate-600">No active drivers in this group.</p>
-                ) : (
-                  <div className="mt-4 grid gap-3 md:grid-cols-2">
-                    {groupDrivers.map((driver) => (
-                      <label
-                        key={driver.id}
-                        className="flex cursor-pointer items-center gap-3 rounded-md border border-slate-200 px-3 py-2 shadow-sm hover:bg-slate-50"
-                      >
-                        <input
-                          required
-                          defaultChecked={selectedMap[groupNumber] === driver.id}
-                          name={`driver_group${groupNumber}_id`}
-                          type="radio"
-                          value={String(driver.id)}
-                        />
-
-                        {driver.image_url ? (
-                          // eslint-disable-next-line @next/next/no-img-element
-                          <img
-                            alt={driver.driver_name}
-                            className="h-12 w-12 rounded-full border border-slate-300 object-cover"
-                            src={driver.image_url}
-                          />
-                        ) : (
-                          <div className="flex h-12 w-12 items-center justify-center rounded-full border border-dashed border-slate-400 text-[10px] font-semibold text-slate-500">
-                            NO IMG
-                          </div>
-                        )}
-
-                        <div>
-                          <p className="text-sm font-semibold text-slate-900">{driver.driver_name}</p>
-                          <p className="text-xs text-slate-600">
-                            Championship Pts: {driver.championship_points}
-                          </p>
-                        </div>
-                      </label>
-                    ))}
-                  </div>
-                )}
-              </section>
-            );
-          })}
-
-          <button
-            className="rounded-md bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
-            disabled={!canSubmit}
-            type="submit"
-          >
-            {picksLocked ? "Picks are locked" : "Save Pick'em Form"}
-          </button>
-        </fieldset>
-      </form>
+      <PickemForm
+        action={saveWeeklyPickAction}
+        canSubmit={canSubmit}
+        existingAverageSpeed={existingPick ? String(existingPick.average_speed) : ""}
+        groups={pickGroups}
+        picksLocked={picksLocked}
+        raceId={upcomingRace.id}
+        savedSelection={selectedMap}
+      />
     </main>
   );
 }
