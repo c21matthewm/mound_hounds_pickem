@@ -44,6 +44,11 @@ In Vercel project:
 - `SUPABASE_SERVICE_ROLE_KEY`
 - `CRON_SECRET`
 - `NEXT_PUBLIC_SITE_URL`
+- `RESEND_API_KEY`
+- `RESEND_FROM_EMAIL`
+- `RESEND_API_KEY`
+- `RESEND_FROM_EMAIL`
+- `RESEND_REPLY_TO` (optional)
 
 Use your existing `.env.local` values for the first four.
 
@@ -113,6 +118,16 @@ curl -i \
 
 Expected: JSON with `"ok": true`.
 
+Also verify pick reminders endpoint:
+
+```bash
+curl -i \
+  -H "Authorization: Bearer <CRON_SECRET>" \
+  https://your-project-name.vercel.app/api/cron/pick-reminders
+```
+
+Expected: JSON with `"ok": true`.
+
 Without auth header, it should return `401` in production.
 
 ## 9) Set Up Supabase Cron (5-Minute Automation)
@@ -146,9 +161,43 @@ select cron.schedule(
   '*/5 * * * *',
   $$
   select net.http_post(
-    url := 'https://moundhoundspickem.vercel.app/api/cron/fantasy-winner',
+    url := 'https://your-project-name.vercel.app/api/cron/fantasy-winner',
     headers := jsonb_build_object(
-      'authorization', 'Bearer NqrliPfzjAUkqRVcVnxVDF6+OoxctvUi9Jn962th9m49dhpDxZTEojPD7NwtQY+a',
+      'authorization', 'Bearer YOUR_CRON_SECRET',
+      'content-type', 'application/json'
+    ),
+    body := '{}'::jsonb
+  );
+  $$
+);
+```
+
+Add a second cron for pick reminders:
+
+```sql
+do $$
+declare
+  existing_job_id bigint;
+begin
+  select j.jobid
+    into existing_job_id
+  from cron.job j
+  where j.jobname = 'pick_reminders_5min';
+
+  if existing_job_id is not null then
+    perform cron.unschedule(existing_job_id);
+  end if;
+end;
+$$;
+
+select cron.schedule(
+  'pick_reminders_5min',
+  '*/5 * * * *',
+  $$
+  select net.http_post(
+    url := 'https://your-project-name.vercel.app/api/cron/pick-reminders',
+    headers := jsonb_build_object(
+      'authorization', 'Bearer YOUR_CRON_SECRET',
       'content-type', 'application/json'
     ),
     body := '{}'::jsonb
@@ -165,7 +214,7 @@ from cron.job
 order by jobid desc;
 ```
 
-Replace both placeholders first:
+Replace placeholders first:
 - `https://your-project-name.vercel.app` with your real production domain
 - `YOUR_CRON_SECRET` with the same value stored in Vercel env vars
 

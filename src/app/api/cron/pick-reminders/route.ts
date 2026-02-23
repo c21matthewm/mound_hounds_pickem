@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { checkCronAuthorization } from "@/lib/cron-auth";
-import { finalizeDueRaceWinners } from "@/lib/fantasy-winner";
+import { sendDuePickReminders } from "@/lib/pick-reminders";
 
 async function handleCronRequest(request: Request) {
   const authCheck = checkCronAuthorization(request);
@@ -9,14 +9,14 @@ async function handleCronRequest(request: Request) {
   }
 
   try {
-    const result = await finalizeDueRaceWinners();
+    const result = await sendDuePickReminders();
     return NextResponse.json({
       ok: true,
       ...result
     });
   } catch (error) {
     const message =
-      error instanceof Error ? error.message : "Failed to finalize due fantasy race winners.";
+      error instanceof Error ? error.message : "Failed running pick reminder notifications.";
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }
