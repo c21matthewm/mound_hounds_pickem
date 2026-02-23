@@ -55,6 +55,6 @@ Race winners are fantasy league winners (team/profile), not INDYCAR race-winning
 
 - Results updates schedule auto winner finalization for about 15 minutes later.
 - Cron endpoint: `/api/cron/fantasy-winner`
-- Vercel schedule: `*/5 * * * *` (see `vercel.json`)
+- Recommended scheduler: Supabase Cron (`pg_cron` + `pg_net`) every 5 minutes
 
-Set `CRON_SECRET` in Vercel and locally to protect cron routes.
+Set `CRON_SECRET` in Vercel and locally to protect cron route calls.

@@ -1,8 +1,0 @@
-{
-  "crons": [
-    {
-      "path": "/api/cron/fantasy-winner",
-      "schedule": "0 12 * * *"
-    }
-  ]
-}

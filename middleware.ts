@@ -16,7 +16,20 @@ const startsWithPrefix = (pathname: string, prefixes: string[]): boolean =>
   prefixes.some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`));
 
 export async function middleware(request: NextRequest) {
-  const { anonKey, url } = getSupabaseEnv();
+  let anonKey: string;
+  let url: string;
+  try {
+    ({ anonKey, url } = getSupabaseEnv());
+  } catch (error) {
+    const message =
+      error instanceof Error
+        ? error.message
+        : "Missing Supabase environment variables in deployment settings.";
+    return new NextResponse(`Deployment configuration error: ${message}`, {
+      headers: { "content-type": "text/plain; charset=utf-8" },
+      status: 500
+    });
+  }
 
   let response = NextResponse.next({
     request

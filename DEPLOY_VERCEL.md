@@ -115,7 +115,61 @@ Expected: JSON with `"ok": true`.
 
 Without auth header, it should return `401` in production.
 
-## 9) Optional: Custom Domain
+## 9) Set Up Supabase Cron (5-Minute Automation)
+
+This replaces Vercel Cron on Hobby and gives you the frequent schedule you wanted.
+
+In Supabase SQL Editor, run:
+
+```sql
+create extension if not exists pg_cron;
+create extension if not exists pg_net;
+
+-- Optional cleanup if job already exists.
+do $$
+declare
+  existing_job_id bigint;
+begin
+  select j.jobid
+    into existing_job_id
+  from cron.job j
+  where j.jobname = 'fantasy_winner_5min';
+
+  if existing_job_id is not null then
+    perform cron.unschedule(existing_job_id);
+  end if;
+end;
+$$;
+
+select cron.schedule(
+  'fantasy_winner_5min',
+  '*/5 * * * *',
+  $$
+  select net.http_post(
+    url := 'https://your-project-name.vercel.app/api/cron/fantasy-winner',
+    headers := jsonb_build_object(
+      'authorization', 'Bearer YOUR_CRON_SECRET',
+      'content-type', 'application/json'
+    ),
+    body := '{}'::jsonb
+  );
+  $$
+);
+```
+
+Then verify job registration:
+
+```sql
+select jobid, jobname, schedule, active
+from cron.job
+order by jobid desc;
+```
+
+Replace both placeholders first:
+- `https://your-project-name.vercel.app` with your real production domain
+- `YOUR_CRON_SECRET` with the same value stored in Vercel env vars
+
+## 10) Optional: Custom Domain
 
 In Vercel:
 
@@ -127,3 +181,19 @@ In Vercel:
    - Supabase redirect URL for `/auth/callback`
 
 Redeploy after changing env vars.
+
+## Troubleshooting: `MIDDLEWARE_INVOCATION_FAILED`
+
+If you see `500: INTERNAL_SERVER_ERROR` with `MIDDLEWARE_INVOCATION_FAILED`, the most common cause
+is missing Supabase env vars in Vercel Production.
+
+Check in Vercel (`Project -> Settings -> Environment Variables`) that these are present for
+**Production**:
+
+- `NEXT_PUBLIC_SUPABASE_URL`
+- `NEXT_PUBLIC_SUPABASE_ANON_KEY`
+- `SUPABASE_SERVICE_ROLE_KEY`
+- `CRON_SECRET`
+- `NEXT_PUBLIC_SITE_URL`
+
+After updating env vars, redeploy and test again.
