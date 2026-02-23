@@ -3,6 +3,7 @@ import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { createClient } from "@supabase/supabase-js";
 import { expect, test, type Page } from "@playwright/test";
+import { trackClientIssues } from "./helpers/monitoring";
 
 const LEAGUE_TIME_ZONE = "America/Indiana/Indianapolis";
 const TEST_PASSWORD = "Pw-E2E-Flow-2026!";
@@ -124,34 +125,6 @@ const toLocalInput = (value: Date): string => {
   }
 
   return `${year}-${month}-${day}T${hour}:${minute}`;
-};
-
-const trackClientIssues = (page: Page, label: string, collector: string[]) => {
-  page.on("pageerror", (error) => {
-    collector.push(`[${label}] pageerror: ${error.message}`);
-  });
-
-  page.on("console", (message) => {
-    if (message.type() !== "error") {
-      return;
-    }
-
-    const text = message.text();
-    // Ignore known browser extension / preload noise.
-    if (text.includes("favicon.ico")) {
-      return;
-    }
-
-    collector.push(`[${label}] console.error: ${text}`);
-  });
-
-  page.on("response", (response) => {
-    const status = response.status();
-    const url = response.url();
-    if (status >= 500 && url.includes("127.0.0.1:3007")) {
-      collector.push(`[${label}] HTTP ${status}: ${url}`);
-    }
-  });
 };
 
 const signIn = async (page: Page, email: string) => {
@@ -336,7 +309,12 @@ test.describe.serial("Full App Flow", () => {
     }
   });
 
-  test("admin + participant E2E flow with race archive behavior", async ({ browser }) => {
+  test("admin + participant E2E flow with race archive behavior", async ({ browser, browserName, isMobile }) => {
+    test.skip(
+      browserName !== "chromium" || isMobile,
+      "Heavy mutation flow is limited to desktop Chromium. Cross-browser/mobile smoke is covered separately."
+    );
+
     adminUser = await createSeedUser("Admin", "admin");
     participant1 = await createSeedUser("Participant1", "participant");
     participant2 = await createSeedUser("Participant2", "participant");

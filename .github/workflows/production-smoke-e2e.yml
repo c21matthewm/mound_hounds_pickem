@@ -1,0 +1,108 @@
+name: Production Smoke E2E
+
+on:
+  deployment_status:
+  workflow_dispatch:
+    inputs:
+      base_url:
+        description: "Override base URL (optional)"
+        required: false
+        type: string
+
+concurrency:
+  group: production-smoke-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    if: |
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'deployment_status' && github.event.deployment_status.state == 'success')
+    env:
+      NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+      PW_INCLUDE_FIREFOX: "1"
+      PW_USE_EXISTING_SERVER: "1"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: ".nvmrc"
+          cache: npm
+
+      - name: Resolve base URL
+        id: base-url
+        shell: bash
+        run: |
+          set -euo pipefail
+          INPUT_URL="${{ github.event.inputs.base_url }}"
+          ENVIRONMENT_URL="${{ github.event.deployment_status.environment_url }}"
+          TARGET_URL="${{ github.event.deployment_status.target_url }}"
+          FALLBACK_URL="${{ vars.PRODUCTION_BASE_URL }}"
+
+          if [[ -n "${INPUT_URL}" ]]; then
+            echo "value=${INPUT_URL}" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if [[ -n "${ENVIRONMENT_URL}" ]]; then
+            echo "value=${ENVIRONMENT_URL}" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if [[ -n "${TARGET_URL}" ]]; then
+            echo "value=${TARGET_URL}" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if [[ -n "${FALLBACK_URL}" ]]; then
+            echo "value=${FALLBACK_URL}" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "No deployment URL available. Set repository variable PRODUCTION_BASE_URL or pass workflow_dispatch input base_url."
+          exit 1
+
+      - name: Wait for base URL readiness
+        shell: bash
+        env:
+          PW_BASE_URL: ${{ steps.base-url.outputs.value }}
+        run: |
+          set -euo pipefail
+          echo "Using PW_BASE_URL=${PW_BASE_URL}"
+          for attempt in {1..30}; do
+            status="$(curl -s -o /dev/null -w "%{http_code}" "${PW_BASE_URL}/login" || true)"
+            if [[ "${status}" == "200" || "${status}" == "302" || "${status}" == "307" ]]; then
+              echo "Base URL is ready."
+              exit 0
+            fi
+            echo "Attempt ${attempt}/30: /login returned ${status}. Waiting 10s..."
+            sleep 10
+          done
+          echo "Timed out waiting for ${PW_BASE_URL}/login"
+          exit 1
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium firefox
+
+      - name: Run production smoke E2E
+        env:
+          PW_BASE_URL: ${{ steps.base-url.outputs.value }}
+        run: npx playwright test tests/e2e/public-auth.spec.ts tests/e2e/full-flow.spec.ts --config=playwright.config.ts
+
+      - name: Upload Playwright artifacts on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-artifacts
+          path: |
+            test-results/
+            playwright-report/
+          if-no-files-found: ignore

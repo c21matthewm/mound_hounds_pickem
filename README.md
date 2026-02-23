@@ -49,6 +49,23 @@ Use the first-time deployment guide:
 
 `DEPLOY_VERCEL.md`
 
+## Production smoke CI
+
+GitHub workflow: `.github/workflows/production-smoke-e2e.yml`
+
+- Triggers on successful deployment status events and manual dispatch.
+- Runs Playwright smoke tests against the deployed URL.
+- Uses a cross-browser matrix (Chromium desktop, mobile Chromium, Firefox in CI).
+
+Set these GitHub repository secrets for the workflow:
+
+- `NEXT_PUBLIC_SUPABASE_URL`
+- `SUPABASE_SERVICE_ROLE_KEY`
+
+Optional repository variable:
+
+- `PRODUCTION_BASE_URL` (fallback URL if deployment event URL is unavailable)
+
 ## Fantasy winner automation
 
 Race winners are fantasy league winners (team/profile), not INDYCAR race-winning drivers.
