@@ -1,25 +1,45 @@
 import { NextResponse } from "next/server";
 import { finalizeDueRaceWinners } from "@/lib/fantasy-winner";
 
-const isAuthorized = (request: Request): boolean => {
+type AuthCheckResult =
+  | { ok: true }
+  | { ok: false; reason: "invalid_auth" | "missing_auth" | "missing_cron_secret" };
+
+const isAuthorized = (request: Request): AuthCheckResult => {
   const expectedSecret = process.env.CRON_SECRET;
 
-  if (!expectedSecret) {
+  if (!expectedSecret || expectedSecret.trim().length === 0) {
     // Local development fallback so cron can be tested without env setup.
     if (process.env.NODE_ENV !== "production") {
-      return true;
+      return { ok: true };
     }
 
-    return false;
+    return { ok: false, reason: "missing_cron_secret" };
   }
 
-  const authHeader = request.headers.get("authorization");
-  return authHeader === `Bearer ${expectedSecret}`;
+  const expected = expectedSecret.trim();
+  const bearerAuthHeader = request.headers.get("authorization")?.trim();
+  const directSecretHeader = request.headers.get("x-cron-secret")?.trim();
+
+  if (!bearerAuthHeader && !directSecretHeader) {
+    return { ok: false, reason: "missing_auth" };
+  }
+
+  if (directSecretHeader && directSecretHeader === expected) {
+    return { ok: true };
+  }
+
+  if (bearerAuthHeader === `Bearer ${expected}`) {
+    return { ok: true };
+  }
+
+  return { ok: false, reason: "invalid_auth" };
 };
 
 async function handleCronRequest(request: Request) {
-  if (!isAuthorized(request)) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const authCheck = isAuthorized(request);
+  if (!authCheck.ok) {
+    return NextResponse.json({ error: "Unauthorized", reason: authCheck.reason }, { status: 401 });
   }
 
   try {
