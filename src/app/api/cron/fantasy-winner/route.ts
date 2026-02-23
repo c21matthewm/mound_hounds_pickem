@@ -17,7 +17,7 @@ const isAuthorized = (request: Request): boolean => {
   return authHeader === `Bearer ${expectedSecret}`;
 };
 
-export async function GET(request: Request) {
+async function handleCronRequest(request: Request) {
   if (!isAuthorized(request)) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
@@ -33,4 +33,12 @@ export async function GET(request: Request) {
       error instanceof Error ? error.message : "Failed to finalize due fantasy race winners.";
     return NextResponse.json({ error: message }, { status: 500 });
   }
+}
+
+export async function GET(request: Request) {
+  return handleCronRequest(request);
+}
+
+export async function POST(request: Request) {
+  return handleCronRequest(request);
 }
