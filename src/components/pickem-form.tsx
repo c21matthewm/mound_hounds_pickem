@@ -1,8 +1,10 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 type SelectionMap = Record<number, number | null>;
+const GROUP_NUMBERS = [1, 2, 3, 4, 5, 6] as const;
+const LEAVE_CONFIRM_MESSAGE = "You have unsaved Pick'em changes. Leave this page without saving?";
 
 type DriverOption = {
   championshipPoints: number;
@@ -38,9 +40,168 @@ export function PickemForm({
 }: Props) {
   const [draftSelection, setDraftSelection] = useState<SelectionMap>(() => ({ ...savedSelection }));
   const [draftAverageSpeed, setDraftAverageSpeed] = useState(existingAverageSpeed);
+  const formRef = useRef<HTMLFormElement | null>(null);
+  const submitInProgressRef = useRef(false);
+  const submitIntentTimeoutRef = useRef<number | null>(null);
+  const allowNextUnloadRef = useRef(false);
+  const allowNextUnloadTimeoutRef = useRef<number | null>(null);
+
+  const hasUnsavedChanges = useMemo(() => {
+    const averageSpeedChanged = draftAverageSpeed.trim() !== existingAverageSpeed.trim();
+    const picksChanged = GROUP_NUMBERS.some(
+      (groupNumber) => (draftSelection[groupNumber] ?? null) !== (savedSelection[groupNumber] ?? null)
+    );
+    return averageSpeedChanged || picksChanged;
+  }, [draftAverageSpeed, draftSelection, existingAverageSpeed, savedSelection]);
+
+  const clearSubmitIntent = () => {
+    submitInProgressRef.current = false;
+    if (submitIntentTimeoutRef.current !== null) {
+      window.clearTimeout(submitIntentTimeoutRef.current);
+      submitIntentTimeoutRef.current = null;
+    }
+  };
+
+  const allowNextUnloadOnce = () => {
+    allowNextUnloadRef.current = true;
+    if (allowNextUnloadTimeoutRef.current !== null) {
+      window.clearTimeout(allowNextUnloadTimeoutRef.current);
+    }
+    allowNextUnloadTimeoutRef.current = window.setTimeout(() => {
+      allowNextUnloadRef.current = false;
+      allowNextUnloadTimeoutRef.current = null;
+    }, 2000);
+  };
+
+  const handleSubmit = () => {
+    submitInProgressRef.current = true;
+    allowNextUnloadOnce();
+    if (submitIntentTimeoutRef.current !== null) {
+      window.clearTimeout(submitIntentTimeoutRef.current);
+    }
+    submitIntentTimeoutRef.current = window.setTimeout(() => {
+      submitInProgressRef.current = false;
+      submitIntentTimeoutRef.current = null;
+    }, 4000);
+  };
+
+  useEffect(
+    () => () => {
+      if (submitIntentTimeoutRef.current !== null) {
+        window.clearTimeout(submitIntentTimeoutRef.current);
+      }
+      if (allowNextUnloadTimeoutRef.current !== null) {
+        window.clearTimeout(allowNextUnloadTimeoutRef.current);
+      }
+    },
+    []
+  );
+
+  useEffect(() => {
+    if (!hasUnsavedChanges || picksLocked) {
+      return;
+    }
+
+    const confirmLeave = (): boolean => {
+      if (submitInProgressRef.current) {
+        allowNextUnloadOnce();
+        return true;
+      }
+      const confirmed = window.confirm(LEAVE_CONFIRM_MESSAGE);
+      if (confirmed) {
+        allowNextUnloadOnce();
+      }
+      return confirmed;
+    };
+
+    const onBeforeUnload = (event: BeforeUnloadEvent) => {
+      if (submitInProgressRef.current || allowNextUnloadRef.current) {
+        allowNextUnloadRef.current = false;
+        return;
+      }
+
+      event.preventDefault();
+      event.returnValue = "";
+    };
+
+    const onDocumentClick = (event: MouseEvent) => {
+      if (
+        event.defaultPrevented ||
+        event.button !== 0 ||
+        event.metaKey ||
+        event.ctrlKey ||
+        event.shiftKey ||
+        event.altKey
+      ) {
+        return;
+      }
+
+      const target = event.target;
+      if (!(target instanceof Element)) {
+        return;
+      }
+
+      const anchor = target.closest("a[href]");
+      if (!(anchor instanceof HTMLAnchorElement)) {
+        return;
+      }
+
+      if (anchor.target && anchor.target !== "_self") {
+        return;
+      }
+
+      if (anchor.hasAttribute("download")) {
+        return;
+      }
+
+      const href = anchor.getAttribute("href");
+      if (!href || href.startsWith("#") || href.startsWith("mailto:") || href.startsWith("tel:")) {
+        return;
+      }
+
+      const destination = new URL(anchor.href, window.location.href);
+      const current = new URL(window.location.href);
+      if (destination.href === current.href) {
+        return;
+      }
+
+      if (!confirmLeave()) {
+        event.preventDefault();
+      }
+    };
+
+    const onDocumentSubmit = (event: SubmitEvent) => {
+      if (event.defaultPrevented) {
+        return;
+      }
+
+      const submittedForm = event.target;
+      if (!(submittedForm instanceof HTMLFormElement)) {
+        return;
+      }
+
+      if (submittedForm === formRef.current) {
+        return;
+      }
+
+      if (!confirmLeave()) {
+        event.preventDefault();
+      }
+    };
+
+    window.addEventListener("beforeunload", onBeforeUnload);
+    document.addEventListener("click", onDocumentClick, true);
+    document.addEventListener("submit", onDocumentSubmit, true);
+
+    return () => {
+      window.removeEventListener("beforeunload", onBeforeUnload);
+      document.removeEventListener("click", onDocumentClick, true);
+      document.removeEventListener("submit", onDocumentSubmit, true);
+    };
+  }, [hasUnsavedChanges, picksLocked]);
 
   return (
-    <form action={action} className="mt-6 space-y-6">
+    <form action={action} className="mt-6 space-y-6" onSubmit={handleSubmit} ref={formRef}>
       <input name="race_id" type="hidden" value={String(raceId)} />
 
       <fieldset className="space-y-6 disabled:opacity-80" disabled={picksLocked}>
@@ -54,7 +215,10 @@ export function PickemForm({
               className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
               min={1}
               name="average_speed"
-              onChange={(event) => setDraftAverageSpeed(event.target.value)}
+              onChange={(event) => {
+                clearSubmitIntent();
+                setDraftAverageSpeed(event.target.value);
+              }}
               step="0.001"
               type="number"
               value={draftAverageSpeed}
@@ -102,12 +266,13 @@ export function PickemForm({
                         required
                         checked={isSelected}
                         name={`driver_group${group.groupNumber}_id`}
-                        onChange={() =>
+                        onChange={() => {
+                          clearSubmitIntent();
                           setDraftSelection((previous) => ({
                             ...previous,
                             [group.groupNumber]: driver.id
-                          }))
-                        }
+                          }));
+                        }}
                         type="radio"
                         value={String(driver.id)}
                       />

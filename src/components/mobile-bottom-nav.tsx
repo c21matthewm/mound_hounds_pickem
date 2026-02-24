@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useSyncExternalStore } from "react";
 
 type NavItem = {
   href: string;
@@ -11,9 +12,10 @@ type NavItem = {
 const NAV_ITEMS: NavItem[] = [
   { href: "/dashboard", label: "Dashboard" },
   { href: "/picks", label: "Pick'em" },
-  { href: "/leaderboard", label: "Leaderboard" },
-  { href: "/feedback", label: "Feedback" }
+  { href: "/leaderboard", label: "Leaderboard" }
 ];
+
+const noopSubscribe = () => () => {};
 
 const isActiveRoute = (pathname: string, href: string): boolean => {
   if (pathname === href) {
@@ -29,10 +31,15 @@ const isActiveRoute = (pathname: string, href: string): boolean => {
 
 export function MobileBottomNav() {
   const pathname = usePathname();
+  const isMounted = useSyncExternalStore(noopSubscribe, () => true, () => false);
+
+  if (!isMounted) {
+    return null;
+  }
 
   return (
     <nav className="fixed inset-x-0 bottom-0 z-40 border-t border-slate-200 bg-white/95 backdrop-blur md:hidden">
-      <ul className="mx-auto grid max-w-3xl grid-cols-4">
+      <ul className="mx-auto grid max-w-3xl grid-cols-3">
         {NAV_ITEMS.map((item) => {
           const active = isActiveRoute(pathname, item.href);
           return (
