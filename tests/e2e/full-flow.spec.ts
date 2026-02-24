@@ -2,13 +2,15 @@ import fs from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { createClient } from "@supabase/supabase-js";
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Dialog, type Page } from "@playwright/test";
 import { trackClientIssues } from "./helpers/monitoring";
 
 const LEAGUE_TIME_ZONE = "America/Indiana/Indianapolis";
 const TEST_PASSWORD = "Pw-E2E-Flow-2026!";
 const RUN_ID = randomUUID().slice(0, 8);
 const TEST_PREFIX = `[PW E2E ${RUN_ID}]`;
+const TEST_FLOW_NAME_PREFIX = "[PW E2E ";
+const TEST_FLOW_EMAIL_PREFIX = "pw-e2e-";
 
 type Role = "admin" | "participant";
 
@@ -103,6 +105,97 @@ const supabase = createClient(
     }
   }
 );
+
+const loadAllPlaywrightAuthUserIds = async (): Promise<string[]> => {
+  const userIds: string[] = [];
+  let page = 1;
+  const perPage = 200;
+
+  while (true) {
+    const { data, error } = await supabase.auth.admin.listUsers({ page, perPage });
+    if (error) {
+      throw new Error(`Failed listing auth users for cleanup: ${error.message}`);
+    }
+
+    const users = data?.users ?? [];
+    users.forEach((user) => {
+      if (user.email?.startsWith(TEST_FLOW_EMAIL_PREFIX)) {
+        userIds.push(user.id);
+      }
+    });
+
+    if (users.length < perPage) {
+      break;
+    }
+    page += 1;
+  }
+
+  return userIds;
+};
+
+const cleanupPlaywrightFlowArtifacts = async () => {
+  const { data: seededRaces, error: seededRaceError } = await supabase
+    .from("races")
+    .select("id")
+    .ilike("race_name", `${TEST_FLOW_NAME_PREFIX}%`);
+  if (seededRaceError) {
+    throw new Error(`Failed listing seeded races for cleanup: ${seededRaceError.message}`);
+  }
+  const seededRaceIds = (seededRaces ?? []).map((row) => Number(row.id)).filter((id) => Number.isFinite(id));
+  if (seededRaceIds.length > 0) {
+    const { error: deleteRaceError } = await supabase.from("races").delete().in("id", seededRaceIds);
+    if (deleteRaceError) {
+      throw new Error(`Failed deleting seeded races: ${deleteRaceError.message}`);
+    }
+  }
+
+  const { data: seededDrivers, error: seededDriverError } = await supabase
+    .from("drivers")
+    .select("id")
+    .ilike("driver_name", `${TEST_FLOW_NAME_PREFIX}%`);
+  if (seededDriverError) {
+    throw new Error(`Failed listing seeded drivers for cleanup: ${seededDriverError.message}`);
+  }
+  const seededDriverIds = (seededDrivers ?? [])
+    .map((row) => Number(row.id))
+    .filter((id) => Number.isFinite(id));
+  if (seededDriverIds.length > 0) {
+    const { error: deleteDriverError } = await supabase.from("drivers").delete().in("id", seededDriverIds);
+    if (deleteDriverError) {
+      throw new Error(`Failed deleting seeded drivers: ${deleteDriverError.message}`);
+    }
+  }
+
+  const seededUserIds = await loadAllPlaywrightAuthUserIds();
+  if (seededUserIds.length === 0) {
+    return;
+  }
+
+  const { error: deleteFeedbackError } = await supabase
+    .from("feedback_items")
+    .delete()
+    .in("user_id", seededUserIds);
+  if (deleteFeedbackError) {
+    throw new Error(`Failed deleting seeded feedback: ${deleteFeedbackError.message}`);
+  }
+
+  const { error: deletePicksError } = await supabase.from("picks").delete().in("user_id", seededUserIds);
+  if (deletePicksError) {
+    throw new Error(`Failed deleting seeded picks: ${deletePicksError.message}`);
+  }
+
+  const { error: deleteProfilesError } = await supabase.from("profiles").delete().in("id", seededUserIds);
+  if (deleteProfilesError) {
+    throw new Error(`Failed deleting seeded profiles: ${deleteProfilesError.message}`);
+  }
+
+  for (const userId of seededUserIds) {
+    const { error: deleteAuthError } = await supabase.auth.admin.deleteUser(userId);
+    if (deleteAuthError) {
+      throw new Error(`Failed deleting seeded auth user ${userId}: ${deleteAuthError.message}`);
+    }
+  }
+};
 
 const toLocalInput = (value: Date): string => {
   const formatter = new Intl.DateTimeFormat("en-US", {
@@ -319,7 +412,28 @@ const submitPicks = async (
   }
 
   await page.getByRole("button", { name: "Save Pick'em Form" }).click();
-  await expect(page.locator("main")).toContainText("Pick'em form saved.");
+  await expect(page.locator("main")).toContainText("Last Saved Submission");
+};
+
+const verifyUnsavedPickGuard = async (page: Page, raceName: string, groupOneDriverId: number) => {
+  await page.goto("/picks");
+  await expect(page.locator("main")).toContainText(raceName);
+  await page.locator('input[name="average_speed"]').fill("177.001");
+  await page.locator(`input[name="driver_group1_id"][value="${groupOneDriverId}"]`).check();
+
+  const dashboardLink = page.getByRole("link", { name: "Dashboard" }).first();
+
+  await page.evaluate(() => {
+    window.confirm = () => false;
+  });
+  await dashboardLink.click();
+  await expect(page).toHaveURL(/\/picks/);
+
+  await page.evaluate(() => {
+    window.confirm = () => true;
+  });
+  await dashboardLink.click();
+  await expect(page).toHaveURL(/\/dashboard/);
 };
 
 test.describe.serial("Full App Flow", () => {
@@ -334,6 +448,10 @@ test.describe.serial("Full App Flow", () => {
   let participant1: SeedUser;
   let participant2: SeedUser;
   let participant3: SeedUser;
+
+  test.beforeAll(async () => {
+    await cleanupPlaywrightFlowArtifacts();
+  });
 
   test.afterAll(async () => {
     if (createdRaceIds.length > 0) {
@@ -357,6 +475,8 @@ test.describe.serial("Full App Flow", () => {
     for (const userId of createdUserIds) {
       await supabase.auth.admin.deleteUser(userId);
     }
+
+    await cleanupPlaywrightFlowArtifacts();
   });
 
   test("admin + participant E2E flow with race archive behavior", async ({ browser, browserName, isMobile }) => {
@@ -425,8 +545,8 @@ test.describe.serial("Full App Flow", () => {
       .first();
 
     const now = new Date();
-    const raceAQualifying = new Date(now.getTime() + 2 * 24 * 60 * 60 * 1000);
-    raceAQualifying.setHours(raceAQualifying.getHours() + 2);
+    // Keep race A as the nearest future race so the Pick'em page deterministically targets it.
+    const raceAQualifying = new Date(now.getTime() + 90 * 60 * 1000);
     const raceAStart = new Date(raceAQualifying.getTime() + 3 * 60 * 60 * 1000);
 
     await addRaceForm.locator('input[name="race_name"]').fill(raceAName);
@@ -466,7 +586,20 @@ test.describe.serial("Full App Flow", () => {
     const p1Page = await p1Context.newPage();
     trackClientIssues(p1Page, "participant1", clientIssues);
     await signIn(p1Page, participant1.email);
+    await verifyUnsavedPickGuard(p1Page, raceAName, pickA[1]);
     await submitPicks(p1Page, raceAName, pickA, 178.101);
+
+    let unexpectedCleanDialogMessage: string | null = null;
+    const cleanDialogHandler = async (dialog: Dialog) => {
+      unexpectedCleanDialogMessage = dialog.message();
+      await dialog.dismiss();
+    };
+    p1Page.on("dialog", cleanDialogHandler);
+    await p1Page.getByRole("link", { name: "Dashboard" }).first().click();
+    await expect(p1Page).toHaveURL(/\/dashboard/);
+    p1Page.off("dialog", cleanDialogHandler);
+    expect(unexpectedCleanDialogMessage).toBeNull();
+
     await submitPicks(p1Page, raceAName, pickB, 178.333);
 
     const p2Context = await browser.newContext();
@@ -496,15 +629,17 @@ test.describe.serial("Full App Flow", () => {
       .locator("form")
       .filter({ has: adminPage.locator(`input[name="race_name"][value="${raceAName}"]`) })
       .first();
-    const lockQualifying = new Date(Date.now() - 90 * 60 * 1000);
-    const lockRaceStart = new Date(Date.now() + 2 * 60 * 60 * 1000);
+    const lockQualifying = new Date(Date.now() - 3 * 60 * 60 * 1000);
+    // Keep race A visible on Pick'em while inside the 24-hour post-start buffer.
+    const lockRaceStart = new Date(Date.now() - 2 * 60 * 60 * 1000);
     await raceAEditForm.locator('input[name="qualifying_start_at"]').fill(toLocalInput(lockQualifying));
     await raceAEditForm.locator('input[name="race_date"]').fill(toLocalInput(lockRaceStart));
     await raceAEditForm.getByRole("button", { name: "Save" }).click();
     await expect(adminPage.locator("main")).toContainText("Race updated.");
 
     await p1Page.goto("/picks");
-    await expect(p1Page.locator("main")).toContainText("Qualifying has started.");
+    await expect(p1Page.locator("main")).toContainText(raceAName);
+    await expect(p1Page.locator("main")).toContainText("Status: Locked");
     await expect(p1Page.getByRole("button", { name: "Picks are locked" })).toBeDisabled();
 
     await p1Page.goto(`/leaderboard?tab=picks&race_id=${raceA.id}`);

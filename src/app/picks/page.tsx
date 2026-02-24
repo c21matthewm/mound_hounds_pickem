@@ -50,6 +50,8 @@ type PageProps = {
 };
 
 const GROUP_NUMBERS = [1, 2, 3, 4, 5, 6] as const;
+const PICKEM_RACE_BUFFER_MS = 24 * 60 * 60 * 1000;
+const PICKEM_RACE_SELECT_FIELDS = "id,race_name,title_image_url,qualifying_start_at,race_date,payout";
 
 const formatRaceDate = (value: string): string =>
   formatLeagueDateTime(value, { dateStyle: "full", timeStyle: "short" });
@@ -88,13 +90,47 @@ export default async function PicksPage({ searchParams }: PageProps) {
 
   const now = new Date();
   const nowIso = now.toISOString();
+  const raceBufferStartIso = new Date(now.getTime() - PICKEM_RACE_BUFFER_MS).toISOString();
   const seasonRange = getLeagueSeasonDateRange();
 
   let upcomingRace: RaceRow | null = null;
   {
+    // Pick'em race selection priority:
+    // 1) Most recently started race in the last 24h (buffer window).
+    // 2) Next upcoming race after that buffer expires.
+    const { data: seasonRecentRace } = await supabase
+      .from("races")
+      .select(PICKEM_RACE_SELECT_FIELDS)
+      .eq("is_archived", false)
+      .gte("race_date", seasonRange.seasonStartIso)
+      .lt("race_date", seasonRange.seasonEndExclusiveIso)
+      .lte("race_date", nowIso)
+      .gt("race_date", raceBufferStartIso)
+      .order("race_date", { ascending: false })
+      .limit(1)
+      .maybeSingle<RaceRow>();
+
+    upcomingRace = seasonRecentRace ?? null;
+  }
+
+  if (!upcomingRace) {
+    const { data: fallbackRecentRace } = await supabase
+      .from("races")
+      .select(PICKEM_RACE_SELECT_FIELDS)
+      .eq("is_archived", false)
+      .lte("race_date", nowIso)
+      .gt("race_date", raceBufferStartIso)
+      .order("race_date", { ascending: false })
+      .limit(1)
+      .maybeSingle<RaceRow>();
+
+    upcomingRace = fallbackRecentRace ?? null;
+  }
+
+  if (!upcomingRace) {
     const { data: seasonUpcomingRace } = await supabase
       .from("races")
-      .select("id,race_name,title_image_url,qualifying_start_at,race_date,payout")
+      .select(PICKEM_RACE_SELECT_FIELDS)
       .eq("is_archived", false)
       .gte("race_date", seasonRange.seasonStartIso)
       .lt("race_date", seasonRange.seasonEndExclusiveIso)
@@ -109,7 +145,7 @@ export default async function PicksPage({ searchParams }: PageProps) {
   if (!upcomingRace) {
     const { data: fallbackUpcomingRace } = await supabase
       .from("races")
-      .select("id,race_name,title_image_url,qualifying_start_at,race_date,payout")
+      .select(PICKEM_RACE_SELECT_FIELDS)
       .eq("is_archived", false)
       .gt("race_date", nowIso)
       .order("race_date", { ascending: true })
