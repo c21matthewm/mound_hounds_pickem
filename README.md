@@ -71,6 +71,8 @@ Optional repository variable:
 Race winners are fantasy league winners (team/profile), not INDYCAR race-winning drivers.
 
 - Results updates schedule auto winner finalization for about 15 minutes later.
+- Weekly tiebreak applies only to first-place ties and uses the closest average-speed pick to the
+  official race-winning average speed.
 - Cron endpoint: `/api/cron/fantasy-winner`
 - Recommended scheduler: Supabase Cron (`pg_cron` + `pg_net`) every 5 minutes
 

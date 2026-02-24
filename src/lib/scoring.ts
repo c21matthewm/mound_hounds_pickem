@@ -2,6 +2,11 @@ import "server-only";
 
 import { createServiceRoleSupabaseClient } from "@/lib/supabase/service-role";
 import { getLeagueSeasonDateRange } from "@/lib/timezone";
+import {
+  assignWeeklyRanks,
+  buildOrderedWeeklyRows,
+  calculateOfficialSpeedDelta
+} from "@/lib/weekly-ranking";
 
 type DriverRow = {
   group_number: number;
@@ -34,6 +39,7 @@ type ProfileRow = {
 
 type RaceRow = {
   id: number;
+  official_winning_average_speed: number | string | null;
   race_date: string;
   race_name: string;
 };
@@ -87,6 +93,7 @@ export type LeagueScoringSnapshot = {
 };
 
 export type PicksByRaceOption = {
+  officialWinningAverageSpeed: number | null;
   raceDate: string;
   raceId: number;
   raceName: string;
@@ -102,6 +109,7 @@ export type PicksByRaceDriverCell = {
 export type PicksByRaceParticipantRow = {
   averageSpeed: number | null;
   driverCells: PicksByRaceDriverCell[];
+  rank: number | null;
   teamName: string;
   totalPoints: number | null;
   userId: string;
@@ -118,6 +126,7 @@ export type ParticipantAnalyticsRaceRow = {
   averageSpeedGuess: number | null;
   cumulativePoints: number;
   fieldSize: number;
+  officialRaceAverageSpeed: number | null;
   pointsVsRaceAverage: number;
   raceAveragePoints: number;
   raceDate: string;
@@ -127,7 +136,6 @@ export type ParticipantAnalyticsRaceRow = {
   tiebreakDelta: number | null;
   weeklyFinish: number | null;
   weeklyPoints: number;
-  winningAverageSpeedGuess: number | null;
 };
 
 export type ParticipantAnalyticsSummary = {
@@ -170,6 +178,11 @@ const asNumber = (value: number | string | null | undefined): number => {
   return 0;
 };
 
+const withOfficialSpeedMigrationHint = (message: string): string =>
+  message.includes("official_winning_average_speed")
+    ? `${message}. Run the latest Supabase migration to add official race average speed support.`
+    : message;
+
 const compareLeaderboardRows = (
   a: { racePoints: number; teamName: string; totalPoints: number },
   b: { racePoints: number; teamName: string; totalPoints: number }
@@ -180,21 +193,6 @@ const compareLeaderboardRows = (
 
   if (b.racePoints !== a.racePoints) {
     return b.racePoints - a.racePoints;
-  }
-
-  return a.teamName.localeCompare(b.teamName);
-};
-
-const compareRaceScoreboardRows = (
-  a: { averageSpeed: number | null; points: number; teamName: string },
-  b: { averageSpeed: number | null; points: number; teamName: string }
-): number => {
-  if (b.points !== a.points) {
-    return b.points - a.points;
-  }
-
-  if (a.averageSpeed !== null && b.averageSpeed !== null && a.averageSpeed !== b.averageSpeed) {
-    return a.averageSpeed - b.averageSpeed;
   }
 
   return a.teamName.localeCompare(b.teamName);
@@ -229,31 +227,41 @@ const assignCompetitionRanks = <T extends { teamName: string; totalPoints: numbe
 };
 
 const assignWeeklyRaceRanks = <T extends { averageSpeed: number | null; racePoints: number; teamName: string }>(
-  rows: T[]
+  rows: T[],
+  officialRaceAverageSpeed: number | null
 ): Array<T & { rank: number }> => {
-  const sorted = [...rows].sort((a, b) =>
-    compareRaceScoreboardRows(
-      { averageSpeed: a.averageSpeed, points: a.racePoints, teamName: a.teamName },
-      { averageSpeed: b.averageSpeed, points: b.racePoints, teamName: b.teamName }
-    )
+  const sorted = buildOrderedWeeklyRows(
+    rows.map((row) => ({
+      ...row,
+      points: row.racePoints
+    })),
+    officialRaceAverageSpeed
   );
-  const ranked: Array<T & { rank: number }> = [];
 
-  let previous: { averageSpeed: number | null; racePoints: number } | null = null;
+  if (sorted.length === 0) {
+    return [];
+  }
+
+  const topPoints = sorted[0].points;
+  const topTieCount = sorted.filter((row) => row.points === topPoints).length;
+
+  const ranked: Array<T & { rank: number }> = [];
+  let previousPoints: number | null = null;
   let previousRank = 0;
 
   sorted.forEach((row, index) => {
-    const sameAsPrevious =
-      previous !== null &&
-      previous.racePoints === row.racePoints &&
-      previous.averageSpeed === row.averageSpeed;
-    const rank = sameAsPrevious ? previousRank : index + 1;
-    ranked.push({ ...row, rank });
+    let rank: number;
 
-    previous = {
-      averageSpeed: row.averageSpeed,
-      racePoints: row.racePoints
-    };
+    if (topTieCount > 1 && row.points === topPoints) {
+      rank = index + 1;
+    } else if (previousPoints !== null && row.points === previousPoints) {
+      rank = previousRank;
+    } else {
+      rank = index + 1;
+    }
+
+    ranked.push({ ...(row as T), rank });
+    previousPoints = row.points;
     previousRank = rank;
   });
 
@@ -342,7 +350,7 @@ export async function buildLeagueScoringSnapshot(): Promise<LeagueScoringSnapsho
       .order("team_name", { ascending: true }),
     supabase
       .from("races")
-      .select("id,race_name,race_date")
+      .select("id,race_name,race_date,official_winning_average_speed")
       .eq("is_archived", false)
       .order("race_date", { ascending: true }),
     supabase.from("picks").select(
@@ -356,7 +364,7 @@ export async function buildLeagueScoringSnapshot(): Promise<LeagueScoringSnapsho
     throw new Error(`Failed to load profiles: ${profilesRes.error.message}`);
   }
   if (racesRes.error) {
-    throw new Error(`Failed to load races: ${racesRes.error.message}`);
+    throw new Error(`Failed to load races: ${withOfficialSpeedMigrationHint(racesRes.error.message)}`);
   }
   if (picksRes.error) {
     throw new Error(`Failed to load picks: ${picksRes.error.message}`);
@@ -420,16 +428,20 @@ export async function buildLeagueScoringSnapshot(): Promise<LeagueScoringSnapsho
   });
 
   const latestRace = completedRaces[completedRaces.length - 1];
-  const latestRaceRows: RaceScoreboardRow[] = participants.map((participant) => {
-    const weekly = pickScoreByRaceUser.get(keyForRaceUser(latestRace.id, participant.id));
-    return {
-      averageSpeed: weekly?.averageSpeed ?? null,
-      points: weekly?.racePoints ?? 0,
-      rowType: "participant",
-      teamName: participant.teamName
-    };
-  });
-  latestRaceRows.sort(compareRaceScoreboardRows);
+  const latestRaceRows: RaceScoreboardRow[] = buildOrderedWeeklyRows(
+    participants.map((participant) => {
+      const weekly = pickScoreByRaceUser.get(keyForRaceUser(latestRace.id, participant.id));
+      return {
+        averageSpeed: weekly?.averageSpeed ?? null,
+        points: weekly?.racePoints ?? 0,
+        rowType: "participant" as const,
+        teamName: participant.teamName
+      };
+    }),
+    latestRace.official_winning_average_speed === null
+      ? null
+      : asNumber(latestRace.official_winning_average_speed)
+  );
 
   const latestRaceExtremes = computeRaceExtremes(
     latestRace.id,
@@ -548,7 +560,7 @@ export async function buildPicksByRaceSnapshot(
       .order("team_name", { ascending: true }),
     supabase
       .from("races")
-      .select("id,race_name,race_date,qualifying_start_at")
+      .select("id,race_name,race_date,qualifying_start_at,official_winning_average_speed")
       .eq("is_archived", false)
       .gte("race_date", seasonRange.seasonStartIso)
       .lt("race_date", seasonRange.seasonEndExclusiveIso)
@@ -561,7 +573,7 @@ export async function buildPicksByRaceSnapshot(
     throw new Error(`Failed to load profiles: ${profilesRes.error.message}`);
   }
   if (seasonRacesRes.error) {
-    throw new Error(`Failed to load races: ${seasonRacesRes.error.message}`);
+    throw new Error(`Failed to load races: ${withOfficialSpeedMigrationHint(seasonRacesRes.error.message)}`);
   }
   if (driversRes.error) {
     throw new Error(`Failed to load drivers: ${driversRes.error.message}`);
@@ -571,13 +583,15 @@ export async function buildPicksByRaceSnapshot(
   if (raceRows.length === 0) {
     const { data: fallbackRaces, error: fallbackRacesError } = await supabase
       .from("races")
-      .select("id,race_name,race_date,qualifying_start_at")
+      .select("id,race_name,race_date,qualifying_start_at,official_winning_average_speed")
       .eq("is_archived", false)
       .lte("qualifying_start_at", nowIso)
       .order("qualifying_start_at", { ascending: false });
 
     if (fallbackRacesError) {
-      throw new Error(`Failed to load fallback races: ${fallbackRacesError.message}`);
+      throw new Error(
+        `Failed to load fallback races: ${withOfficialSpeedMigrationHint(fallbackRacesError.message)}`
+      );
     }
 
     raceRows = (fallbackRaces ?? []) as Array<RaceRow & { qualifying_start_at: string }>;
@@ -591,6 +605,10 @@ export async function buildPicksByRaceSnapshot(
     }));
 
   const availableRaces: PicksByRaceOption[] = raceRows.map((race) => ({
+    officialWinningAverageSpeed:
+      race.official_winning_average_speed === null
+        ? null
+        : asNumber(race.official_winning_average_speed),
     raceDate: race.race_date,
     raceId: race.id,
     raceName: race.race_name,
@@ -640,7 +658,7 @@ export async function buildPicksByRaceSnapshot(
   });
   const resultsPosted = resultRows.length > 0;
 
-  const rows: PicksByRaceParticipantRow[] = participants.map((participant) => {
+  const baseRows = participants.map((participant) => {
     const pick = picksByUser.get(participant.id) ?? null;
 
     const driverCells: PicksByRaceDriverCell[] = pickDriverIds(pick).map((driverId, index) => ({
@@ -656,34 +674,33 @@ export async function buildPicksByRaceSnapshot(
     return {
       averageSpeed: pick ? asNumber(pick.average_speed) : null,
       driverCells,
+      rank: null as number | null,
       teamName: participant.teamName,
       totalPoints,
       userId: participant.id
     };
   });
 
+  let rows: PicksByRaceParticipantRow[] = [];
+
   if (resultsPosted) {
-    rows.sort((a, b) => {
-      const totalCompare = (b.totalPoints ?? 0) - (a.totalPoints ?? 0);
-      if (totalCompare !== 0) {
-        return totalCompare;
-      }
+    const ranked = assignWeeklyRanks(
+      baseRows.map((row) => ({
+        ...row,
+        points: row.totalPoints ?? 0
+      })),
+      selectedRace.officialWinningAverageSpeed
+    );
 
-      if (a.averageSpeed !== null && b.averageSpeed !== null && a.averageSpeed !== b.averageSpeed) {
-        return a.averageSpeed - b.averageSpeed;
-      }
-
-      if (a.averageSpeed === null && b.averageSpeed !== null) {
-        return 1;
-      }
-      if (a.averageSpeed !== null && b.averageSpeed === null) {
-        return -1;
-      }
-
-      return a.teamName.localeCompare(b.teamName);
-    });
+    rows = ranked.map(({ points, ...row }) => ({
+      ...row,
+      rank: row.rank,
+      totalPoints: points
+    }));
   } else {
-    rows.sort((a, b) => a.teamName.localeCompare(b.teamName));
+    rows = [...baseRows]
+      .sort((a, b) => a.teamName.localeCompare(b.teamName))
+      .map((row) => ({ ...row, rank: null }));
   }
 
   return {
@@ -746,7 +763,7 @@ export async function buildParticipantAnalyticsSnapshot(
       .order("team_name", { ascending: true }),
     supabase
       .from("races")
-      .select("id,race_name,race_date")
+      .select("id,race_name,race_date,official_winning_average_speed")
       .eq("is_archived", false)
       .order("race_date", { ascending: true }),
     supabase.from("picks").select(
@@ -759,7 +776,7 @@ export async function buildParticipantAnalyticsSnapshot(
     throw new Error(`Failed to load profiles: ${profilesRes.error.message}`);
   }
   if (racesRes.error) {
-    throw new Error(`Failed to load races: ${racesRes.error.message}`);
+    throw new Error(`Failed to load races: ${withOfficialSpeedMigrationHint(racesRes.error.message)}`);
   }
   if (picksRes.error) {
     throw new Error(`Failed to load picks: ${picksRes.error.message}`);
@@ -836,6 +853,11 @@ export async function buildParticipantAnalyticsSnapshot(
   const raceRows: ParticipantAnalyticsRaceRow[] = [];
 
   completedRaces.forEach((race) => {
+    const officialRaceAverageSpeed =
+      race.official_winning_average_speed === null
+        ? null
+        : asNumber(race.official_winning_average_speed);
+
     const weeklyRows = participants.map((row) => {
       const weekly = pickScoreByRaceUser.get(keyForRaceUser(race.id, row.id));
       return {
@@ -845,7 +867,7 @@ export async function buildParticipantAnalyticsSnapshot(
         userId: row.id
       };
     });
-    const weeklyRanks = assignWeeklyRaceRanks(weeklyRows);
+    const weeklyRanks = assignWeeklyRaceRanks(weeklyRows, officialRaceAverageSpeed);
     const weeklyRankByUser = new Map(weeklyRanks.map((row) => [row.userId, row.rank]));
     const raceAveragePoints =
       weeklyRows.length === 0
@@ -868,7 +890,6 @@ export async function buildParticipantAnalyticsSnapshot(
     currentStanding =
       cumulativeRanks.find((row) => row.userId === participant.id)?.rank ?? currentStanding;
 
-    const winningAverageSpeedGuess = weeklyRanks[0]?.averageSpeed ?? null;
     const participantWeekly = weeklyRows.find((row) => row.userId === participant.id);
     const participantAverageSpeed = participantWeekly?.averageSpeed ?? null;
 
@@ -876,19 +897,16 @@ export async function buildParticipantAnalyticsSnapshot(
       averageSpeedGuess: participantAverageSpeed,
       cumulativePoints: cumulativeByUser.get(participant.id) ?? 0,
       fieldSize,
+      officialRaceAverageSpeed,
       pointsVsRaceAverage: (participantWeekly?.racePoints ?? 0) - raceAveragePoints,
       raceAveragePoints,
       raceDate: race.race_date,
       raceId: race.id,
       raceName: race.race_name,
       submittedPick: participantAverageSpeed !== null,
-      tiebreakDelta:
-        participantAverageSpeed !== null && winningAverageSpeedGuess !== null
-          ? Math.abs(participantAverageSpeed - winningAverageSpeedGuess)
-          : null,
+      tiebreakDelta: calculateOfficialSpeedDelta(participantAverageSpeed, officialRaceAverageSpeed),
       weeklyFinish: weeklyRankByUser.get(participant.id) ?? null,
-      weeklyPoints: participantWeekly?.racePoints ?? 0,
-      winningAverageSpeedGuess
+      weeklyPoints: participantWeekly?.racePoints ?? 0
     });
   });
 
