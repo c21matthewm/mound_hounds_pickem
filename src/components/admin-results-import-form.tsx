@@ -30,6 +30,7 @@ type PreviewState = {
   rows: PreviewRow[];
   unmatchedDriverNames: string[];
   unmatchedLineCount: number;
+  winningAverageSpeed: number | null;
 };
 
 type Props = {
@@ -63,7 +64,8 @@ export function AdminResultsImportForm({ action, activeRaces, drivers }: Props) 
     previewState !== null &&
     !previewIsStale &&
     previewState.readyCount > 0 &&
-    previewState.unmatchedLineCount === 0;
+    previewState.unmatchedLineCount === 0 &&
+    previewState.winningAverageSpeed !== null;
 
   const runPreview = () => {
     if (!raceId) {
@@ -81,6 +83,14 @@ export function AdminResultsImportForm({ action, activeRaces, drivers }: Props) 
     const parsed = parseIndycarResultsPaste(rawPaste);
     if (parsed.rows.length === 0) {
       setPreviewError("No result rows were detected from your pasted table.");
+      setPreviewState(null);
+      return;
+    }
+
+    if (parsed.winningAverageSpeed === null) {
+      setPreviewError(
+        "Could not determine the official race average speed. Make sure the Average Speed column is included."
+      );
       setPreviewState(null);
       return;
     }
@@ -135,7 +145,8 @@ export function AdminResultsImportForm({ action, activeRaces, drivers }: Props) 
       readyCount,
       rows: previewRows,
       unmatchedDriverNames: Array.from(unmatchedNames),
-      unmatchedLineCount
+      unmatchedLineCount,
+      winningAverageSpeed: parsed.winningAverageSpeed
     });
   };
 
@@ -218,6 +229,12 @@ export function AdminResultsImportForm({ action, activeRaces, drivers }: Props) 
           </p>
         ) : null}
       </div>
+
+      {previewState && !previewIsStale ? (
+        <p className="mt-2 text-xs text-slate-600">
+          Official race average speed detected: {previewState.winningAverageSpeed?.toFixed(3)}
+        </p>
+      ) : null}
 
       {previewError ? (
         <p className="mt-3 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">

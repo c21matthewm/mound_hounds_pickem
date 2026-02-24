@@ -579,7 +579,8 @@ export default async function AdminPage({ searchParams }: PageProps) {
           </div>
         </form>
         <p className="mt-2 text-xs text-slate-500">
-          Auto winner uses highest weekly points, then lower average-speed prediction as tiebreaker.
+          Auto winner uses highest weekly points. If first place is tied, tiebreak uses closest
+          pick to the official race average speed (winner&apos;s speed), then team name.
           When race results are updated, auto-calculation is rescheduled for about 15 minutes later.
         </p>
 

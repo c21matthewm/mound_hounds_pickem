@@ -2,6 +2,7 @@ import "server-only";
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { createServiceRoleSupabaseClient } from "@/lib/supabase/service-role";
+import { buildOrderedWeeklyRows } from "@/lib/weekly-ranking";
 
 export const AUTO_WINNER_DELAY_MINUTES = 15;
 
@@ -26,7 +27,12 @@ type ResultRow = {
   points: number;
 };
 
-type RaceRow = {
+type RaceWinnerSpeedRow = {
+  id: number;
+  official_winning_average_speed: number | string | null;
+};
+
+type PendingRaceRow = {
   id: number;
 };
 
@@ -42,6 +48,11 @@ const toNumber = (value: number | string): number => {
 
   return 0;
 };
+
+const withOfficialSpeedMigrationHint = (message: string): string =>
+  message.includes("official_winning_average_speed")
+    ? `${message}. Run the latest Supabase migration to add official race average speed support.`
+    : message;
 
 const scorePick = (pick: PickRow, pointsByDriverId: Map<number, number>): number => {
   const selectedDrivers = [
@@ -82,14 +93,15 @@ export async function calculateRaceWinnerProfileId(
   supabase: SupabaseClient,
   raceId: number
 ): Promise<string | null> {
-  const [picksRes, resultsRes] = await Promise.all([
+  const [picksRes, resultsRes, raceRes] = await Promise.all([
     supabase
       .from("picks")
       .select(
         "user_id,average_speed,driver_group1_id,driver_group2_id,driver_group3_id,driver_group4_id,driver_group5_id,driver_group6_id"
       )
       .eq("race_id", raceId),
-    supabase.from("results").select("driver_id,points").eq("race_id", raceId)
+    supabase.from("results").select("driver_id,points").eq("race_id", raceId),
+    supabase.from("races").select("id,official_winning_average_speed").eq("id", raceId).maybeSingle()
   ]);
 
   if (picksRes.error) {
@@ -98,9 +110,13 @@ export async function calculateRaceWinnerProfileId(
   if (resultsRes.error) {
     throw new Error(resultsRes.error.message);
   }
+  if (raceRes.error) {
+    throw new Error(withOfficialSpeedMigrationHint(raceRes.error.message));
+  }
 
   const picks = (picksRes.data ?? []) as PickRow[];
   const results = (resultsRes.data ?? []) as ResultRow[];
+  const race = raceRes.data as RaceWinnerSpeedRow | null;
   if (picks.length === 0) {
     return null;
   }
@@ -125,24 +141,20 @@ export async function calculateRaceWinnerProfileId(
     teamNameByUserId.set(profile.id, profile.team_name);
   });
 
-  const ranked = picks
-    .map((pick) => ({
+  const officialWinningAverageSpeed =
+    race?.official_winning_average_speed === null || race?.official_winning_average_speed === undefined
+      ? null
+      : toNumber(race.official_winning_average_speed);
+
+  const ranked = buildOrderedWeeklyRows(
+    picks.map((pick) => ({
       averageSpeed: toNumber(pick.average_speed),
       points: scorePick(pick, pointsByDriverId),
       teamName: teamNameByUserId.get(pick.user_id) ?? `Team-${pick.user_id.slice(0, 8)}`,
       userId: pick.user_id
-    }))
-    .sort((a, b) => {
-      if (b.points !== a.points) {
-        return b.points - a.points;
-      }
-
-      if (a.averageSpeed !== b.averageSpeed) {
-        return a.averageSpeed - b.averageSpeed;
-      }
-
-      return a.teamName.localeCompare(b.teamName);
-    });
+    })),
+    officialWinningAverageSpeed
+  );
 
   return ranked[0]?.userId ?? null;
 }
@@ -199,7 +211,7 @@ export async function finalizeDueRaceWinners(): Promise<{
     throw new Error(racesError.message);
   }
 
-  const pendingRaces = (races ?? []) as RaceRow[];
+  const pendingRaces = (races ?? []) as PendingRaceRow[];
   for (const race of pendingRaces) {
     await finalizeRaceWinnerNow(supabase, race.id);
   }

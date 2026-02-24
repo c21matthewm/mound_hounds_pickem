@@ -1,6 +1,11 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import {
+  buildOrderedWeeklyRows,
+  calculateOfficialSpeedDelta,
+  isTopPointsTie
+} from "@/lib/weekly-ranking";
 
 type DriverCell = {
   driverName: string | null;
@@ -17,12 +22,13 @@ export type PicksByRaceTableRow = {
 };
 
 type Props = {
+  officialWinningAverageSpeed: number | null;
   resultsPosted: boolean;
   rows: PicksByRaceTableRow[];
 };
 
 type TieBreakRow = {
-  averageSpeed: number;
+  averageSpeed: number | null;
   teamName: string;
   userId: string;
 };
@@ -153,7 +159,7 @@ const filterInputClassName =
 const formatAverageSpeed = (value: number | null): string =>
   value !== null ? value.toFixed(3) : "-";
 
-export function PicksByRaceTable({ resultsPosted, rows }: Props) {
+export function PicksByRaceTable({ officialWinningAverageSpeed, resultsPosted, rows }: Props) {
   const [filters, setFilters] = useState<ColumnFilters>(DEFAULT_FILTERS);
   const [sortKey, setSortKey] = useState<SortKey>(resultsPosted ? "rank" : "teamName");
   const [sortDirection, setSortDirection] = useState<SortDirection>(
@@ -251,23 +257,29 @@ export function PicksByRaceTable({ resultsPosted, rows }: Props) {
       return [] as TieBreakRow[];
     }
 
-    const tiedRows: TieBreakRow[] = rows
-      .filter(
-        (row) =>
-          row.totalPoints === selectedRow.totalPoints &&
-          row.averageSpeed !== null &&
-          row.userId !== "benchmark_high" &&
-          row.userId !== "benchmark_low"
-      )
+    const normalizedRows = rows
+      .filter((row) => row.totalPoints !== null)
       .map((row) => ({
-        averageSpeed: row.averageSpeed as number,
+        averageSpeed: row.averageSpeed,
+        points: row.totalPoints ?? 0,
         teamName: row.teamName,
         userId: row.userId
-      }))
-      .sort((a, b) => a.averageSpeed - b.averageSpeed || a.teamName.localeCompare(b.teamName));
+      }));
 
-    return tiedRows;
-  }, [resultsPosted, rows, selectedRow]);
+    if (!isTopPointsTie(normalizedRows, selectedRow.totalPoints)) {
+      return [] as TieBreakRow[];
+    }
+
+    const topPoints = Math.max(...normalizedRows.map((row) => row.points));
+    const tiedTopRows = normalizedRows.filter((row) => row.points === topPoints);
+    const orderedTopRows = buildOrderedWeeklyRows(tiedTopRows, officialWinningAverageSpeed);
+
+    return orderedTopRows.map((row) => ({
+      averageSpeed: row.averageSpeed,
+      teamName: row.teamName,
+      userId: row.userId
+    }));
+  }, [officialWinningAverageSpeed, resultsPosted, rows, selectedRow]);
 
   const selectedTieBreakRank = useMemo(() => {
     if (!selectedRow) {
@@ -530,13 +542,19 @@ export function PicksByRaceTable({ resultsPosted, rows }: Props) {
                 </p>
               ) : tieBreakRows.length <= 1 ? (
                 <p className="mt-2 text-sm text-slate-600">
-                  No tie on total score for this row. Tiebreak not needed.
+                  No first-place tie for this row. Tiebreak not needed.
                 </p>
               ) : (
                 <>
                   <p className="mt-2 text-sm text-slate-700">
-                    Teams tied at <span className="font-semibold">{selectedRow.totalPoints}</span> points
-                    are ordered by lower average-speed prediction.
+                    Teams tied for first at <span className="font-semibold">{selectedRow.totalPoints}</span>{" "}
+                    points are ordered by closest pick to the official race average speed.
+                  </p>
+                  <p className="mt-1 text-xs text-slate-600">
+                    Official race average speed:{" "}
+                    {officialWinningAverageSpeed !== null
+                      ? officialWinningAverageSpeed.toFixed(3)
+                      : "Unavailable (fallback to team name order)."}
                   </p>
                   <p className="mt-1 text-xs text-slate-600">
                     {selectedTieBreakRank
@@ -550,6 +568,7 @@ export function PicksByRaceTable({ resultsPosted, rows }: Props) {
                           <th className="px-3 py-2 font-semibold">Tiebreak Rank</th>
                           <th className="px-3 py-2 font-semibold">Team</th>
                           <th className="px-3 py-2 font-semibold">Average Speed</th>
+                          <th className="px-3 py-2 font-semibold">Delta to Official</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -562,7 +581,14 @@ export function PicksByRaceTable({ resultsPosted, rows }: Props) {
                           >
                             <td className="px-3 py-2">{index + 1}</td>
                             <td className="px-3 py-2">{row.teamName}</td>
-                            <td className="px-3 py-2">{row.averageSpeed.toFixed(3)}</td>
+                            <td className="px-3 py-2">
+                              {row.averageSpeed !== null ? row.averageSpeed.toFixed(3) : "-"}
+                            </td>
+                            <td className="px-3 py-2">
+                              {calculateOfficialSpeedDelta(row.averageSpeed, officialWinningAverageSpeed)?.toFixed(
+                                3
+                              ) ?? "-"}
+                            </td>
                           </tr>
                         ))}
                       </tbody>

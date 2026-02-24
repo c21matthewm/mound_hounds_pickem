@@ -990,12 +990,34 @@ export async function importIndycarResultsAction(formData: FormData) {
     redirectWithTab("error", "No valid rows were mapped to drivers.");
   }
 
+  if (parsed.winningAverageSpeed === null) {
+    redirectWithTab(
+      "error",
+      "Could not determine official race average speed from the pasted results. Include the Average Speed column."
+    );
+  }
+
   const { error: upsertError } = await supabase
     .from("results")
     .upsert(payload, { onConflict: "race_id,driver_id" });
 
   if (upsertError) {
     redirectWithTab("error", upsertError.message);
+  }
+
+  const { error: raceUpdateError } = await supabase
+    .from("races")
+    .update({ official_winning_average_speed: parsed.winningAverageSpeed })
+    .eq("id", raceId);
+
+  if (raceUpdateError) {
+    if (raceUpdateError.message.includes("official_winning_average_speed")) {
+      redirectWithTab(
+        "error",
+        "Database migration missing for official race average speed. Run the latest Supabase migration, then retry import."
+      );
+    }
+    redirectWithTab("error", raceUpdateError.message);
   }
 
   try {

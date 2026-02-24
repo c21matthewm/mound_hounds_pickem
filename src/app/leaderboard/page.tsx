@@ -118,13 +118,13 @@ export default async function LeaderboardPage({ searchParams }: PageProps) {
   }
 
   const picksTableRows: PicksByRaceTableRow[] = picksSnapshot
-    ? picksSnapshot.rows.map((row, index) => ({
+    ? picksSnapshot.rows.map((row) => ({
       averageSpeed: row.averageSpeed,
       drivers: row.driverCells.map((cell) => ({
         driverName: cell.driverName,
         points: cell.points
       })),
-      rank: picksSnapshot.resultsPosted ? index + 1 : null,
+      rank: row.rank,
       teamName: row.teamName,
       totalPoints: row.totalPoints,
       userId: row.userId
@@ -320,7 +320,11 @@ export default async function LeaderboardPage({ searchParams }: PageProps) {
                 </div>
               ) : null}
             </section>
-            <PicksByRaceTable resultsPosted={picksSnapshot.resultsPosted} rows={picksTableRows} />
+            <PicksByRaceTable
+              officialWinningAverageSpeed={picksSnapshot.selectedRace?.officialWinningAverageSpeed ?? null}
+              resultsPosted={picksSnapshot.resultsPosted}
+              rows={picksTableRows}
+            />
           </>
         )
       ) : null}
@@ -489,7 +493,7 @@ export default async function LeaderboardPage({ searchParams }: PageProps) {
                       <th className="px-3 py-2 font-semibold">Cumulative</th>
                       <th className="px-3 py-2 font-semibold">Pick</th>
                       <th className="px-3 py-2 font-semibold">Tiebreak Guess</th>
-                      <th className="px-3 py-2 font-semibold">Winning Guess</th>
+                      <th className="px-3 py-2 font-semibold">Official Race Avg Speed</th>
                       <th className="px-3 py-2 font-semibold">Delta</th>
                     </tr>
                   </thead>
@@ -521,8 +525,8 @@ export default async function LeaderboardPage({ searchParams }: PageProps) {
                           {row.averageSpeedGuess !== null ? row.averageSpeedGuess.toFixed(3) : "-"}
                         </td>
                         <td className="px-3 py-2">
-                          {row.winningAverageSpeedGuess !== null
-                            ? row.winningAverageSpeedGuess.toFixed(3)
+                          {row.officialRaceAverageSpeed !== null
+                            ? row.officialRaceAverageSpeed.toFixed(3)
                             : "-"}
                         </td>
                         <td className="px-3 py-2">

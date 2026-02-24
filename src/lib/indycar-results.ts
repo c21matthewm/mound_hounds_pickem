@@ -1,4 +1,5 @@
 export type ParsedIndycarResultRow = {
+  averageSpeed: number | null;
   carNumber: string | null;
   driverName: string;
   lineNumber: number;
@@ -9,6 +10,7 @@ export type ParsedIndycarResultRow = {
 export type ParsedIndycarResults = {
   ignoredLineCount: number;
   rows: ParsedIndycarResultRow[];
+  winningAverageSpeed: number | null;
 };
 
 const splitColumns = (line: string): string[] => {
@@ -29,6 +31,16 @@ const parseInteger = (value: string): number | null => {
 
   const parsed = Number.parseInt(match[0], 10);
   return Number.isInteger(parsed) ? parsed : null;
+};
+
+const parseDecimal = (value: string): number | null => {
+  const normalized = value.trim().replace(/,/g, "");
+  if (!normalized) {
+    return null;
+  }
+
+  const parsed = Number(normalized);
+  return Number.isFinite(parsed) ? parsed : null;
 };
 
 const isLikelyHeader = (line: string): boolean => {
@@ -96,6 +108,8 @@ export function parseIndycarResultsPaste(rawInput: string): ParsedIndycarResults
     }
 
     const position = parseInteger(columns[0] ?? "");
+    // INDYCAR export format: average speed is column 10 (1-based), which is 3rd from end.
+    const averageSpeed = parseDecimal(columns[columns.length - 3] ?? "");
 
     const driverIndexFromEnd = columns.length - 9;
     const driverIndex = driverIndexFromEnd >= 0 ? driverIndexFromEnd : 2;
@@ -110,6 +124,7 @@ export function parseIndycarResultsPaste(rawInput: string): ParsedIndycarResults
     }
 
     rows.push({
+      averageSpeed,
       carNumber,
       driverName,
       lineNumber: index + 1,
@@ -118,8 +133,12 @@ export function parseIndycarResultsPaste(rawInput: string): ParsedIndycarResults
     });
   });
 
+  const winnerRowByPosition = rows.find((row) => row.position === 1 && row.averageSpeed !== null) ?? null;
+  const winnerRowFallback = rows.find((row) => row.averageSpeed !== null) ?? null;
+
   return {
     ignoredLineCount,
-    rows
+    rows,
+    winningAverageSpeed: winnerRowByPosition?.averageSpeed ?? winnerRowFallback?.averageSpeed ?? null
   };
 }

@@ -47,6 +47,7 @@ create table if not exists public.races (
   qualifying_start_at timestamptz not null,
   race_date timestamptz not null,
   payout numeric(10,2) not null default 0,
+  official_winning_average_speed numeric(8,3) check (official_winning_average_speed >= 0),
   winner_profile_id uuid references public.profiles(id) on delete set null,
   winner_source text not null default 'auto' check (winner_source in ('auto', 'manual')),
   winner_is_manual_override boolean not null default false,
