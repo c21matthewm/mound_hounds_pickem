@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import Link from "next/link";
 import { MobileBottomNav } from "@/components/mobile-bottom-nav";
 import { SignOutButton } from "@/components/sign-out-button";
+import { MOUND_HOUND_IMAGE_PATH } from "@/lib/branding";
 import { isProfileComplete, type ProfileRow } from "@/lib/profile";
 import { queryStringParam } from "@/lib/query";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
@@ -87,8 +88,19 @@ export default async function DashboardPage({ searchParams }: PageProps) {
       </section>
 
       <section className="mt-6 rounded-lg border border-dashed border-slate-300 bg-slate-50 p-5">
-        <h2 className="text-lg font-semibold text-slate-900">Quick Actions</h2>
-        <p className="mt-1 text-sm text-slate-600">Everything you need for race week in one place.</p>
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <h2 className="text-lg font-semibold text-slate-900">Quick Actions</h2>
+            <p className="mt-1 text-sm text-slate-600">Everything you need for race week in one place.</p>
+          </div>
+          <div className="shrink-0 rounded-full border border-slate-300 bg-white p-1">
+            <div
+              aria-hidden
+              className="h-12 w-12 rounded-full border border-slate-200 bg-slate-200 bg-cover bg-center"
+              style={{ backgroundImage: `url('${MOUND_HOUND_IMAGE_PATH}')` }}
+            />
+          </div>
+        </div>
 
         <div className="mt-4 space-y-3">
           <section className="rounded-md border border-slate-200 bg-white p-3">
