@@ -114,6 +114,47 @@ export type PicksByRaceSnapshot = {
   selectedRace: PicksByRaceOption | null;
 };
 
+export type ParticipantAnalyticsRaceRow = {
+  averageSpeedGuess: number | null;
+  cumulativePoints: number;
+  fieldSize: number;
+  pointsVsRaceAverage: number;
+  raceAveragePoints: number;
+  raceDate: string;
+  raceId: number;
+  raceName: string;
+  submittedPick: boolean;
+  tiebreakDelta: number | null;
+  weeklyFinish: number | null;
+  weeklyPoints: number;
+  winningAverageSpeedGuess: number | null;
+};
+
+export type ParticipantAnalyticsSummary = {
+  averageFinish: number | null;
+  averageTiebreakDelta: number | null;
+  averageWeeklyPoints: number;
+  bestWeek: ParticipantAnalyticsRaceRow | null;
+  closestTiebreakDelta: number | null;
+  completedRaces: number;
+  currentStanding: number | null;
+  fieldSize: number;
+  lastThreeRaceAverage: number | null;
+  momentumDelta: number | null;
+  pickSubmissionRate: number;
+  topThreeFinishes: number;
+  totalPoints: number;
+  weeklyWins: number;
+  worstWeek: ParticipantAnalyticsRaceRow | null;
+};
+
+export type ParticipantAnalyticsSnapshot = {
+  raceRows: ParticipantAnalyticsRaceRow[];
+  summary: ParticipantAnalyticsSummary;
+  teamName: string;
+  userId: string;
+};
+
 const asNumber = (value: number | string | null | undefined): number => {
   if (typeof value === "number") {
     return value;
@@ -180,6 +221,38 @@ const assignCompetitionRanks = <T extends { teamName: string; totalPoints: numbe
     previous = {
       racePoints: row.racePoints,
       totalPoints: row.totalPoints
+    };
+    previousRank = rank;
+  });
+
+  return ranked;
+};
+
+const assignWeeklyRaceRanks = <T extends { averageSpeed: number | null; racePoints: number; teamName: string }>(
+  rows: T[]
+): Array<T & { rank: number }> => {
+  const sorted = [...rows].sort((a, b) =>
+    compareRaceScoreboardRows(
+      { averageSpeed: a.averageSpeed, points: a.racePoints, teamName: a.teamName },
+      { averageSpeed: b.averageSpeed, points: b.racePoints, teamName: b.teamName }
+    )
+  );
+  const ranked: Array<T & { rank: number }> = [];
+
+  let previous: { averageSpeed: number | null; racePoints: number } | null = null;
+  let previousRank = 0;
+
+  sorted.forEach((row, index) => {
+    const sameAsPrevious =
+      previous !== null &&
+      previous.racePoints === row.racePoints &&
+      previous.averageSpeed === row.averageSpeed;
+    const rank = sameAsPrevious ? previousRank : index + 1;
+    ranked.push({ ...row, rank });
+
+    previous = {
+      averageSpeed: row.averageSpeed,
+      racePoints: row.racePoints
     };
     previousRank = rank;
   });
@@ -618,5 +691,247 @@ export async function buildPicksByRaceSnapshot(
     resultsPosted,
     rows,
     selectedRace
+  };
+}
+
+const average = (values: number[]): number | null =>
+  values.length === 0 ? null : values.reduce((sum, value) => sum + value, 0) / values.length;
+
+const pickBetterBestWeek = (
+  current: ParticipantAnalyticsRaceRow | null,
+  candidate: ParticipantAnalyticsRaceRow
+): ParticipantAnalyticsRaceRow => {
+  if (!current) {
+    return candidate;
+  }
+  if (candidate.weeklyPoints !== current.weeklyPoints) {
+    return candidate.weeklyPoints > current.weeklyPoints ? candidate : current;
+  }
+  const candidateFinish = candidate.weeklyFinish ?? Number.POSITIVE_INFINITY;
+  const currentFinish = current.weeklyFinish ?? Number.POSITIVE_INFINITY;
+  if (candidateFinish !== currentFinish) {
+    return candidateFinish < currentFinish ? candidate : current;
+  }
+  return candidate.raceDate > current.raceDate ? candidate : current;
+};
+
+const pickWorseWeek = (
+  current: ParticipantAnalyticsRaceRow | null,
+  candidate: ParticipantAnalyticsRaceRow
+): ParticipantAnalyticsRaceRow => {
+  if (!current) {
+    return candidate;
+  }
+  if (candidate.weeklyPoints !== current.weeklyPoints) {
+    return candidate.weeklyPoints < current.weeklyPoints ? candidate : current;
+  }
+  const candidateFinish = candidate.weeklyFinish ?? Number.POSITIVE_INFINITY;
+  const currentFinish = current.weeklyFinish ?? Number.POSITIVE_INFINITY;
+  if (candidateFinish !== currentFinish) {
+    return candidateFinish > currentFinish ? candidate : current;
+  }
+  return candidate.raceDate > current.raceDate ? candidate : current;
+};
+
+export async function buildParticipantAnalyticsSnapshot(
+  userId: string
+): Promise<ParticipantAnalyticsSnapshot> {
+  const supabase = createServiceRoleSupabaseClient();
+
+  const [profilesRes, racesRes, picksRes, resultsRes] = await Promise.all([
+    supabase
+      .from("profiles")
+      .select("id,team_name,role,full_name")
+      .in("role", ["participant", "admin"])
+      .order("team_name", { ascending: true }),
+    supabase
+      .from("races")
+      .select("id,race_name,race_date")
+      .eq("is_archived", false)
+      .order("race_date", { ascending: true }),
+    supabase.from("picks").select(
+      "user_id,race_id,average_speed,driver_group1_id,driver_group2_id,driver_group3_id,driver_group4_id,driver_group5_id,driver_group6_id"
+    ),
+    supabase.from("results").select("race_id,driver_id,points")
+  ]);
+
+  if (profilesRes.error) {
+    throw new Error(`Failed to load profiles: ${profilesRes.error.message}`);
+  }
+  if (racesRes.error) {
+    throw new Error(`Failed to load races: ${racesRes.error.message}`);
+  }
+  if (picksRes.error) {
+    throw new Error(`Failed to load picks: ${picksRes.error.message}`);
+  }
+  if (resultsRes.error) {
+    throw new Error(`Failed to load race results: ${resultsRes.error.message}`);
+  }
+
+  const participants: Participant[] = ((profilesRes.data ?? []) as ProfileRow[])
+    .filter((profile) => typeof profile.team_name === "string" && profile.team_name.trim().length > 0)
+    .map((profile) => ({
+      id: profile.id,
+      teamName: profile.team_name.trim()
+    }));
+  const participant = participants.find((row) => row.id === userId);
+  if (!participant) {
+    throw new Error("Participant profile not found for analytics.");
+  }
+
+  const races = (racesRes.data ?? []) as RaceRow[];
+  const picks = (picksRes.data ?? []) as PickRow[];
+  const results = (resultsRes.data ?? []) as ResultRow[];
+  const fieldSize = participants.length;
+
+  const resultPointsByRaceDriver = new Map<string, number>();
+  const resultsByRace = new Map<number, ResultRow[]>();
+  results.forEach((result) => {
+    resultPointsByRaceDriver.set(keyForRaceDriver(result.race_id, result.driver_id), asNumber(result.points));
+    const arr = resultsByRace.get(result.race_id) ?? [];
+    arr.push(result);
+    resultsByRace.set(result.race_id, arr);
+  });
+
+  const completedRaceIds = new Set<number>(Array.from(resultsByRace.keys()));
+  const completedRaces = races.filter((race) => completedRaceIds.has(race.id));
+
+  if (completedRaces.length === 0) {
+    return {
+      raceRows: [],
+      summary: {
+        averageFinish: null,
+        averageTiebreakDelta: null,
+        averageWeeklyPoints: 0,
+        bestWeek: null,
+        closestTiebreakDelta: null,
+        completedRaces: 0,
+        currentStanding: null,
+        fieldSize,
+        lastThreeRaceAverage: null,
+        momentumDelta: null,
+        pickSubmissionRate: 0,
+        topThreeFinishes: 0,
+        totalPoints: 0,
+        weeklyWins: 0,
+        worstWeek: null
+      },
+      teamName: participant.teamName,
+      userId: participant.id
+    };
+  }
+
+  const pickScoreByRaceUser = new Map<string, { averageSpeed: number; racePoints: number }>();
+  picks.forEach((pick) => {
+    if (!completedRaceIds.has(pick.race_id)) {
+      return;
+    }
+    pickScoreByRaceUser.set(keyForRaceUser(pick.race_id, pick.user_id), scorePick(pick, resultPointsByRaceDriver));
+  });
+
+  const cumulativeByUser = new Map<string, number>();
+  participants.forEach((row) => cumulativeByUser.set(row.id, 0));
+
+  let currentStanding: number | null = null;
+  const raceRows: ParticipantAnalyticsRaceRow[] = [];
+
+  completedRaces.forEach((race) => {
+    const weeklyRows = participants.map((row) => {
+      const weekly = pickScoreByRaceUser.get(keyForRaceUser(race.id, row.id));
+      return {
+        averageSpeed: weekly?.averageSpeed ?? null,
+        racePoints: weekly?.racePoints ?? 0,
+        teamName: row.teamName,
+        userId: row.id
+      };
+    });
+    const weeklyRanks = assignWeeklyRaceRanks(weeklyRows);
+    const weeklyRankByUser = new Map(weeklyRanks.map((row) => [row.userId, row.rank]));
+    const raceAveragePoints =
+      weeklyRows.length === 0
+        ? 0
+        : weeklyRows.reduce((sum, row) => sum + row.racePoints, 0) / weeklyRows.length;
+
+    const cumulativeRankingInput = participants.map((row) => {
+      const weekly = pickScoreByRaceUser.get(keyForRaceUser(race.id, row.id));
+      const weeklyPoints = weekly?.racePoints ?? 0;
+      const nextTotal = (cumulativeByUser.get(row.id) ?? 0) + weeklyPoints;
+      cumulativeByUser.set(row.id, nextTotal);
+      return {
+        racePoints: weeklyPoints,
+        teamName: row.teamName,
+        totalPoints: nextTotal,
+        userId: row.id
+      };
+    });
+    const cumulativeRanks = assignCompetitionRanks(cumulativeRankingInput);
+    currentStanding =
+      cumulativeRanks.find((row) => row.userId === participant.id)?.rank ?? currentStanding;
+
+    const winningAverageSpeedGuess = weeklyRanks[0]?.averageSpeed ?? null;
+    const participantWeekly = weeklyRows.find((row) => row.userId === participant.id);
+    const participantAverageSpeed = participantWeekly?.averageSpeed ?? null;
+
+    raceRows.push({
+      averageSpeedGuess: participantAverageSpeed,
+      cumulativePoints: cumulativeByUser.get(participant.id) ?? 0,
+      fieldSize,
+      pointsVsRaceAverage: (participantWeekly?.racePoints ?? 0) - raceAveragePoints,
+      raceAveragePoints,
+      raceDate: race.race_date,
+      raceId: race.id,
+      raceName: race.race_name,
+      submittedPick: participantAverageSpeed !== null,
+      tiebreakDelta:
+        participantAverageSpeed !== null && winningAverageSpeedGuess !== null
+          ? Math.abs(participantAverageSpeed - winningAverageSpeedGuess)
+          : null,
+      weeklyFinish: weeklyRankByUser.get(participant.id) ?? null,
+      weeklyPoints: participantWeekly?.racePoints ?? 0,
+      winningAverageSpeedGuess
+    });
+  });
+
+  const weeklyPoints = raceRows.map((row) => row.weeklyPoints);
+  const weeklyFinishes = raceRows
+    .map((row) => row.weeklyFinish)
+    .filter((value): value is number => value !== null);
+  const tiebreakDeltas = raceRows
+    .map((row) => row.tiebreakDelta)
+    .filter((value): value is number => value !== null);
+  const submittedCount = raceRows.filter((row) => row.submittedPick).length;
+  const bestWeek = raceRows.reduce<ParticipantAnalyticsRaceRow | null>(
+    (best, row) => pickBetterBestWeek(best, row),
+    null
+  );
+  const worstWeek = raceRows.reduce<ParticipantAnalyticsRaceRow | null>(
+    (worst, row) => pickWorseWeek(worst, row),
+    null
+  );
+  const averageWeeklyPoints = average(weeklyPoints) ?? 0;
+  const lastThreeRaceRows = raceRows.slice(-3);
+  const lastThreeRaceAverage = average(lastThreeRaceRows.map((row) => row.weeklyPoints));
+
+  return {
+    raceRows,
+    summary: {
+      averageFinish: average(weeklyFinishes),
+      averageTiebreakDelta: average(tiebreakDeltas),
+      averageWeeklyPoints,
+      bestWeek,
+      closestTiebreakDelta: tiebreakDeltas.length === 0 ? null : Math.min(...tiebreakDeltas),
+      completedRaces: raceRows.length,
+      currentStanding,
+      fieldSize,
+      lastThreeRaceAverage,
+      momentumDelta: lastThreeRaceAverage === null ? null : lastThreeRaceAverage - averageWeeklyPoints,
+      pickSubmissionRate: raceRows.length === 0 ? 0 : submittedCount / raceRows.length,
+      topThreeFinishes: weeklyFinishes.filter((finish) => finish <= 3).length,
+      totalPoints: raceRows[raceRows.length - 1]?.cumulativePoints ?? 0,
+      weeklyWins: weeklyFinishes.filter((finish) => finish === 1).length,
+      worstWeek
+    },
+    teamName: participant.teamName,
+    userId: participant.id
   };
 }
