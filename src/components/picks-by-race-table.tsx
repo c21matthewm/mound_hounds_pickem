@@ -473,7 +473,7 @@ export function PicksByRaceTable({ officialWinningAverageSpeed, resultsPosted, r
                     const groupCell = row.drivers[groupNumber - 1];
                     return (
                       <td key={`${row.userId}-score-${groupNumber}`} className="px-3 py-2">
-                        {resultsPosted && groupCell?.driverName ? (groupCell.points ?? 0) : "-"}
+                        {resultsPosted ? (groupCell?.points ?? "-") : "-"}
                       </td>
                     );
                   })}
@@ -615,7 +615,7 @@ export function PicksByRaceTable({ officialWinningAverageSpeed, resultsPosted, r
                         <td className="px-3 py-2">Group {index + 1}</td>
                         <td className="px-3 py-2">{driver.driverName ?? "No pick submitted"}</td>
                         <td className="px-3 py-2">
-                          {resultsPosted && driver.driverName ? (driver.points ?? 0) : "-"}
+                          {resultsPosted ? (driver.points ?? "-") : "-"}
                         </td>
                       </tr>
                     ))}
