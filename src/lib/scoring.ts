@@ -15,6 +15,7 @@ type DriverRow = {
 
 type DriverNameRow = {
   driver_name: string;
+  group_number: number;
   id: number;
 };
 
@@ -330,6 +331,17 @@ const computeRaceExtremes = (
   return { highest, lowest };
 };
 
+const computeLowestFallbackByRace = (
+  resultsByRace: Map<number, ResultRow[]>,
+  driverGroupById: Map<number, number>
+): Map<number, number> => {
+  const byRace = new Map<number, number>();
+  resultsByRace.forEach((raceResults, raceId) => {
+    byRace.set(raceId, computeRaceExtremes(raceId, raceResults, driverGroupById).lowest);
+  });
+  return byRace;
+};
+
 const pickDriverIds = (pick: PickRow | null): Array<number | null> => [
   pick?.driver_group1_id ?? null,
   pick?.driver_group2_id ?? null,
@@ -426,14 +438,16 @@ export async function buildLeagueScoringSnapshot(): Promise<LeagueScoringSnapsho
   drivers.forEach((driver) => {
     driverGroupById.set(driver.id, driver.group_number);
   });
+  const lowestFallbackByRaceId = computeLowestFallbackByRace(resultsByRace, driverGroupById);
 
   const latestRace = completedRaces[completedRaces.length - 1];
+  const latestRaceMissingPickFallback = lowestFallbackByRaceId.get(latestRace.id) ?? 0;
   const latestRaceRows: RaceScoreboardRow[] = buildOrderedWeeklyRows(
     participants.map((participant) => {
       const weekly = pickScoreByRaceUser.get(keyForRaceUser(latestRace.id, participant.id));
       return {
         averageSpeed: weekly?.averageSpeed ?? null,
-        points: weekly?.racePoints ?? 0,
+        points: weekly?.racePoints ?? latestRaceMissingPickFallback,
         rowType: "participant" as const,
         teamName: participant.teamName
       };
@@ -480,9 +494,10 @@ export async function buildLeagueScoringSnapshot(): Promise<LeagueScoringSnapsho
   });
 
   completedRaces.forEach((race) => {
+    const missingPickRacePoints = lowestFallbackByRaceId.get(race.id) ?? 0;
     const rankingInput = participants.map((participant) => {
       const weekly = pickScoreByRaceUser.get(keyForRaceUser(race.id, participant.id));
-      const weeklyPoints = weekly?.racePoints ?? 0;
+      const weeklyPoints = weekly?.racePoints ?? missingPickRacePoints;
       const nextTotal = (cumulativeByUser.get(participant.id) ?? 0) + weeklyPoints;
 
       cumulativeByUser.set(participant.id, nextTotal);
@@ -566,7 +581,7 @@ export async function buildPicksByRaceSnapshot(
       .lt("race_date", seasonRange.seasonEndExclusiveIso)
       .lte("qualifying_start_at", nowIso)
       .order("qualifying_start_at", { ascending: false }),
-    supabase.from("drivers").select("id,driver_name")
+    supabase.from("drivers").select("id,driver_name,group_number")
   ]);
 
   if (profilesRes.error) {
@@ -647,14 +662,26 @@ export async function buildPicksByRaceSnapshot(
   });
 
   const driverNameById = new Map<number, string>();
+  const driverGroupById = new Map<number, number>();
   ((driversRes.data ?? []) as DriverNameRow[]).forEach((driver) => {
     driverNameById.set(driver.id, driver.driver_name);
+    driverGroupById.set(driver.id, driver.group_number);
   });
 
   const resultPointsByDriverId = new Map<number, number>();
+  const minimumPointsByGroup = new Map<number, number>();
   const resultRows = (resultsRes.data ?? []) as ResultRow[];
   resultRows.forEach((result) => {
-    resultPointsByDriverId.set(result.driver_id, asNumber(result.points));
+    const points = asNumber(result.points);
+    resultPointsByDriverId.set(result.driver_id, points);
+    const group = driverGroupById.get(result.driver_id);
+    if (!group || group < 1 || group > 6) {
+      return;
+    }
+    const currentMin = minimumPointsByGroup.get(group);
+    if (currentMin === undefined || points < currentMin) {
+      minimumPointsByGroup.set(group, points);
+    }
   });
   const resultsPosted = resultRows.length > 0;
 
@@ -664,7 +691,13 @@ export async function buildPicksByRaceSnapshot(
     const driverCells: PicksByRaceDriverCell[] = pickDriverIds(pick).map((driverId, index) => ({
       driverName: driverId === null ? null : (driverNameById.get(driverId) ?? `Unknown #${driverId}`),
       groupNumber: index + 1,
-      points: resultsPosted && driverId !== null ? (resultPointsByDriverId.get(driverId) ?? 0) : null
+      points: resultsPosted
+        ? driverId !== null
+          ? (resultPointsByDriverId.get(driverId) ?? 0)
+          : pick
+            ? null
+            : (minimumPointsByGroup.get(index + 1) ?? null)
+        : null
     }));
 
     const totalPoints = resultsPosted
@@ -755,7 +788,7 @@ export async function buildParticipantAnalyticsSnapshot(
 ): Promise<ParticipantAnalyticsSnapshot> {
   const supabase = createServiceRoleSupabaseClient();
 
-  const [profilesRes, racesRes, picksRes, resultsRes] = await Promise.all([
+  const [profilesRes, racesRes, picksRes, resultsRes, driversRes] = await Promise.all([
     supabase
       .from("profiles")
       .select("id,team_name,role,full_name")
@@ -769,7 +802,8 @@ export async function buildParticipantAnalyticsSnapshot(
     supabase.from("picks").select(
       "user_id,race_id,average_speed,driver_group1_id,driver_group2_id,driver_group3_id,driver_group4_id,driver_group5_id,driver_group6_id"
     ),
-    supabase.from("results").select("race_id,driver_id,points")
+    supabase.from("results").select("race_id,driver_id,points"),
+    supabase.from("drivers").select("id,group_number")
   ]);
 
   if (profilesRes.error) {
@@ -783,6 +817,9 @@ export async function buildParticipantAnalyticsSnapshot(
   }
   if (resultsRes.error) {
     throw new Error(`Failed to load race results: ${resultsRes.error.message}`);
+  }
+  if (driversRes.error) {
+    throw new Error(`Failed to load drivers: ${driversRes.error.message}`);
   }
 
   const participants: Participant[] = ((profilesRes.data ?? []) as ProfileRow[])
@@ -799,6 +836,7 @@ export async function buildParticipantAnalyticsSnapshot(
   const races = (racesRes.data ?? []) as RaceRow[];
   const picks = (picksRes.data ?? []) as PickRow[];
   const results = (resultsRes.data ?? []) as ResultRow[];
+  const drivers = (driversRes.data ?? []) as DriverRow[];
   const fieldSize = participants.length;
 
   const resultPointsByRaceDriver = new Map<string, number>();
@@ -812,6 +850,11 @@ export async function buildParticipantAnalyticsSnapshot(
 
   const completedRaceIds = new Set<number>(Array.from(resultsByRace.keys()));
   const completedRaces = races.filter((race) => completedRaceIds.has(race.id));
+  const driverGroupById = new Map<number, number>();
+  drivers.forEach((driver) => {
+    driverGroupById.set(driver.id, driver.group_number);
+  });
+  const lowestFallbackByRaceId = computeLowestFallbackByRace(resultsByRace, driverGroupById);
 
   if (completedRaces.length === 0) {
     return {
@@ -857,12 +900,13 @@ export async function buildParticipantAnalyticsSnapshot(
       race.official_winning_average_speed === null
         ? null
         : asNumber(race.official_winning_average_speed);
+    const missingPickRacePoints = lowestFallbackByRaceId.get(race.id) ?? 0;
 
     const weeklyRows = participants.map((row) => {
       const weekly = pickScoreByRaceUser.get(keyForRaceUser(race.id, row.id));
       return {
         averageSpeed: weekly?.averageSpeed ?? null,
-        racePoints: weekly?.racePoints ?? 0,
+        racePoints: weekly?.racePoints ?? missingPickRacePoints,
         teamName: row.teamName,
         userId: row.id
       };
@@ -876,7 +920,7 @@ export async function buildParticipantAnalyticsSnapshot(
 
     const cumulativeRankingInput = participants.map((row) => {
       const weekly = pickScoreByRaceUser.get(keyForRaceUser(race.id, row.id));
-      const weeklyPoints = weekly?.racePoints ?? 0;
+      const weeklyPoints = weekly?.racePoints ?? missingPickRacePoints;
       const nextTotal = (cumulativeByUser.get(row.id) ?? 0) + weeklyPoints;
       cumulativeByUser.set(row.id, nextTotal);
       return {
