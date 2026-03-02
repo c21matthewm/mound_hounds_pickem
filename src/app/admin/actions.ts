@@ -194,6 +194,51 @@ async function ensureRaceIsActive(supabase: SupabaseClient, raceId: number) {
   }
 }
 
+async function ensureRaceDriverGroupSnapshot(supabase: SupabaseClient, raceId: number) {
+  const { data: existingRows, error: existingRowsError } = await supabase
+    .from("race_driver_groups")
+    .select("race_id")
+    .eq("race_id", raceId)
+    .limit(1);
+
+  if (existingRowsError) {
+    throw new Error(existingRowsError.message);
+  }
+
+  if ((existingRows ?? []).length > 0) {
+    return;
+  }
+
+  const { data: activeDrivers, error: activeDriversError } = await supabase
+    .from("drivers")
+    .select("id,group_number")
+    .eq("is_active", true);
+
+  if (activeDriversError) {
+    throw new Error(activeDriversError.message);
+  }
+
+  const rowsToInsert = (activeDrivers ?? [])
+    .filter((driver) => driver.group_number >= 1 && driver.group_number <= 6)
+    .map((driver) => ({
+      driver_id: driver.id,
+      group_number: driver.group_number,
+      race_id: raceId
+    }));
+
+  if (rowsToInsert.length === 0) {
+    throw new Error("Unable to snapshot race groups because no active grouped drivers were found.");
+  }
+
+  const { error: upsertError } = await supabase
+    .from("race_driver_groups")
+    .upsert(rowsToInsert, { ignoreDuplicates: true, onConflict: "race_id,driver_id" });
+
+  if (upsertError) {
+    throw new Error(upsertError.message);
+  }
+}
+
 export async function createDriverAction(formData: FormData) {
   const { supabase } = await requireAdmin();
   const tab = parseAdminTab(asText(formData.get("tab"))) ?? "drivers";
@@ -837,6 +882,16 @@ export async function upsertResultAction(formData: FormData) {
     redirectWithTab("error", message);
   }
 
+  try {
+    await ensureRaceDriverGroupSnapshot(supabase, selectedRaceId);
+  } catch (snapshotError) {
+    const message =
+      snapshotError instanceof Error
+        ? snapshotError.message
+        : "Failed to snapshot race driver groups before saving results.";
+    redirectWithTab("error", message);
+  }
+
   const { error } = await supabase.from("results").upsert(
     {
       driver_id: selectedDriverId,
@@ -921,6 +976,16 @@ export async function importIndycarResultsAction(formData: FormData) {
   } catch (ensureError) {
     const message =
       ensureError instanceof Error ? ensureError.message : "Selected race is not editable.";
+    redirectWithTab("error", message);
+  }
+
+  try {
+    await ensureRaceDriverGroupSnapshot(supabase, raceId);
+  } catch (snapshotError) {
+    const message =
+      snapshotError instanceof Error
+        ? snapshotError.message
+        : "Failed to snapshot race driver groups before importing results.";
     redirectWithTab("error", message);
   }
 
