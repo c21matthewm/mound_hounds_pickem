@@ -282,6 +282,7 @@ const resolveRaceDriverGroup = (
   raceId: number,
   driverId: number,
   raceDriverGroupByRaceDriver: Map<string, number>,
+  pickedDriverGroupByRaceDriver: Map<string, number>,
   currentDriverGroupById: Map<number, number>
 ): number | undefined => {
   const raceSpecific = raceDriverGroupByRaceDriver.get(keyForRaceDriver(raceId, driverId));
@@ -289,7 +290,36 @@ const resolveRaceDriverGroup = (
     return raceSpecific;
   }
 
+  const pickedGroup = pickedDriverGroupByRaceDriver.get(keyForRaceDriver(raceId, driverId));
+  if (pickedGroup !== undefined) {
+    return pickedGroup;
+  }
+
   return currentDriverGroupById.get(driverId);
+};
+
+const buildPickedDriverGroupByRaceDriver = (picks: PickRow[]): Map<string, number> => {
+  const pickedDriverGroupByRaceDriver = new Map<string, number>();
+
+  picks.forEach((pick) => {
+    const groupedDriverIds: Array<[number, number]> = [
+      [pick.driver_group1_id, 1],
+      [pick.driver_group2_id, 2],
+      [pick.driver_group3_id, 3],
+      [pick.driver_group4_id, 4],
+      [pick.driver_group5_id, 5],
+      [pick.driver_group6_id, 6]
+    ];
+
+    groupedDriverIds.forEach(([driverId, groupNumber]) => {
+      const key = keyForRaceDriver(pick.race_id, driverId);
+      if (!pickedDriverGroupByRaceDriver.has(key)) {
+        pickedDriverGroupByRaceDriver.set(key, groupNumber);
+      }
+    });
+  });
+
+  return pickedDriverGroupByRaceDriver;
 };
 
 const scorePick = (
@@ -319,6 +349,7 @@ const computeRaceExtremes = (
   raceId: number,
   results: ResultRow[],
   raceDriverGroupByRaceDriver: Map<string, number>,
+  pickedDriverGroupByRaceDriver: Map<string, number>,
   currentDriverGroupById: Map<number, number>
 ): { highest: number; lowest: number } => {
   const pointsByGroup = new Map<number, number[]>();
@@ -331,6 +362,7 @@ const computeRaceExtremes = (
       raceId,
       result.driver_id,
       raceDriverGroupByRaceDriver,
+      pickedDriverGroupByRaceDriver,
       currentDriverGroupById
     );
     if (!group || group < 1 || group > 6) {
@@ -360,6 +392,7 @@ const computeRaceExtremes = (
 const computeLowestFallbackByRace = (
   resultsByRace: Map<number, ResultRow[]>,
   raceDriverGroupByRaceDriver: Map<string, number>,
+  pickedDriverGroupByRaceDriver: Map<string, number>,
   currentDriverGroupById: Map<number, number>
 ): Map<number, number> => {
   const byRace = new Map<number, number>();
@@ -370,6 +403,7 @@ const computeLowestFallbackByRace = (
         raceId,
         raceResults,
         raceDriverGroupByRaceDriver,
+        pickedDriverGroupByRaceDriver,
         currentDriverGroupById
       ).lowest
     );
@@ -474,6 +508,7 @@ export async function buildLeagueScoringSnapshot(): Promise<LeagueScoringSnapsho
 
     pickScoreByRaceUser.set(keyForRaceUser(pick.race_id, pick.user_id), scorePick(pick, resultPointsByRaceDriver));
   });
+  const pickedDriverGroupByRaceDriver = buildPickedDriverGroupByRaceDriver(picks);
 
   const currentDriverGroupById = new Map<number, number>();
   drivers.forEach((driver) => {
@@ -487,6 +522,7 @@ export async function buildLeagueScoringSnapshot(): Promise<LeagueScoringSnapsho
   const lowestFallbackByRaceId = computeLowestFallbackByRace(
     resultsByRace,
     raceDriverGroupByRaceDriver,
+    pickedDriverGroupByRaceDriver,
     currentDriverGroupById
   );
 
@@ -511,6 +547,7 @@ export async function buildLeagueScoringSnapshot(): Promise<LeagueScoringSnapsho
     latestRace.id,
     resultsByRace.get(latestRace.id) ?? [],
     raceDriverGroupByRaceDriver,
+    pickedDriverGroupByRaceDriver,
     currentDriverGroupById
   );
 
@@ -714,10 +751,12 @@ export async function buildPicksByRaceSnapshot(
     throw new Error(`Failed to load race driver groups: ${raceDriverGroupsRes.error.message}`);
   }
 
+  const selectedRacePicks = (picksRes.data ?? []) as PickRow[];
   const picksByUser = new Map<string, PickRow>();
-  ((picksRes.data ?? []) as PickRow[]).forEach((pick) => {
+  selectedRacePicks.forEach((pick) => {
     picksByUser.set(pick.user_id, pick);
   });
+  const pickedDriverGroupByRaceDriver = buildPickedDriverGroupByRaceDriver(selectedRacePicks);
 
   const driverNameById = new Map<number, string>();
   const currentDriverGroupById = new Map<number, number>();
@@ -740,6 +779,7 @@ export async function buildPicksByRaceSnapshot(
       selectedRace.raceId,
       result.driver_id,
       raceDriverGroupByRaceDriver,
+      pickedDriverGroupByRaceDriver,
       currentDriverGroupById
     );
     if (!group || group < 1 || group > 6) {
@@ -935,6 +975,7 @@ export async function buildParticipantAnalyticsSnapshot(
   const lowestFallbackByRaceId = computeLowestFallbackByRace(
     resultsByRace,
     raceDriverGroupByRaceDriver,
+    buildPickedDriverGroupByRaceDriver(picks),
     currentDriverGroupById
   );
 
