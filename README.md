@@ -1,106 +1,176 @@
 # Mound Hounds Pick'em
 
-Custom INDYCAR fantasy league app built with:
+A custom INDYCAR fantasy league app for managing race picks, driver groups, race results,
+season standings, league rules, feedback, and admin operations.
 
-- Next.js (App Router)
+## Stack
+
+- Next.js App Router
 - React
 - Tailwind CSS
-- Supabase (PostgreSQL + Auth + RLS)
+- Supabase Auth, PostgreSQL, Storage, RLS, and `pg_cron`/`pg_net`
+- Vercel for production hosting
+- Playwright for end-to-end testing
 
-## Step 1 status
+## Core Concepts
 
-Step 1 local setup is complete in this repo.
+- Participants submit one driver from each of six groups before qualifying starts.
+- Driver groups are based on active driver championship standings.
+- Race results update driver championship points and regenerate groups for the next race.
+- Race scoring uses the group mapping that was active for that race, not whatever the current
+  groups become after results are saved.
+- Participants who do not submit picks receive the lowest possible score for that race: the
+  lowest scoring driver from each race-specific group.
+- Highest and lowest benchmark scores are calculated from the best/worst driver in each
+  race-specific group.
+- Average speed tiebreaks apply only to first-place ties for a race.
 
-Recommended Node version:
+## Local Setup
+
+Use Node from `.nvmrc`:
 
 ```bash
-nvm use 22
-```
-
-To finish local dependency install, run:
-
-```bash
+nvm use
 npm install
-```
-
-Copy environment template:
-
-```bash
 cp .env.local.example .env.local
 ```
 
-Then run:
+Fill `.env.local` with values from Supabase and your local/dev settings:
 
 ```bash
-npm run lint
-npm run build
+NEXT_PUBLIC_SUPABASE_URL=...
+NEXT_PUBLIC_SUPABASE_ANON_KEY=...
+SUPABASE_SERVICE_ROLE_KEY=...
+NEXT_PUBLIC_SITE_URL=http://localhost:3000
+CRON_SECRET=...
+```
+
+Email reminder values are optional while reminders are on hold:
+
+```bash
+RESEND_API_KEY=
+RESEND_FROM_EMAIL=
+RESEND_REPLY_TO=
+```
+
+Run the app:
+
+```bash
 npm run dev
 ```
 
-Supabase schema SQL:
+Open `http://localhost:3000`.
 
-`supabase/schema.sql`
+## Verification
 
-Remaining Step 1 actions in Supabase web dashboard are in `STEP1_SETUP.md`.
+Run the full local verification set:
 
-## Deploying to Vercel
+```bash
+npm run verify
+```
 
-Use the first-time deployment guide:
+That runs:
 
-`DEPLOY_VERCEL.md`
+- `npm run lint`
+- `npm run typecheck`
+- `npm run build`
 
-## Production smoke CI
+Run Playwright smoke tests:
 
-GitHub workflow: `.github/workflows/production-smoke-e2e.yml`
+```bash
+npm run e2e:smoke
+```
 
-- Triggers on successful deployment status events and manual dispatch.
-- Runs Playwright smoke tests against the deployed URL.
-- Uses a cross-browser matrix (Chromium desktop, mobile Chromium, Firefox in CI).
+Run the full Playwright suite:
 
-Set these GitHub repository secrets for the workflow:
+```bash
+npm run e2e
+```
 
-- `NEXT_PUBLIC_SUPABASE_URL`
-- `SUPABASE_SERVICE_ROLE_KEY`
+If you already have a local dev server running on `localhost:3000`, point Playwright at it:
 
-Optional repository variable:
+```bash
+PW_USE_EXISTING_SERVER=1 PW_BASE_URL=http://127.0.0.1:3000 npm run e2e
+```
 
-- `PRODUCTION_BASE_URL` (fallback URL if deployment event URL is unavailable)
+The full e2e flow creates temporary Supabase data and cleans it up after the run. It also restores
+driver standings/points that it changes during the test.
 
-## Fantasy winner automation
+## Supabase Setup
 
-Race winners are fantasy league winners (team/profile), not INDYCAR race-winning drivers.
+For a fresh Supabase project, run the consolidated schema:
 
-- Results updates schedule auto winner finalization for about 15 minutes later.
-- Weekly tiebreak applies only to first-place ties and uses the closest average-speed pick to the
-  official race-winning average speed.
-- Cron endpoint: `/api/cron/fantasy-winner`
-- Recommended scheduler: Supabase Cron (`pg_cron` + `pg_net`) every 5 minutes
+```text
+supabase/schema.sql
+```
 
-Set `CRON_SECRET` in Vercel and locally to protect cron route calls.
+For an existing project, apply any migration files in `supabase/migrations/` that have not been
+run yet. The newest migration protects race scoring by automatically snapshotting driver groups
+whenever results are inserted:
 
-## Pick reminder automation
+```text
+supabase/migrations/20260310_auto_snapshot_race_groups_on_results_insert.sql
+```
 
-Cron endpoint: `/api/cron/pick-reminders`
+After creating your first user account, promote it to admin in Supabase SQL Editor:
 
-Behavior:
+```sql
+update public.profiles p
+set role = 'admin'
+from auth.users u
+where p.id = u.id
+  and lower(u.email) = lower('your-admin-email@example.com');
+```
 
-- Targets the next unarchived race where qualifying has not started.
-- Sends reminders only to participants who have not submitted picks for that race.
-- Reminder windows:
-  - 4 days before qualifying deadline
-  - 2 days before qualifying deadline
-  - 2 hours before qualifying deadline
-- Sends email reminders to participant account emails.
-- Sends SMS reminders through carrier email gateways when `phone_number` and a supported
-  `phone_carrier` are present.
-- Uses `public.pick_reminders` to dedupe sends (no duplicate sends per user/race/window/channel).
+## Admin Workflow
 
-Required env vars:
+1. Import preseason championship standings or manage drivers manually.
+2. Add races with race start, qualifying start, payout, and optional title image.
+3. Participants submit picks before qualifying.
+4. After a race, import INDYCAR results or enter driver points manually.
+5. Results save official points, snapshot race groups if needed, refresh driver championship
+   standings, refresh driver groups for the next race, and schedule fantasy winner calculation.
+6. Use the leaderboard tabs to review standings, locked picks by race, and participant analytics.
 
-- `RESEND_API_KEY`
-- `RESEND_FROM_EMAIL`
-- `CRON_SECRET`
+Example paste formats live in:
 
-Optional:
+- `docs/examples/indycar-race-results-sample.txt`
+- `docs/examples/championship-standings-sample.txt`
 
-- `RESEND_REPLY_TO`
+## Production Deployment
+
+Use `DEPLOY_VERCEL.md` for first-time deployment, Vercel environment variables, Supabase Auth
+redirect URLs, cron setup, and production smoke testing.
+
+Normal branch workflow:
+
+```bash
+git checkout dev
+# make and test changes
+git push origin dev
+git checkout main
+git merge dev
+git push origin main
+git checkout dev
+```
+
+Vercel production deploys from `main`.
+
+## Important Routes
+
+- `/login` and `/signup`: public auth pages
+- `/dashboard`: participant home, rules/support links, profile snapshot
+- `/picks`: active race pick form
+- `/leaderboard`: standings, picks by race, analytics
+- `/feedback`: participant bug/improvement submissions
+- `/rules`: in-app rules PDF viewer
+- `/admin`: admin-only drivers, races, results, and feedback management
+- `/api/cron/fantasy-winner`: protected fantasy winner finalization cron
+- `/api/cron/pick-reminders`: protected pick reminder cron
+
+## Notes
+
+- `.venv` is not required; this is a Node/Next.js app.
+- `node_modules`, `.next`, Playwright artifacts, and local env files are intentionally ignored.
+- Reminder emails/SMS require a configured email provider. Without a custom sending domain, leave
+  Resend values unset and keep reminder delivery on hold.

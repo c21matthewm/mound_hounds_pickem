@@ -38,15 +38,17 @@ export function MobileBottomNav() {
   }
 
   return (
-    <nav className="fixed inset-x-0 bottom-0 z-40 border-t border-slate-200 bg-white/95 backdrop-blur md:hidden">
-      <ul className="mx-auto grid max-w-3xl grid-cols-3">
+    <nav className="fixed inset-x-0 bottom-3 z-40 px-3 md:hidden">
+      <ul className="mx-auto grid max-w-sm grid-cols-3 rounded-full border border-slate-200 bg-white/90 p-1 shadow-[0_18px_50px_-28px_rgba(15,23,42,0.85)] backdrop-blur">
         {NAV_ITEMS.map((item) => {
           const active = isActiveRoute(pathname, item.href);
           return (
             <li key={item.href}>
               <Link
-                className={`flex h-14 items-center justify-center text-xs font-semibold ${
-                  active ? "text-slate-900" : "text-slate-500"
+                className={`flex h-11 items-center justify-center rounded-full text-xs font-semibold ${
+                  active
+                    ? "bg-slate-900 text-white shadow-sm"
+                    : "text-slate-500 hover:bg-slate-100 hover:text-slate-900"
                 }`}
                 href={item.href}
               >

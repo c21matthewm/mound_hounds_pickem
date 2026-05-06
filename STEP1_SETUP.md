@@ -1,47 +1,21 @@
 # Step 1 Setup
 
-Step 1 is already implemented in this repository.
+Step 1 is complete in this repository. This file is intentionally short so the setup
+instructions do not drift from the main documentation.
 
-- Next.js app scaffold exists in `src/`
-- Supabase packages are installed
-- Supabase schema exists in `supabase/schema.sql`
-- Environment template exists in `.env.local.example`
+Use:
 
-## Environment variables
+- `README.md` for local setup, Supabase setup, daily development, and app usage.
+- `DEPLOY_VERCEL.md` for Vercel, Supabase Auth URLs, production env vars, cron, and deployment.
 
-```bash
-cp .env.local.example .env.local
-```
-
-Set values from Supabase `Project Settings -> API`.
-
-## Local verification
+Quick local check:
 
 ```bash
+nvm use
 npm install
-npm run lint
-npm run build
+cp .env.local.example .env.local
+npm run verify
 npm run dev
 ```
 
-`npm run dev` should start at `http://localhost:3000`.
-
-## Supabase schema
-
-Open Supabase SQL Editor (web dashboard) and run:
-
-`supabase/schema.sql`
-
-## Make first admin user
-
-After your account signs up:
-
-```sql
-update public.profiles
-set role = 'admin'
-where id = (select id from auth.users where email = 'YOUR_EMAIL_HERE');
-```
-
-## Note on `.venv`
-
-This is a Node/Next.js app, so `.venv` is not required for runtime. It can exist in the repo without affecting the app.
+Then open `http://localhost:3000`.

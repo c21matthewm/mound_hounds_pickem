@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { MobileBottomNav } from "@/components/mobile-bottom-nav";
+import { PicksRaceSelect } from "@/components/picks-race-select";
 import { SignOutButton } from "@/components/sign-out-button";
 import {
   PicksByRaceTable,
@@ -38,8 +39,6 @@ const parseLeaderboardTab = (value: string | undefined): LeaderboardTab =>
 const formatSignedValue = (value: number, digits = 1): string =>
   `${value >= 0 ? "+" : ""}${value.toFixed(digits)}`;
 
-const formatPercent = (value: number): string => `${(value * 100).toFixed(0)}%`;
-
 const parseRaceId = (value: string | undefined): number | undefined => {
   if (!value) {
     return undefined;
@@ -62,6 +61,12 @@ const tabHref = (tab: LeaderboardTab, raceId?: number): string => {
 
   return `/leaderboard?${params.toString()}`;
 };
+
+const formatOptionalNumber = (value: number | null, digits = 1): string =>
+  value !== null ? value.toFixed(digits) : "-";
+
+const formatFinish = (finish: number | null, fieldSize: number): string =>
+  finish !== null ? `${finish}/${fieldSize}` : "-";
 
 export default async function LeaderboardPage({ searchParams }: PageProps) {
   const params = await searchParams;
@@ -142,7 +147,6 @@ export default async function LeaderboardPage({ searchParams }: PageProps) {
     ? standingsSnapshot.leaderboardRows.map((row) => ({
       change: row.change,
       currentStanding: row.currentStanding,
-      previousStanding: row.previousStanding,
       racePointsByRaceId: standingsSnapshot.raceColumns.reduce<Record<number, number>>(
         (accumulator, column) => {
           accumulator[column.raceId] = row.raceBreakdown.get(column.raceId) ?? 0;
@@ -152,10 +156,45 @@ export default async function LeaderboardPage({ searchParams }: PageProps) {
       ),
       teamName: row.teamName,
       totalPoints: row.totalPoints,
-      trend: row.trend,
       userId: row.userId
     }))
     : [];
+
+  const analyticsRaceRows = analyticsSnapshot?.raceRows ?? [];
+  const totalVsLeagueAverage = analyticsRaceRows.reduce(
+    (sum, row) => sum + row.pointsVsRaceAverage,
+    0
+  );
+  const aboveAverageWeekCount = analyticsRaceRows.filter(
+    (row) => row.pointsVsRaceAverage > 0
+  ).length;
+  const bestFinish = analyticsRaceRows.reduce<number | null>((best, row) => {
+    if (row.weeklyFinish === null) {
+      return best;
+    }
+
+    return best === null ? row.weeklyFinish : Math.min(best, row.weeklyFinish);
+  }, null);
+  const recentRaceRows = analyticsRaceRows.slice(-3);
+  const maxWeeklyPoints = Math.max(1, ...analyticsRaceRows.map((row) => row.weeklyPoints));
+  const strongestVsFieldRace = analyticsRaceRows.reduce<
+    (typeof analyticsRaceRows)[number] | null
+  >((best, row) => {
+    if (!best || row.pointsVsRaceAverage > best.pointsVsRaceAverage) {
+      return row;
+    }
+
+    return best;
+  }, null);
+  const toughestVsFieldRace = analyticsRaceRows.reduce<
+    (typeof analyticsRaceRows)[number] | null
+  >((worst, row) => {
+    if (!worst || row.pointsVsRaceAverage < worst.pointsVsRaceAverage) {
+      return row;
+    }
+
+    return worst;
+  }, null);
 
   return (
     <main className="mx-auto flex min-h-screen max-w-[1200px] flex-col px-6 py-10 pb-24 md:pb-10">
@@ -166,7 +205,7 @@ export default async function LeaderboardPage({ searchParams }: PageProps) {
           </p>
           <h1 className="mt-3 text-3xl font-semibold tracking-tight">Season Leaderboard</h1>
           <p className="mt-2 text-sm text-slate-600">
-            Standings, movement, and locked picks by race.
+            Standings, locked picks by race, and season-long performance trends.
           </p>
         </div>
 
@@ -280,43 +319,60 @@ export default async function LeaderboardPage({ searchParams }: PageProps) {
           </section>
         ) : (
           <>
-            <section className="mt-6 rounded-lg border border-slate-200 bg-white p-6">
-              <div className="flex flex-wrap items-end gap-3">
+            <section className="mt-6 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+              <div className="flex flex-wrap items-end justify-between gap-4">
                 <div className="min-w-[280px] flex-1">
                   <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-600">
                     Select race
                   </label>
-                  <form action="/leaderboard" className="flex flex-wrap items-center gap-2" method="get">
-                    <input name="tab" type="hidden" value="picks" />
-                    <select
-                      className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900"
-                      defaultValue={String(picksSnapshot.selectedRace?.raceId ?? "")}
-                      name="race_id"
-                    >
-                      {picksSnapshot.availableRaces.map((race) => (
-                        <option key={race.raceId} value={race.raceId}>
-                          {race.raceName} (Lock: {formatRaceDate(race.qualifyingStartAt)})
-                        </option>
-                      ))}
-                    </select>
-                    <button
-                      className="rounded-md border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100"
-                      type="submit"
-                    >
-                      Load race
-                    </button>
-                  </form>
+                  <PicksRaceSelect
+                    races={picksSnapshot.availableRaces.map((race) => ({
+                      raceId: race.raceId,
+                      raceName: race.raceName
+                    }))}
+                    selectedRaceId={picksSnapshot.selectedRace?.raceId ?? null}
+                  />
+                </div>
+                <div className="rounded-xl border border-cyan-100 bg-cyan-50 px-4 py-3 text-sm text-cyan-900">
+                  Picks unlock here after qualifying starts. Results add per-driver scores.
                 </div>
               </div>
 
               {picksSnapshot.selectedRace ? (
-                <div className="mt-4 text-sm text-slate-700">
-                  <p>
-                    <span className="font-semibold">{picksSnapshot.selectedRace.raceName}</span>
-                  </p>
-                  <p>Qualifying (Pick Lock): {formatRaceDate(picksSnapshot.selectedRace.qualifyingStartAt)}</p>
-                  <p>Race Start: {formatRaceDate(picksSnapshot.selectedRace.raceDate)}</p>
-                  <p className="mt-1 text-xs text-slate-500">Times shown in {LEAGUE_TIME_ZONE}.</p>
+                <div className="mt-5 grid gap-3 text-sm text-slate-700 md:grid-cols-3">
+                  <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 md:col-span-3">
+                    <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                      Selected Race
+                    </p>
+                    <p className="mt-1 text-lg font-semibold text-slate-900">
+                      {picksSnapshot.selectedRace.raceName}
+                    </p>
+                    <p className="mt-1 text-xs text-slate-500">Times shown in {LEAGUE_TIME_ZONE}.</p>
+                  </div>
+                  <div className="rounded-xl border border-slate-200 bg-white p-3">
+                    <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                      Pick Lock
+                    </p>
+                    <p className="mt-1 font-medium text-slate-900">
+                      {formatRaceDate(picksSnapshot.selectedRace.qualifyingStartAt)}
+                    </p>
+                  </div>
+                  <div className="rounded-xl border border-slate-200 bg-white p-3">
+                    <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                      Race Start
+                    </p>
+                    <p className="mt-1 font-medium text-slate-900">
+                      {formatRaceDate(picksSnapshot.selectedRace.raceDate)}
+                    </p>
+                  </div>
+                  <div className="rounded-xl border border-slate-200 bg-white p-3">
+                    <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                      Results
+                    </p>
+                    <p className="mt-1 font-medium text-slate-900">
+                      {picksSnapshot.resultsPosted ? "Posted" : "Pending"}
+                    </p>
+                  </div>
                 </div>
               ) : null}
             </section>
@@ -340,139 +396,188 @@ export default async function LeaderboardPage({ searchParams }: PageProps) {
           </section>
         ) : (
           <>
-            <section className="mt-6 rounded-lg border border-slate-200 bg-white p-6">
-              <h2 className="text-xl font-semibold text-slate-900">
-                {analyticsSnapshot.teamName} Analytics
-              </h2>
-              <p className="mt-2 text-sm text-slate-600">
-                Personal trends, weekly performance, and tiebreak consistency for completed races.
-              </p>
+            <section className="mt-6 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+              <div className="bg-[radial-gradient(circle_at_top_left,_#06b6d4,_transparent_35%),linear-gradient(135deg,_#0f172a,_#1e293b)] p-6 text-white">
+                <p className="text-xs font-semibold uppercase tracking-[0.2em] text-cyan-200">
+                  Personal Analytics
+                </p>
+                <h2 className="mt-2 text-2xl font-semibold tracking-tight">
+                  {analyticsSnapshot.teamName}
+                </h2>
+                <p className="mt-2 max-w-2xl text-sm text-slate-300">
+                  A snapshot of your weekly finishes, pace against the field, recent form, and
+                  tiebreak accuracy across completed races.
+                </p>
 
-              <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-                <div className="rounded-md border border-slate-200 bg-slate-50 p-3">
-                  <p className="text-xs font-semibold uppercase tracking-wide text-slate-600">
-                    Current Standing
-                  </p>
-                  <p className="mt-1 text-2xl font-semibold text-slate-900">
-                    {analyticsSnapshot.summary.currentStanding !== null
-                      ? `${analyticsSnapshot.summary.currentStanding}/${analyticsSnapshot.summary.fieldSize}`
-                      : "-"}
-                  </p>
-                </div>
-                <div className="rounded-md border border-slate-200 bg-slate-50 p-3">
-                  <p className="text-xs font-semibold uppercase tracking-wide text-slate-600">
-                    Total Points
-                  </p>
-                  <p className="mt-1 text-2xl font-semibold text-slate-900">
-                    {analyticsSnapshot.summary.totalPoints}
-                  </p>
-                </div>
-                <div className="rounded-md border border-slate-200 bg-slate-50 p-3">
-                  <p className="text-xs font-semibold uppercase tracking-wide text-slate-600">
-                    Avg Weekly Finish
-                  </p>
-                  <p className="mt-1 text-2xl font-semibold text-slate-900">
-                    {analyticsSnapshot.summary.averageFinish !== null
-                      ? analyticsSnapshot.summary.averageFinish.toFixed(2)
-                      : "-"}
-                  </p>
-                </div>
-                <div className="rounded-md border border-slate-200 bg-slate-50 p-3">
-                  <p className="text-xs font-semibold uppercase tracking-wide text-slate-600">
-                    Pick Submission
-                  </p>
-                  <p className="mt-1 text-2xl font-semibold text-slate-900">
-                    {formatPercent(analyticsSnapshot.summary.pickSubmissionRate)}
-                  </p>
-                </div>
-                <div className="rounded-md border border-slate-200 bg-slate-50 p-3">
-                  <p className="text-xs font-semibold uppercase tracking-wide text-slate-600">
-                    Weekly Wins
-                  </p>
-                  <p className="mt-1 text-2xl font-semibold text-slate-900">
-                    {analyticsSnapshot.summary.weeklyWins}
-                  </p>
-                </div>
-                <div className="rounded-md border border-slate-200 bg-slate-50 p-3">
-                  <p className="text-xs font-semibold uppercase tracking-wide text-slate-600">
-                    Top-3 Finishes
-                  </p>
-                  <p className="mt-1 text-2xl font-semibold text-slate-900">
-                    {analyticsSnapshot.summary.topThreeFinishes}
-                  </p>
-                </div>
-                <div className="rounded-md border border-slate-200 bg-slate-50 p-3">
-                  <p className="text-xs font-semibold uppercase tracking-wide text-slate-600">
-                    Avg Weekly Points
-                  </p>
-                  <p className="mt-1 text-2xl font-semibold text-slate-900">
-                    {analyticsSnapshot.summary.averageWeeklyPoints.toFixed(1)}
-                  </p>
-                </div>
-                <div className="rounded-md border border-slate-200 bg-slate-50 p-3">
-                  <p className="text-xs font-semibold uppercase tracking-wide text-slate-600">
-                    Tiebreak Delta (Avg)
-                  </p>
-                  <p className="mt-1 text-2xl font-semibold text-slate-900">
-                    {analyticsSnapshot.summary.averageTiebreakDelta !== null
-                      ? analyticsSnapshot.summary.averageTiebreakDelta.toFixed(3)
-                      : "-"}
-                  </p>
+                <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                  <div className="rounded-xl border border-white/15 bg-white/10 p-3 backdrop-blur">
+                    <p className="text-xs font-semibold uppercase tracking-wide text-slate-300">
+                      Current Rank
+                    </p>
+                    <p className="mt-1 text-3xl font-semibold">
+                      {analyticsSnapshot.summary.currentStanding !== null
+                        ? `#${analyticsSnapshot.summary.currentStanding}`
+                        : "-"}
+                    </p>
+                    <p className="text-xs text-slate-300">
+                      Field of {analyticsSnapshot.summary.fieldSize}
+                    </p>
+                  </div>
+                  <div className="rounded-xl border border-white/15 bg-white/10 p-3 backdrop-blur">
+                    <p className="text-xs font-semibold uppercase tracking-wide text-slate-300">
+                      Total Points
+                    </p>
+                    <p className="mt-1 text-3xl font-semibold">
+                      {analyticsSnapshot.summary.totalPoints}
+                    </p>
+                    <p className="text-xs text-slate-300">
+                      {formatOptionalNumber(analyticsSnapshot.summary.averageWeeklyPoints)} per race
+                    </p>
+                  </div>
+                  <div className="rounded-xl border border-white/15 bg-white/10 p-3 backdrop-blur">
+                    <p className="text-xs font-semibold uppercase tracking-wide text-slate-300">
+                      Vs League Avg
+                    </p>
+                    <p className="mt-1 text-3xl font-semibold">
+                      {formatSignedValue(totalVsLeagueAverage)}
+                    </p>
+                    <p className="text-xs text-slate-300">
+                      {aboveAverageWeekCount}/{analyticsRaceRows.length} weeks above average
+                    </p>
+                  </div>
+                  <div className="rounded-xl border border-white/15 bg-white/10 p-3 backdrop-blur">
+                    <p className="text-xs font-semibold uppercase tracking-wide text-slate-300">
+                      Best Finish
+                    </p>
+                    <p className="mt-1 text-3xl font-semibold">
+                      {bestFinish !== null ? `#${bestFinish}` : "-"}
+                    </p>
+                    <p className="text-xs text-slate-300">
+                      {analyticsSnapshot.summary.weeklyWins} win(s),{" "}
+                      {analyticsSnapshot.summary.topThreeFinishes} top-3
+                    </p>
+                  </div>
                 </div>
               </div>
 
-              <div className="mt-5 grid gap-3 lg:grid-cols-2">
-                <div className="rounded-md border border-emerald-200 bg-emerald-50 p-3">
-                  <p className="text-xs font-semibold uppercase tracking-wide text-emerald-700">
-                    Best Week
-                  </p>
-                  {analyticsSnapshot.summary.bestWeek ? (
-                    <p className="mt-1 text-sm font-medium text-emerald-900">
-                      {analyticsSnapshot.summary.bestWeek.raceName}:{" "}
-                      {analyticsSnapshot.summary.bestWeek.weeklyPoints} pts (Finish{" "}
-                      {analyticsSnapshot.summary.bestWeek.weeklyFinish ?? "-"})
+              <div className="grid gap-4 p-6 lg:grid-cols-[1.1fr_0.9fr]">
+                <section className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <h3 className="text-sm font-semibold uppercase tracking-wide text-slate-700">
+                        Recent Form
+                      </h3>
+                      <p className="mt-1 text-xs text-slate-500">
+                        Last three completed races compared with your season average.
+                      </p>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-lg font-semibold text-slate-900">
+                        {formatOptionalNumber(analyticsSnapshot.summary.lastThreeRaceAverage)}
+                      </p>
+                      <p className="text-xs text-slate-500">
+                        {analyticsSnapshot.summary.momentumDelta !== null
+                          ? `${formatSignedValue(analyticsSnapshot.summary.momentumDelta)} vs avg`
+                          : "Need more races"}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="mt-4 grid gap-3">
+                    {recentRaceRows.map((row) => (
+                      <div key={`recent-${row.raceId}`}>
+                        <div className="mb-1 flex items-center justify-between gap-2 text-xs">
+                          <span className="truncate font-medium text-slate-700">{row.raceName}</span>
+                          <span className="font-semibold text-slate-900">
+                            {row.weeklyPoints} pts, {formatFinish(row.weeklyFinish, row.fieldSize)}
+                          </span>
+                        </div>
+                        <div className="h-2 overflow-hidden rounded-full bg-slate-200">
+                          <div
+                            className="h-full rounded-full bg-cyan-500"
+                            style={{
+                              width: `${Math.max(8, (row.weeklyPoints / maxWeeklyPoints) * 100)}%`
+                            }}
+                          />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </section>
+
+                <section className="grid gap-3">
+                  <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4">
+                    <p className="text-xs font-semibold uppercase tracking-wide text-emerald-700">
+                      Best Week
                     </p>
-                  ) : (
-                    <p className="mt-1 text-sm text-emerald-800">-</p>
-                  )}
-                </div>
-                <div className="rounded-md border border-amber-200 bg-amber-50 p-3">
-                  <p className="text-xs font-semibold uppercase tracking-wide text-amber-700">
-                    Toughest Week
-                  </p>
-                  {analyticsSnapshot.summary.worstWeek ? (
-                    <p className="mt-1 text-sm font-medium text-amber-900">
-                      {analyticsSnapshot.summary.worstWeek.raceName}:{" "}
-                      {analyticsSnapshot.summary.worstWeek.weeklyPoints} pts (Finish{" "}
-                      {analyticsSnapshot.summary.worstWeek.weeklyFinish ?? "-"})
+                    {analyticsSnapshot.summary.bestWeek ? (
+                      <p className="mt-1 text-sm font-medium text-emerald-950">
+                        {analyticsSnapshot.summary.bestWeek.raceName}:{" "}
+                        {analyticsSnapshot.summary.bestWeek.weeklyPoints} pts, finish{" "}
+                        {formatFinish(
+                          analyticsSnapshot.summary.bestWeek.weeklyFinish,
+                          analyticsSnapshot.summary.bestWeek.fieldSize
+                        )}
+                      </p>
+                    ) : (
+                      <p className="mt-1 text-sm text-emerald-800">-</p>
+                    )}
+                  </div>
+                  <div className="rounded-xl border border-amber-200 bg-amber-50 p-4">
+                    <p className="text-xs font-semibold uppercase tracking-wide text-amber-700">
+                      Toughest Week
                     </p>
-                  ) : (
-                    <p className="mt-1 text-sm text-amber-800">-</p>
-                  )}
-                </div>
-                <div className="rounded-md border border-slate-200 bg-slate-50 p-3">
+                    {analyticsSnapshot.summary.worstWeek ? (
+                      <p className="mt-1 text-sm font-medium text-amber-950">
+                        {analyticsSnapshot.summary.worstWeek.raceName}:{" "}
+                        {analyticsSnapshot.summary.worstWeek.weeklyPoints} pts, finish{" "}
+                        {formatFinish(
+                          analyticsSnapshot.summary.worstWeek.weeklyFinish,
+                          analyticsSnapshot.summary.worstWeek.fieldSize
+                        )}
+                      </p>
+                    ) : (
+                      <p className="mt-1 text-sm text-amber-800">-</p>
+                    )}
+                  </div>
+                  <div className="rounded-xl border border-slate-200 bg-white p-4">
+                    <p className="text-xs font-semibold uppercase tracking-wide text-slate-600">
+                      Tiebreak Read
+                    </p>
+                    <p className="mt-1 text-sm font-medium text-slate-900">
+                      Average miss:{" "}
+                      {formatOptionalNumber(analyticsSnapshot.summary.averageTiebreakDelta, 3)}
+                    </p>
+                    <p className="mt-1 text-xs text-slate-500">
+                      Closest miss:{" "}
+                      {formatOptionalNumber(analyticsSnapshot.summary.closestTiebreakDelta, 3)}
+                    </p>
+                  </div>
+                </section>
+              </div>
+
+              <div className="grid gap-3 border-t border-slate-200 bg-slate-50 p-6 lg:grid-cols-2">
+                <div className="rounded-xl border border-slate-200 bg-white p-4">
                   <p className="text-xs font-semibold uppercase tracking-wide text-slate-600">
-                    Last 3 Race Avg
+                    Biggest Jump On The Field
                   </p>
                   <p className="mt-1 text-sm font-medium text-slate-900">
-                    {analyticsSnapshot.summary.lastThreeRaceAverage !== null
-                      ? analyticsSnapshot.summary.lastThreeRaceAverage.toFixed(1)
-                      : "-"}{" "}
-                    pts
-                    {analyticsSnapshot.summary.momentumDelta !== null ? (
-                      <span className="ml-1 text-slate-600">
-                        ({formatSignedValue(analyticsSnapshot.summary.momentumDelta)} vs season avg)
-                      </span>
-                    ) : null}
+                    {strongestVsFieldRace
+                      ? `${strongestVsFieldRace.raceName}: ${formatSignedValue(
+                          strongestVsFieldRace.pointsVsRaceAverage
+                        )} pts vs average`
+                      : "-"}
                   </p>
                 </div>
-                <div className="rounded-md border border-slate-200 bg-slate-50 p-3">
+                <div className="rounded-xl border border-slate-200 bg-white p-4">
                   <p className="text-xs font-semibold uppercase tracking-wide text-slate-600">
-                    Closest Tiebreak
+                    Biggest Miss On The Field
                   </p>
                   <p className="mt-1 text-sm font-medium text-slate-900">
-                    {analyticsSnapshot.summary.closestTiebreakDelta !== null
-                      ? analyticsSnapshot.summary.closestTiebreakDelta.toFixed(3)
+                    {toughestVsFieldRace
+                      ? `${toughestVsFieldRace.raceName}: ${formatSignedValue(
+                          toughestVsFieldRace.pointsVsRaceAverage
+                        )} pts vs average`
                       : "-"}
                   </p>
                 </div>
@@ -480,7 +585,10 @@ export default async function LeaderboardPage({ searchParams }: PageProps) {
             </section>
 
             <section className="mt-6 rounded-lg border border-slate-200 bg-white p-6">
-              <h3 className="text-lg font-semibold text-slate-900">Race-by-Race Breakdown</h3>
+              <h3 className="text-lg font-semibold text-slate-900">Race Log</h3>
+              <p className="mt-1 text-sm text-slate-600">
+                Your week-by-week scorecard with finish, field comparison, and tiebreak accuracy.
+              </p>
               <p className="mt-1 text-xs text-slate-500">Times shown in {LEAGUE_TIME_ZONE}.</p>
               <div className="mt-4 overflow-x-auto rounded-md border border-slate-200">
                 <table className="min-w-full text-left text-sm">
@@ -488,12 +596,12 @@ export default async function LeaderboardPage({ searchParams }: PageProps) {
                     <tr>
                       <th className="px-3 py-2 font-semibold">Race</th>
                       <th className="px-3 py-2 font-semibold">Finish</th>
-                      <th className="px-3 py-2 font-semibold">Week Pts</th>
-                      <th className="px-3 py-2 font-semibold">Vs Avg</th>
+                      <th className="px-3 py-2 font-semibold">Race Points</th>
+                      <th className="px-3 py-2 font-semibold">Vs League Avg</th>
                       <th className="px-3 py-2 font-semibold">Cumulative</th>
-                      <th className="px-3 py-2 font-semibold">Pick</th>
+                      <th className="px-3 py-2 font-semibold">Scored As</th>
                       <th className="px-3 py-2 font-semibold">Tiebreak Guess</th>
-                      <th className="px-3 py-2 font-semibold">Official Race Avg Speed</th>
+                      <th className="px-3 py-2 font-semibold">Official Avg Speed</th>
                       <th className="px-3 py-2 font-semibold">Delta</th>
                     </tr>
                   </thead>
@@ -520,7 +628,17 @@ export default async function LeaderboardPage({ searchParams }: PageProps) {
                           {formatSignedValue(row.pointsVsRaceAverage)}
                         </td>
                         <td className="px-3 py-2">{row.cumulativePoints}</td>
-                        <td className="px-3 py-2">{row.submittedPick ? "Yes" : "No"}</td>
+                        <td className="px-3 py-2">
+                          {row.submittedPick ? (
+                            <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-xs font-semibold text-emerald-700">
+                              Submitted picks
+                            </span>
+                          ) : (
+                            <span className="rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-xs font-semibold text-amber-700">
+                              Lowest score fallback
+                            </span>
+                          )}
+                        </td>
                         <td className="px-3 py-2">
                           {row.averageSpeedGuess !== null ? row.averageSpeedGuess.toFixed(3) : "-"}
                         </td>

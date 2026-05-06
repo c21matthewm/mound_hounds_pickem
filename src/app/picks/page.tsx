@@ -267,36 +267,53 @@ export default async function PicksPage({ searchParams }: PageProps) {
         </div>
       </header>
 
-      <section className="mt-6 overflow-hidden rounded-xl border border-slate-200 bg-white">
+      <section className="mt-6 overflow-hidden rounded-3xl border border-slate-200 bg-white">
         {upcomingRace.title_image_url ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img
             alt={`${upcomingRace.race_name} banner`}
-            className="h-44 w-full object-cover md:h-56"
+            className="h-44 w-full object-cover md:h-64"
             src={upcomingRace.title_image_url}
           />
         ) : null}
 
-        <div className="bg-gradient-to-r from-slate-900 to-slate-800 p-6 text-white">
-          <h2 className="text-2xl font-semibold">{upcomingRace.race_name}</h2>
-          <div className="mt-4 grid gap-2 text-sm md:grid-cols-2 lg:grid-cols-4">
-            <p>
-              <span className="font-semibold">Pick Deadline:</span>{" "}
-              {formatRaceDate(upcomingRace.qualifying_start_at)}
-            </p>
-            <p>
-              <span className="font-semibold">Race Start:</span>{" "}
-              {formatRaceDate(upcomingRace.race_date)}
-            </p>
-            <p>
-              <span className="font-semibold">Payout:</span> ${Number(upcomingRace.payout).toFixed(2)}
-            </p>
-            <p>
-              <span className="font-semibold">Status:</span> {picksLocked ? "Locked" : "Open"}
-            </p>
+        <div className="bg-[radial-gradient(circle_at_top_left,_#0ea5e9,_transparent_28%),linear-gradient(135deg,_#0f172a,_#1e293b)] p-6 text-white md:p-7">
+          <div className="flex flex-wrap items-start justify-between gap-4">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-cyan-200">
+                Current Pick&apos;em
+              </p>
+              <h2 className="mt-2 text-3xl font-semibold tracking-tight">{upcomingRace.race_name}</h2>
+            </div>
+            <span
+              className={`rounded-full border px-3 py-1 text-xs font-semibold uppercase tracking-wide ${
+                picksLocked
+                  ? "border-amber-300/60 bg-amber-300/15 text-amber-100"
+                  : "border-emerald-300/60 bg-emerald-300/15 text-emerald-100"
+              }`}
+            >
+              Status: {picksLocked ? "Locked" : "Open"}
+            </span>
           </div>
-          <p className="mt-2 text-xs text-slate-200">All race times shown in {LEAGUE_TIME_ZONE}.</p>
-          <p className="mt-1 text-xs text-slate-200">
+          <div className="mt-5 grid gap-3 text-sm md:grid-cols-2 lg:grid-cols-4">
+            <div className="rounded-xl border border-white/15 bg-white/10 p-3">
+              <p className="text-xs font-semibold uppercase tracking-wide text-slate-300">Pick Deadline</p>
+              <p className="mt-1 font-medium">{formatRaceDate(upcomingRace.qualifying_start_at)}</p>
+            </div>
+            <div className="rounded-xl border border-white/15 bg-white/10 p-3">
+              <p className="text-xs font-semibold uppercase tracking-wide text-slate-300">Race Start</p>
+              <p className="mt-1 font-medium">{formatRaceDate(upcomingRace.race_date)}</p>
+            </div>
+            <div className="rounded-xl border border-white/15 bg-white/10 p-3">
+              <p className="text-xs font-semibold uppercase tracking-wide text-slate-300">Payout</p>
+              <p className="mt-1 font-medium">${Number(upcomingRace.payout).toFixed(2)}</p>
+            </div>
+            <div className="rounded-xl border border-white/15 bg-white/10 p-3">
+              <p className="text-xs font-semibold uppercase tracking-wide text-slate-300">Timezone</p>
+              <p className="mt-1 font-medium">{LEAGUE_TIME_ZONE}</p>
+            </div>
+          </div>
+          <p className="mt-4 text-xs text-slate-200">
             Please visit the{" "}
             <a
               className="font-semibold text-cyan-200 underline decoration-cyan-300/70 underline-offset-2 hover:text-cyan-100"
