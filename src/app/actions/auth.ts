@@ -113,6 +113,68 @@ export async function signUpAction(formData: FormData) {
   messageRedirect("/login", "Check your email to confirm your account.");
 }
 
+export async function requestPasswordResetAction(formData: FormData) {
+  const email = asText(formData.get("email")).toLowerCase();
+
+  if (!email) {
+    errorRedirect("/forgot-password", "Email is required.");
+  }
+
+  const supabase = await createServerSupabaseClient();
+  const origin = await getOrigin();
+
+  const { error } = await supabase.auth.resetPasswordForEmail(email, {
+    redirectTo: `${origin}/auth/callback?next=/reset-password`
+  });
+
+  if (error) {
+    console.error("[auth] resetPasswordForEmail failed:", error.message);
+    errorRedirect("/forgot-password", friendlyAuthError(error.message));
+  }
+
+  messageRedirect(
+    "/forgot-password",
+    "If that email is tied to an account, a password reset link has been sent."
+  );
+}
+
+export async function updatePasswordAction(formData: FormData) {
+  const password = asText(formData.get("password"));
+  const confirmPassword = asText(formData.get("confirm_password"));
+
+  if (!password || !confirmPassword) {
+    errorRedirect("/reset-password", "Password and confirmation are required.");
+  }
+
+  if (password.length < 6) {
+    errorRedirect("/reset-password", "Password must be at least 6 characters.");
+  }
+
+  if (password !== confirmPassword) {
+    errorRedirect("/reset-password", "Password confirmation does not match.");
+  }
+
+  const supabase = await createServerSupabaseClient();
+  const {
+    data: { user },
+    error: authError
+  } = await supabase.auth.getUser();
+
+  if (authError || !user) {
+    errorRedirect("/login", "Your password reset link expired. Request a new reset link.");
+  }
+
+  const { error } = await supabase.auth.updateUser({ password });
+
+  if (error) {
+    console.error("[auth] updateUser password failed:", error.message);
+    errorRedirect("/reset-password", friendlyAuthError(error.message));
+  }
+
+  await supabase.auth.signOut();
+  messageRedirect("/login", "Password updated. Sign in with your new password.");
+}
+
 export async function signOutAction() {
   const supabase = await createServerSupabaseClient();
   await supabase.auth.signOut();

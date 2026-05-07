@@ -65,7 +65,12 @@ export default async function LoginPage({ searchParams }: PageProps) {
         </label>
 
         <label className="block">
-          <span className="mb-1 block text-sm font-medium text-slate-700">Password</span>
+          <span className="mb-1 flex items-center justify-between gap-3 text-sm font-medium text-slate-700">
+            <span>Password</span>
+            <Link className="text-xs font-semibold text-blue-700 underline" href="/forgot-password">
+              Forgot password?
+            </Link>
+          </span>
           <input
             required
             className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm"

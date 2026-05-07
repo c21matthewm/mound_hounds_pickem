@@ -159,6 +159,7 @@ Vercel production deploys from `main`.
 ## Important Routes
 
 - `/login` and `/signup`: public auth pages
+- `/forgot-password` and `/reset-password`: Supabase password recovery flow
 - `/dashboard`: participant home, rules/support links, profile snapshot
 - `/picks`: active race pick form
 - `/leaderboard`: standings, picks by race, analytics

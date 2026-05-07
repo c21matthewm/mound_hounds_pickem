@@ -96,6 +96,9 @@ http://localhost:3000/auth/callback
 https://moundhoundspickem.vercel.app/auth/callback
 ```
 
+Password reset emails also use these callback URLs. The app sends users through
+`/auth/callback?next=/reset-password`, so no separate `/reset-password` redirect URL is required.
+
 If you add a custom domain later, also add:
 
 ```text
