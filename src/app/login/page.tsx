@@ -14,11 +14,11 @@ export default async function LoginPage({ searchParams }: PageProps) {
   const next = sanitizeNextPath(queryStringParam(params.next));
 
   return (
-    <main className="mx-auto flex min-h-screen max-w-md flex-col justify-center px-6 py-16">
+    <main className="mx-auto flex min-h-screen max-w-lg flex-col justify-center px-6 py-16">
       <p className="inline-flex w-fit rounded-full border border-blue-200 bg-blue-50 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-blue-700">
         Mound Hounds Pick&apos;em League
       </p>
-      <div className="mt-4 overflow-hidden rounded-xl border border-slate-200 bg-slate-100 p-1">
+      <div className="mt-4 overflow-hidden rounded-3xl border border-slate-200 bg-slate-100 p-1 shadow-sm">
         <div className="relative aspect-[16/9] overflow-hidden rounded-lg bg-slate-900">
           <div
             aria-hidden
@@ -31,8 +31,8 @@ export default async function LoginPage({ searchParams }: PageProps) {
           />
         </div>
       </div>
-      <h1 className="mt-4 text-3xl font-semibold tracking-tight">Sign in</h1>
-      <p className="mt-2 text-sm text-slate-600">
+      <h1 className="mt-5 text-4xl font-semibold tracking-tight text-slate-950">Sign in</h1>
+      <p className="mt-2 text-sm leading-6 text-slate-600">
         Access your Mound Hounds Pick&apos;em League account.
       </p>
       
@@ -50,7 +50,7 @@ export default async function LoginPage({ searchParams }: PageProps) {
 
       <form
         action={signInAction}
-        className="mt-6 space-y-4 rounded-lg border border-slate-200 bg-white p-5"
+        className="mt-6 space-y-4 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"
       >
         <input name="next" type="hidden" value={next} />
 
@@ -58,7 +58,7 @@ export default async function LoginPage({ searchParams }: PageProps) {
           <span className="mb-1 block text-sm font-medium text-slate-700">Email</span>
           <input
             required
-            className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+            className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm"
             name="email"
             type="email"
           />
@@ -68,14 +68,14 @@ export default async function LoginPage({ searchParams }: PageProps) {
           <span className="mb-1 block text-sm font-medium text-slate-700">Password</span>
           <input
             required
-            className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+            className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm"
             name="password"
             type="password"
           />
         </label>
 
         <button
-          className="w-full rounded-md bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-700"
+          className="w-full rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white hover:bg-slate-700"
           type="submit"
         >
           Sign in

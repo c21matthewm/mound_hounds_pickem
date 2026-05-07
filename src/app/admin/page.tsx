@@ -66,7 +66,6 @@ type ResultRow = {
 
 type FeedbackItemRow = {
   category: string;
-  context_page: string | null;
   created_at: string;
   details: string;
   feedback_type: string;
@@ -126,7 +125,7 @@ export default async function AdminPage({ searchParams }: PageProps) {
       .order("team_name", { ascending: true }),
     supabase
       .from("feedback_items")
-      .select("id,user_id,feedback_type,category,context_page,details,created_at")
+      .select("id,user_id,feedback_type,category,details,created_at")
       .order("created_at", { ascending: false })
   ]);
 
@@ -239,8 +238,9 @@ export default async function AdminPage({ searchParams }: PageProps) {
           <input name="tab" type="hidden" value="drivers" />
           <h3 className="text-sm font-semibold text-slate-900">Import Championship Standings</h3>
           <p className="mt-1 text-xs text-slate-600">
-            Paste rows like your `sample2.txt` (Rank, Driver, Engine, Points, ...). The importer
-            maps Rank, Driver, and Points for one-time seed/correction updates.
+            Paste rows like `docs/examples/championship-standings-sample.txt` (Rank, Driver,
+            Engine, Points, ...). The importer maps Rank, Driver, and Points for one-time
+            seed/correction updates.
           </p>
           <textarea
             required
@@ -948,14 +948,13 @@ export default async function AdminPage({ searchParams }: PageProps) {
                   <th className="px-3 py-2 font-semibold">Team</th>
                   <th className="px-3 py-2 font-semibold">Type</th>
                   <th className="px-3 py-2 font-semibold">Category</th>
-                  <th className="px-3 py-2 font-semibold">Context</th>
                   <th className="px-3 py-2 font-semibold">Details</th>
                 </tr>
               </thead>
               <tbody>
                 {feedbackItems.length === 0 ? (
                   <tr>
-                    <td className="px-3 py-3 text-slate-600" colSpan={6}>
+                    <td className="px-3 py-3 text-slate-600" colSpan={5}>
                       No feedback submissions yet.
                     </td>
                   </tr>
@@ -968,7 +967,6 @@ export default async function AdminPage({ searchParams }: PageProps) {
                       </td>
                       <td className="px-3 py-2">{feedbackTypeLabel(item.feedback_type)}</td>
                       <td className="px-3 py-2">{feedbackCategoryLabel(item.category)}</td>
-                      <td className="px-3 py-2">{item.context_page || "-"}</td>
                       <td className="px-3 py-2">{feedbackDetailPreview(item.details)}</td>
                     </tr>
                   ))

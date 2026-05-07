@@ -682,14 +682,15 @@ test.describe.serial("Full App Flow", () => {
 
     const standingsTotalSort = p1Page.getByTestId("standings-sort-total");
     await standingsTotalSort.click();
-    await expect(standingsTotalSort).toContainText("↑");
-    await standingsTotalSort.click();
     await expect(standingsTotalSort).toContainText("↓");
+    await standingsTotalSort.click();
+    await expect(standingsTotalSort).toContainText("↑");
 
     await p1Page.goto("/leaderboard?tab=analytics");
-    await expect(p1Page.locator("main")).toContainText(`${participant1.teamName} Analytics`);
-    await expect(p1Page.locator("main")).toContainText("Race-by-Race Breakdown");
-    await expect(p1Page.locator("main")).toContainText("Tiebreak Delta (Avg)");
+    await expect(p1Page.locator("main")).toContainText(participant1.teamName);
+    await expect(p1Page.locator("main")).toContainText("Personal Analytics");
+    await expect(p1Page.locator("main")).toContainText("Race Log");
+    await expect(p1Page.locator("main")).toContainText("Tiebreak Read");
     await expect(p1Page.locator("main")).toContainText(raceAName);
 
     const { count: raceResultCount, error: raceResultCountError } = await supabase

@@ -205,14 +205,17 @@ export function PickemForm({
       <input name="race_id" type="hidden" value={String(raceId)} />
 
       <fieldset className="space-y-6 disabled:opacity-80" disabled={picksLocked}>
-        <section className="rounded-lg border border-slate-200 bg-white p-6">
-          <label className="block max-w-xs">
-            <span className="mb-1 block text-sm font-medium text-slate-700">
+        <section className="rounded-2xl border border-slate-200 bg-white p-5 md:p-6">
+          <label className="block max-w-sm">
+            <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">
               Average Speed Tie-breaker
+            </span>
+            <span className="mb-3 block text-sm text-slate-600">
+              Used only if multiple teams tie for the weekly win.
             </span>
             <input
               required
-              className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+              className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm"
               min={1}
               name="average_speed"
               onChange={(event) => {
@@ -229,14 +232,22 @@ export function PickemForm({
         {groups.map((group) => (
           <section
             key={group.groupNumber}
-            className="rounded-lg border border-slate-200 bg-white p-6"
+            className="rounded-2xl border border-slate-200 bg-white p-5 md:p-6"
           >
-            <h3 className="text-lg font-semibold text-slate-900">
-              Group {group.groupNumber}
-              <span className="ml-2 text-sm font-normal text-slate-500">
-                {group.isTopGroup ? "(Pick 1 of 4)" : "(Pick 1)"}
-              </span>
-            </h3>
+            <div className="flex flex-wrap items-end justify-between gap-2">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-wide text-cyan-700">
+                  Driver Group
+                </p>
+                <h3 className="text-xl font-semibold text-slate-900">
+                  Group {group.groupNumber}
+                  <span className="ml-2 text-sm font-normal text-slate-500">
+                    {group.isTopGroup ? "Pick 1 of 4" : "Pick 1"}
+                  </span>
+                </h3>
+              </div>
+              <p className="text-xs text-slate-500">Sorted by current championship standing.</p>
+            </div>
 
             {group.drivers.length === 0 ? (
               <p className="mt-3 text-sm text-slate-600">No active drivers in this group.</p>
@@ -255,12 +266,12 @@ export function PickemForm({
                       ? "border-cyan-500 bg-cyan-50 ring-2 ring-cyan-200"
                       : isSaved
                         ? "border-amber-300 bg-amber-50"
-                        : "border-slate-200 hover:bg-slate-50";
+                        : "border-slate-200 bg-white hover:border-cyan-200 hover:bg-cyan-50/40";
 
                   return (
                     <label
                       key={driver.id}
-                      className={`relative flex cursor-pointer items-center gap-3 rounded-lg border px-3 py-2 shadow-sm transition ${cardClassName}`}
+                      className={`relative flex cursor-pointer items-center gap-3 rounded-2xl border px-3 py-3 shadow-sm transition hover:-translate-y-0.5 ${cardClassName}`}
                     >
                       <input
                         required
@@ -281,17 +292,17 @@ export function PickemForm({
                         // eslint-disable-next-line @next/next/no-img-element
                         <img
                           alt={driver.driverName}
-                          className="h-12 w-12 rounded-full border border-slate-300 object-cover"
+                          className="h-14 w-14 rounded-2xl border border-slate-300 object-cover"
                           src={driver.imageUrl}
                         />
                       ) : (
-                        <div className="flex h-12 w-12 items-center justify-center rounded-full border border-dashed border-slate-400 text-[10px] font-semibold text-slate-500">
+                        <div className="flex h-14 w-14 items-center justify-center rounded-2xl border border-dashed border-slate-400 text-[10px] font-semibold text-slate-500">
                           NO IMG
                         </div>
                       )}
 
                       <div>
-                        <p className="text-sm font-semibold text-slate-900">{driver.driverName}</p>
+                        <p className="pr-16 text-sm font-semibold text-slate-900">{driver.driverName}</p>
                         <p className="text-xs text-slate-600">
                           Championship Pts: {driver.championshipPoints}
                         </p>
@@ -323,7 +334,7 @@ export function PickemForm({
         ))}
 
         <button
-          className="rounded-md bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
+          className="rounded-xl bg-slate-900 px-5 py-3 text-sm font-semibold text-white hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
           disabled={!canSubmit}
           type="submit"
         >

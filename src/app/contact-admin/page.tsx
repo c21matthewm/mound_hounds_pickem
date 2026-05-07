@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
+import { MobileBottomNav } from "@/components/mobile-bottom-nav";
 import { SignOutButton } from "@/components/sign-out-button";
 import { isProfileComplete, type ProfileRow } from "@/lib/profile";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
@@ -25,7 +26,7 @@ export default async function ContactAdminPage() {
   }
 
   return (
-    <main className="mx-auto flex min-h-screen max-w-3xl flex-col px-6 py-16">
+    <main className="mx-auto flex min-h-screen max-w-3xl flex-col px-6 py-16 pb-24 md:pb-16">
       <header className="relative flex flex-wrap items-start justify-between gap-4">
         <div>
           <p className="inline-flex rounded-full border border-blue-200 bg-blue-50 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-blue-700">
@@ -48,18 +49,21 @@ export default async function ContactAdminPage() {
         </div>
       </header>
 
-      <section className="mt-6 rounded-lg border border-slate-200 bg-white p-6">
-        <p className="text-sm text-slate-700">
-          Please contact league admin at{" "}
+      <section className="mt-6 rounded-2xl border border-slate-200 bg-white p-6">
+        <p className="text-sm text-slate-700">League admin email</p>
+        <p className="mt-2 text-xl font-semibold text-slate-900">
           <a
-            className="font-semibold text-slate-900 underline decoration-slate-400 underline-offset-2 hover:text-slate-700"
+            className="underline decoration-cyan-400 underline-offset-4 hover:text-cyan-800"
             href="mailto:indymoundhounds@gmail.com"
           >
             indymoundhounds@gmail.com
           </a>
-          .
+        </p>
+        <p className="mt-3 text-sm text-slate-600">
+          Include your team name and as much detail as possible so the issue can be handled quickly.
         </p>
       </section>
+      <MobileBottomNav />
     </main>
   );
 }

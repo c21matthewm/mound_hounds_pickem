@@ -118,7 +118,7 @@ export default async function FeedbackPage({ searchParams }: PageProps) {
         </p>
       ) : null}
 
-      <section className="mt-6 rounded-lg border border-slate-200 bg-white p-6">
+      <section className="mt-6 rounded-2xl border border-slate-200 bg-white p-6">
         <h2 className="text-xl font-semibold text-slate-900">Submit Feedback</h2>
         <p className="mt-2 text-sm text-slate-600">
           Choose the closest category, then describe what happened or what should improve. Be as
@@ -132,7 +132,7 @@ export default async function FeedbackPage({ searchParams }: PageProps) {
                 Feedback type
               </span>
               <select
-                className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900"
+                className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900"
                 defaultValue="bug"
                 name="feedback_type"
                 required
@@ -150,7 +150,7 @@ export default async function FeedbackPage({ searchParams }: PageProps) {
                 Category
               </span>
               <select
-                className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900"
+                className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900"
                 defaultValue="weekly_picks"
                 name="category"
                 required
@@ -169,7 +169,7 @@ export default async function FeedbackPage({ searchParams }: PageProps) {
               Description
             </span>
             <textarea
-              className="h-40 w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+              className="h-40 w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm"
               name="details"
               placeholder="Please include exact steps, what you expected to happen, what happened instead, and any relevant values."
               required
@@ -181,7 +181,7 @@ export default async function FeedbackPage({ searchParams }: PageProps) {
               Your submission is visible to league admins and will help prioritize fixes.
             </p>
             <button
-              className="rounded-md bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-700"
+              className="rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white hover:bg-slate-700"
               type="submit"
             >
               Submit feedback
@@ -190,7 +190,7 @@ export default async function FeedbackPage({ searchParams }: PageProps) {
         </form>
       </section>
 
-      <section className="mt-6 rounded-lg border border-slate-200 bg-white p-6">
+      <section className="mt-6 rounded-2xl border border-slate-200 bg-white p-6">
         <h2 className="text-lg font-semibold text-slate-900">Your Recent Submissions</h2>
         <p className="mt-1 text-xs text-slate-500">Times shown in {LEAGUE_TIME_ZONE}.</p>
         {myFeedback.length === 0 ? (

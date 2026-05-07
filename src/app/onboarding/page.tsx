@@ -45,14 +45,18 @@ export default async function OnboardingPage({ searchParams }: PageProps) {
 
   return (
     <main className="mx-auto flex min-h-screen max-w-2xl flex-col justify-center px-6 py-16">
-      <SignOutButton />
-      <p className="inline-flex w-fit rounded-full border border-blue-200 bg-blue-50 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-blue-700">
-        League Setup
-      </p>
-      <h1 className="mt-4 text-3xl font-semibold tracking-tight">Complete your profile</h1>
-      <p className="mt-2 text-sm text-slate-600">
-        We need your team and contact details before you can submit race picks.
-      </p>
+      <header className="relative overflow-hidden rounded-3xl border border-slate-200 bg-white p-6">
+        <SignOutButton />
+        <p className="inline-flex w-fit rounded-full border border-blue-200 bg-blue-50 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-blue-700">
+          League Setup
+        </p>
+        <h1 className="mt-4 text-4xl font-semibold tracking-tight text-slate-950">
+          Complete your profile
+        </h1>
+        <p className="mt-2 max-w-xl text-sm leading-6 text-slate-600">
+          Add your team and contact details once, then you can jump straight into race week.
+        </p>
+      </header>
 
       {error ? (
         <p className="mt-4 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
@@ -68,13 +72,13 @@ export default async function OnboardingPage({ searchParams }: PageProps) {
 
       <form
         action={saveProfileAction}
-        className="mt-6 grid gap-4 rounded-lg border border-slate-200 bg-white p-6"
+        className="mt-6 grid gap-4 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm"
       >
         <label className="block">
           <span className="mb-1 block text-sm font-medium text-slate-700">Full name</span>
           <input
             required
-            className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+            className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm"
             defaultValue={profile?.full_name ?? ""}
             name="full_name"
             type="text"
@@ -85,7 +89,7 @@ export default async function OnboardingPage({ searchParams }: PageProps) {
           <span className="mb-1 block text-sm font-medium text-slate-700">Team name</span>
           <input
             required
-            className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+            className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm"
             defaultValue={profile?.team_name ?? ""}
             name="team_name"
             type="text"
@@ -96,7 +100,7 @@ export default async function OnboardingPage({ searchParams }: PageProps) {
           <span className="mb-1 block text-sm font-medium text-slate-700">Phone number</span>
           <input
             required
-            className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+            className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm"
             defaultValue={profile?.phone_number ?? ""}
             name="phone_number"
             placeholder="e.g. 317-555-1212"
@@ -108,7 +112,7 @@ export default async function OnboardingPage({ searchParams }: PageProps) {
           <span className="mb-1 block text-sm font-medium text-slate-700">Phone carrier</span>
           <select
             required
-            className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+            className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm"
             defaultValue={profile?.phone_carrier ?? ""}
             name="phone_carrier"
           >
@@ -124,7 +128,7 @@ export default async function OnboardingPage({ searchParams }: PageProps) {
         </label>
 
         <button
-          className="mt-2 rounded-md bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-700"
+          className="mt-2 rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white hover:bg-slate-700"
           type="submit"
         >
           Save profile

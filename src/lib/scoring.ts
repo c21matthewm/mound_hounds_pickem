@@ -65,11 +65,9 @@ type Participant = {
 export type LeaderboardRow = {
   change: number;
   currentStanding: number;
-  previousStanding: number | null;
   raceBreakdown: Map<number, number>;
   teamName: string;
   totalPoints: number;
-  trend: "flat" | "up" | "down";
   userId: string;
 };
 
@@ -156,7 +154,6 @@ export type ParticipantAnalyticsSummary = {
   fieldSize: number;
   lastThreeRaceAverage: number | null;
   momentumDelta: number | null;
-  pickSubmissionRate: number;
   topThreeFinishes: number;
   totalPoints: number;
   weeklyWins: number;
@@ -227,48 +224,6 @@ const assignCompetitionRanks = <T extends { teamName: string; totalPoints: numbe
       racePoints: row.racePoints,
       totalPoints: row.totalPoints
     };
-    previousRank = rank;
-  });
-
-  return ranked;
-};
-
-const assignWeeklyRaceRanks = <T extends { averageSpeed: number | null; racePoints: number; teamName: string }>(
-  rows: T[],
-  officialRaceAverageSpeed: number | null
-): Array<T & { rank: number }> => {
-  const sorted = buildOrderedWeeklyRows(
-    rows.map((row) => ({
-      ...row,
-      points: row.racePoints
-    })),
-    officialRaceAverageSpeed
-  );
-
-  if (sorted.length === 0) {
-    return [];
-  }
-
-  const topPoints = sorted[0].points;
-  const topTieCount = sorted.filter((row) => row.points === topPoints).length;
-
-  const ranked: Array<T & { rank: number }> = [];
-  let previousPoints: number | null = null;
-  let previousRank = 0;
-
-  sorted.forEach((row, index) => {
-    let rank: number;
-
-    if (topTieCount > 1 && row.points === topPoints) {
-      rank = index + 1;
-    } else if (previousPoints !== null && row.points === previousPoints) {
-      rank = previousRank;
-    } else {
-      rank = index + 1;
-    }
-
-    ranked.push({ ...(row as T), rank });
-    previousPoints = row.points;
     previousRank = rank;
   });
 
@@ -615,17 +570,13 @@ export async function buildLeagueScoringSnapshot(): Promise<LeagueScoringSnapsho
         : null;
       const baselinePrevious = previousStanding ?? currentStanding;
       const change = baselinePrevious - currentStanding;
-      const trend: LeaderboardRow["trend"] =
-        change > 0 ? "up" : change < 0 ? "down" : "flat";
 
       return {
         change,
         currentStanding,
-        previousStanding,
         raceBreakdown: raceBreakdownByUser.get(participant.id) ?? new Map<number, number>(),
         teamName: participant.teamName,
         totalPoints: cumulativeByUser.get(participant.id) ?? 0,
-        trend,
         userId: participant.id
       };
     })
@@ -993,7 +944,6 @@ export async function buildParticipantAnalyticsSnapshot(
         fieldSize,
         lastThreeRaceAverage: null,
         momentumDelta: null,
-        pickSubmissionRate: 0,
         topThreeFinishes: 0,
         totalPoints: 0,
         weeklyWins: 0,
@@ -1034,7 +984,13 @@ export async function buildParticipantAnalyticsSnapshot(
         userId: row.id
       };
     });
-    const weeklyRanks = assignWeeklyRaceRanks(weeklyRows, officialRaceAverageSpeed);
+    const weeklyRanks = assignWeeklyRanks(
+      weeklyRows.map((row) => ({
+        ...row,
+        points: row.racePoints
+      })),
+      officialRaceAverageSpeed
+    );
     const weeklyRankByUser = new Map(weeklyRanks.map((row) => [row.userId, row.rank]));
     const raceAveragePoints =
       weeklyRows.length === 0
@@ -1058,6 +1014,7 @@ export async function buildParticipantAnalyticsSnapshot(
       cumulativeRanks.find((row) => row.userId === participant.id)?.rank ?? currentStanding;
 
     const participantWeekly = weeklyRows.find((row) => row.userId === participant.id);
+    const participantWeeklyPoints = participantWeekly?.racePoints ?? missingPickRacePoints;
     const participantAverageSpeed = participantWeekly?.averageSpeed ?? null;
 
     raceRows.push({
@@ -1065,7 +1022,7 @@ export async function buildParticipantAnalyticsSnapshot(
       cumulativePoints: cumulativeByUser.get(participant.id) ?? 0,
       fieldSize,
       officialRaceAverageSpeed,
-      pointsVsRaceAverage: (participantWeekly?.racePoints ?? 0) - raceAveragePoints,
+      pointsVsRaceAverage: participantWeeklyPoints - raceAveragePoints,
       raceAveragePoints,
       raceDate: race.race_date,
       raceId: race.id,
@@ -1073,7 +1030,7 @@ export async function buildParticipantAnalyticsSnapshot(
       submittedPick: participantAverageSpeed !== null,
       tiebreakDelta: calculateOfficialSpeedDelta(participantAverageSpeed, officialRaceAverageSpeed),
       weeklyFinish: weeklyRankByUser.get(participant.id) ?? null,
-      weeklyPoints: participantWeekly?.racePoints ?? 0
+      weeklyPoints: participantWeeklyPoints
     });
   });
 
@@ -1084,7 +1041,6 @@ export async function buildParticipantAnalyticsSnapshot(
   const tiebreakDeltas = raceRows
     .map((row) => row.tiebreakDelta)
     .filter((value): value is number => value !== null);
-  const submittedCount = raceRows.filter((row) => row.submittedPick).length;
   const bestWeek = raceRows.reduce<ParticipantAnalyticsRaceRow | null>(
     (best, row) => pickBetterBestWeek(best, row),
     null
@@ -1110,7 +1066,6 @@ export async function buildParticipantAnalyticsSnapshot(
       fieldSize,
       lastThreeRaceAverage,
       momentumDelta: lastThreeRaceAverage === null ? null : lastThreeRaceAverage - averageWeeklyPoints,
-      pickSubmissionRate: raceRows.length === 0 ? 0 : submittedCount / raceRows.length,
       topThreeFinishes: weeklyFinishes.filter((finish) => finish <= 3).length,
       totalPoints: raceRows[raceRows.length - 1]?.cumulativePoints ?? 0,
       weeklyWins: weeklyFinishes.filter((finish) => finish === 1).length,

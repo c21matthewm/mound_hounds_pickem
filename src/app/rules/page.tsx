@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
+import { MobileBottomNav } from "@/components/mobile-bottom-nav";
 import { SignOutButton } from "@/components/sign-out-button";
 import { isProfileComplete, type ProfileRow } from "@/lib/profile";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
@@ -27,7 +28,7 @@ export default async function RulesPage() {
   }
 
   return (
-    <main className="mx-auto flex min-h-screen max-w-[1200px] flex-col px-6 py-10">
+    <main className="mx-auto flex min-h-screen max-w-[1200px] flex-col px-6 py-10 pb-24 md:pb-10">
       <header className="relative flex flex-wrap items-start justify-between gap-4">
         <div>
           <p className="inline-flex rounded-full border border-blue-200 bg-blue-50 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-blue-700">
@@ -62,7 +63,7 @@ export default async function RulesPage() {
         </div>
       </header>
 
-      <section className="mt-6 rounded-lg border border-slate-200 bg-white p-6">
+      <section className="mt-6 rounded-2xl border border-slate-200 bg-white p-6">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <p className="text-sm text-slate-700">
             The PDF is shown inline below. If your browser blocks inline PDF display, open it
@@ -78,7 +79,7 @@ export default async function RulesPage() {
           </a>
         </div>
 
-        <div className="mt-4 h-[70vh] overflow-hidden rounded-lg border border-slate-200 bg-slate-50">
+        <div className="mt-4 h-[70vh] overflow-hidden rounded-2xl border border-slate-200 bg-slate-50">
           <iframe
             className="h-full w-full"
             src={`${RULES_PDF_PATH}#view=FitH`}
@@ -86,6 +87,7 @@ export default async function RulesPage() {
           />
         </div>
       </section>
+      <MobileBottomNav />
     </main>
   );
 }

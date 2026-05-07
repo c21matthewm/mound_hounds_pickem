@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { Fragment, useMemo, useState } from "react";
 import {
   buildOrderedWeeklyRows,
   calculateOfficialSpeedDelta,
@@ -292,22 +292,28 @@ export function PicksByRaceTable({ officialWinningAverageSpeed, resultsPosted, r
 
   return (
     <>
-      <section className="mt-6 overflow-x-auto rounded-lg border border-slate-200 bg-white">
-        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 bg-slate-50 px-3 py-2">
-          <p className="text-xs text-slate-600">
-            Showing <span className="font-semibold text-slate-900">{filteredAndSortedRows.length}</span>{" "}
-            of {rows.length} participant row(s). Click a participant name for score breakdown.
-          </p>
+      <section className="mt-6 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 bg-gradient-to-r from-cyan-50 to-slate-50 px-4 py-3">
+          <div>
+            <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-800">
+              Picks Matrix
+            </h2>
+            <p className="mt-1 text-xs text-slate-600">
+              Showing <span className="font-semibold text-slate-900">{filteredAndSortedRows.length}</span>{" "}
+              of {rows.length} teams. Pick and score columns are paired by group.
+            </p>
+          </div>
           <button
             className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-100"
             data-testid="picks-table-reset"
             onClick={resetView}
             type="button"
           >
-            Reset filters & sort
+            Reset view
           </button>
         </div>
 
+        <div className="overflow-x-auto">
         <table className="min-w-full text-left text-sm">
           <thead className="bg-slate-50 text-slate-700">
             <tr>
@@ -345,28 +351,28 @@ export function PicksByRaceTable({ officialWinningAverageSpeed, resultsPosted, r
                 </button>
               </th>
               {Array.from({ length: 6 }, (_, index) => index + 1).map((groupNumber) => (
-                <th key={`group-${groupNumber}`} className="px-3 py-2 font-semibold">
-                  <button
-                    className="inline-flex items-center gap-1"
-                    onClick={() => onSort(`driver${groupNumber}` as SortKey)}
-                    type="button"
-                  >
-                    Group {groupNumber}{" "}
-                    {sortIndicator(`driver${groupNumber}` as SortKey, sortKey, sortDirection)}
-                  </button>
-                </th>
-              ))}
-              {Array.from({ length: 6 }, (_, index) => index + 1).map((groupNumber) => (
-                <th key={`group-score-${groupNumber}`} className="px-3 py-2 font-semibold">
-                  <button
-                    className="inline-flex items-center gap-1"
-                    onClick={() => onSort(`score${groupNumber}` as SortKey)}
-                    type="button"
-                  >
-                    Group {groupNumber} (Score){" "}
-                    {sortIndicator(`score${groupNumber}` as SortKey, sortKey, sortDirection)}
-                  </button>
-                </th>
+                <Fragment key={`group-columns-${groupNumber}`}>
+                  <th className="px-3 py-2 font-semibold">
+                    <button
+                      className="inline-flex items-center gap-1"
+                      onClick={() => onSort(`driver${groupNumber}` as SortKey)}
+                      type="button"
+                    >
+                      G{groupNumber} Pick{" "}
+                      {sortIndicator(`driver${groupNumber}` as SortKey, sortKey, sortDirection)}
+                    </button>
+                  </th>
+                  <th className="px-3 py-2 font-semibold">
+                    <button
+                      className="inline-flex items-center gap-1"
+                      onClick={() => onSort(`score${groupNumber}` as SortKey)}
+                      type="button"
+                    >
+                      G{groupNumber} Score{" "}
+                      {sortIndicator(`score${groupNumber}` as SortKey, sortKey, sortDirection)}
+                    </button>
+                  </th>
+                </Fragment>
               ))}
             </tr>
             <tr>
@@ -408,30 +414,30 @@ export function PicksByRaceTable({ officialWinningAverageSpeed, resultsPosted, r
                 />
               </th>
               {Array.from({ length: 6 }, (_, index) => index + 1).map((groupNumber) => (
-                <th key={`driver-filter-${groupNumber}`} className="px-3 py-2">
-                  <input
-                    className={filterInputClassName}
-                    onChange={(event) =>
-                      updateFilter(`driver${groupNumber}` as SortKey, event.target.value)
-                    }
-                    placeholder="Driver contains..."
-                    type="text"
-                    value={filters[`driver${groupNumber}` as SortKey]}
-                  />
-                </th>
-              ))}
-              {Array.from({ length: 6 }, (_, index) => index + 1).map((groupNumber) => (
-                <th key={`score-filter-${groupNumber}`} className="px-3 py-2">
-                  <input
-                    className={filterInputClassName}
-                    onChange={(event) =>
-                      updateFilter(`score${groupNumber}` as SortKey, event.target.value)
-                    }
-                    placeholder=">=30"
-                    type="text"
-                    value={filters[`score${groupNumber}` as SortKey]}
-                  />
-                </th>
+                <Fragment key={`group-filters-${groupNumber}`}>
+                  <th className="px-3 py-2">
+                    <input
+                      className={filterInputClassName}
+                      onChange={(event) =>
+                        updateFilter(`driver${groupNumber}` as SortKey, event.target.value)
+                      }
+                      placeholder="Driver..."
+                      type="text"
+                      value={filters[`driver${groupNumber}` as SortKey]}
+                    />
+                  </th>
+                  <th className="px-3 py-2">
+                    <input
+                      className={filterInputClassName}
+                      onChange={(event) =>
+                        updateFilter(`score${groupNumber}` as SortKey, event.target.value)
+                      }
+                      placeholder=">=30"
+                      type="text"
+                      value={filters[`score${groupNumber}` as SortKey]}
+                    />
+                  </th>
+                </Fragment>
               ))}
             </tr>
           </thead>
@@ -464,17 +470,22 @@ export function PicksByRaceTable({ officialWinningAverageSpeed, resultsPosted, r
                   {Array.from({ length: 6 }, (_, offset) => offset + 1).map((groupNumber) => {
                     const groupCell = row.drivers[groupNumber - 1];
                     return (
-                      <td key={`${row.userId}-driver-${groupNumber}`} className="px-3 py-2">
-                        {groupCell?.driverName ?? "No pick submitted"}
-                      </td>
-                    );
-                  })}
-                  {Array.from({ length: 6 }, (_, offset) => offset + 1).map((groupNumber) => {
-                    const groupCell = row.drivers[groupNumber - 1];
-                    return (
-                      <td key={`${row.userId}-score-${groupNumber}`} className="px-3 py-2">
-                        {resultsPosted ? (groupCell?.points ?? "-") : "-"}
-                      </td>
+                      <Fragment key={`${row.userId}-group-${groupNumber}`}>
+                        <td className="px-3 py-2">
+                          {groupCell?.driverName ?? (
+                            <span className="text-slate-400">No pick submitted</span>
+                          )}
+                        </td>
+                        <td className="px-3 py-2">
+                          {resultsPosted ? (
+                            <span className="inline-flex min-w-8 justify-center rounded-full bg-slate-100 px-2 py-0.5 text-xs font-semibold text-slate-700">
+                              {groupCell?.points ?? "-"}
+                            </span>
+                          ) : (
+                            "-"
+                          )}
+                        </td>
+                      </Fragment>
                     );
                   })}
                 </tr>
@@ -482,6 +493,7 @@ export function PicksByRaceTable({ officialWinningAverageSpeed, resultsPosted, r
             )}
           </tbody>
         </table>
+        </div>
       </section>
 
       {selectedRow ? (

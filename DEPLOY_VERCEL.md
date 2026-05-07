@@ -1,90 +1,129 @@
-# Deploy To Vercel (First-Time Setup)
+# Deploy To Vercel
 
-This guide publishes your Next.js app to a public URL so participants can create accounts and test.
+This app is designed to run locally from `dev` and deploy publicly from `main`.
 
-## 1) Prerequisites
+Production URL currently used in examples:
 
-- GitHub account
-- Vercel account (sign in with GitHub)
-- Supabase project already set up (you already ran `supabase/schema.sql`)
-
-## 2) Push This Project To GitHub
-
-From project root:
-
-```bash
-git init
-git add .
-git commit -m "Initial INDYCAR fantasy app"
-git branch -M main
-git remote add origin https://github.com/<your-user>/<your-repo>.git
-git push -u origin main
+```text
+https://moundhoundspickem.vercel.app
 ```
 
-If this repo is already connected to GitHub, just commit and push latest changes.
+Replace that with a future custom domain if you add one later.
 
-## 3) Create Vercel Project
+## 1. GitHub And Branches
 
-1. Open Vercel dashboard: `https://vercel.com/dashboard`
-2. Click `Add New...` -> `Project`
-3. Import your GitHub repo
-4. Framework should auto-detect as `Next.js`
-5. Keep root directory as repo root
-6. Click `Deploy` once (without env vars it may fail, that is okay for first URL creation)
+Vercel should be connected to this GitHub repo and production should deploy from `main`.
 
-## 4) Set Environment Variables In Vercel
+Daily development flow:
 
-In Vercel project:
+```bash
+git checkout dev
+npm run verify
+git push origin dev
+```
 
-1. Go to `Settings` -> `Environment Variables`
-2. Add each variable below for `Production`, `Preview`, and `Development`:
+When ready to release:
 
-- `NEXT_PUBLIC_SUPABASE_URL`
-- `NEXT_PUBLIC_SUPABASE_ANON_KEY`
-- `SUPABASE_SERVICE_ROLE_KEY`
-- `CRON_SECRET`
-- `NEXT_PUBLIC_SITE_URL`
-- `RESEND_API_KEY`
-- `RESEND_FROM_EMAIL`
-- `RESEND_API_KEY`
-- `RESEND_FROM_EMAIL`
-- `RESEND_REPLY_TO` (optional)
+```bash
+git checkout main
+git merge dev
+git push origin main
+git checkout dev
+```
 
-Use your existing `.env.local` values for the first four.
+Vercel will build the pushed `main` branch.
 
-For `CRON_SECRET`, generate a strong value:
+## 2. Vercel Environment Variables
+
+In Vercel:
+
+```text
+Project -> Settings -> Environment Variables
+```
+
+Set these for Production. Preview/Development can use the same values while the app is small.
+
+Required:
+
+```text
+NEXT_PUBLIC_SUPABASE_URL
+NEXT_PUBLIC_SUPABASE_ANON_KEY
+SUPABASE_SERVICE_ROLE_KEY
+NEXT_PUBLIC_SITE_URL
+CRON_SECRET
+```
+
+Set `NEXT_PUBLIC_SITE_URL` to:
+
+```text
+https://moundhoundspickem.vercel.app
+```
+
+Optional reminder delivery values:
+
+```text
+RESEND_API_KEY
+RESEND_FROM_EMAIL
+RESEND_REPLY_TO
+```
+
+Generate a strong cron secret locally:
 
 ```bash
 openssl rand -base64 48
 ```
 
-Set `NEXT_PUBLIC_SITE_URL` to your production Vercel URL, for example:
+After changing env vars, redeploy the latest production deployment.
+
+## 3. Supabase Auth URLs
+
+In Supabase:
 
 ```text
-https://your-project-name.vercel.app
+Authentication -> URL Configuration
 ```
 
-Then click `Redeploy` from the latest deployment.
+Set Site URL:
 
-## 5) Configure Supabase Auth URLs (Required)
+```text
+https://moundhoundspickem.vercel.app
+```
 
-In Supabase dashboard:
+Add Redirect URLs:
 
-1. Open `Authentication` -> `URL Configuration`
-2. Set `Site URL` to your Vercel production URL:
-   - `https://your-project-name.vercel.app`
-3. Add `Redirect URLs`:
-   - `http://localhost:3000/auth/callback`
-   - `https://your-project-name.vercel.app/auth/callback`
-   - If using a custom domain later, add `https://your-domain.com/auth/callback`
-4. Save
+```text
+http://localhost:3000/auth/callback
+https://moundhoundspickem.vercel.app/auth/callback
+```
 
-If email confirmation is enabled, users must confirm by email before login.
+If you add a custom domain later, also add:
 
-## 6) Create/Promote Your Admin User
+```text
+https://your-domain.com/auth/callback
+```
 
-1. Sign up once on the public site with your own account
-2. In Supabase SQL Editor, run:
+## 4. Supabase Database
+
+For a new project, run:
+
+```text
+supabase/schema.sql
+```
+
+For an existing project, apply any missing files in `supabase/migrations/` in filename order.
+
+Most recent scoring safety migration:
+
+```text
+supabase/migrations/20260310_auto_snapshot_race_groups_on_results_insert.sql
+```
+
+That migration ensures driver groups are snapshotted as soon as race results are inserted, even if
+results are inserted outside the normal admin UI path.
+
+## 5. Promote Admin
+
+After signing up with your commissioner/admin account, run this in Supabase SQL Editor:
 
 ```sql
 update public.profiles p
@@ -94,59 +133,64 @@ where p.id = u.id
   and lower(u.email) = lower('your-admin-email@example.com');
 ```
 
-Now your account can access `/admin`.
+Then visit:
 
-## 7) Verify Public Flow
+```text
+https://moundhoundspickem.vercel.app/admin
+```
 
-Test in this order:
+## 6. Verify Production
 
-1. Open public URL
-2. Create a new test participant account
-3. Login and complete onboarding
-4. Submit picks on `/picks`
-5. Login as admin, create race/results, verify leaderboard updates
+Open the production URL and test:
 
-## 8) Verify Cron Endpoint Security + Health
+1. Login/signup.
+2. Complete onboarding.
+3. Open dashboard.
+4. Confirm `/picks`, `/leaderboard`, `/rules`, and `/feedback` load.
+5. Login as admin and confirm `/admin` loads.
 
-From terminal:
+Cron health checks:
 
 ```bash
 curl -i \
   -H "Authorization: Bearer <CRON_SECRET>" \
-  https://your-project-name.vercel.app/api/cron/fantasy-winner
+  https://moundhoundspickem.vercel.app/api/cron/fantasy-winner
 ```
-
-Expected: JSON with `"ok": true`.
-
-Also verify pick reminders endpoint:
 
 ```bash
 curl -i \
   -H "Authorization: Bearer <CRON_SECRET>" \
-  https://your-project-name.vercel.app/api/cron/pick-reminders
+  https://moundhoundspickem.vercel.app/api/cron/pick-reminders
 ```
 
-Expected: JSON with `"ok": true`.
+Expected response includes:
 
-Without auth header, it should return `401` in production.
+```json
+{"ok":true}
+```
 
-## 9) Set Up Supabase Cron (5-Minute Automation)
+Without the auth header, production should return `401`.
 
-This replaces Vercel Cron on Hobby and gives you the frequent schedule you wanted.
+## 7. Supabase Cron
 
-In Supabase SQL Editor, run:
+Vercel Hobby only supports daily cron frequency, so use Supabase `pg_cron` + `pg_net` for frequent
+jobs.
+
+Run once in Supabase SQL Editor:
 
 ```sql
 create extension if not exists pg_cron;
 create extension if not exists pg_net;
+```
 
--- Optional cleanup if job already exists.
+Fantasy winner job:
+
+```sql
 do $$
 declare
   existing_job_id bigint;
 begin
-  select j.jobid
-    into existing_job_id
+  select j.jobid into existing_job_id
   from cron.job j
   where j.jobname = 'fantasy_winner_5min';
 
@@ -161,7 +205,7 @@ select cron.schedule(
   '*/5 * * * *',
   $$
   select net.http_post(
-    url := 'https://your-project-name.vercel.app/api/cron/fantasy-winner',
+    url := 'https://moundhoundspickem.vercel.app/api/cron/fantasy-winner',
     headers := jsonb_build_object(
       'authorization', 'Bearer YOUR_CRON_SECRET',
       'content-type', 'application/json'
@@ -172,15 +216,14 @@ select cron.schedule(
 );
 ```
 
-Add a second cron for pick reminders:
+Pick reminder job:
 
 ```sql
 do $$
 declare
   existing_job_id bigint;
 begin
-  select j.jobid
-    into existing_job_id
+  select j.jobid into existing_job_id
   from cron.job j
   where j.jobname = 'pick_reminders_5min';
 
@@ -195,7 +238,7 @@ select cron.schedule(
   '*/5 * * * *',
   $$
   select net.http_post(
-    url := 'https://your-project-name.vercel.app/api/cron/pick-reminders',
+    url := 'https://moundhoundspickem.vercel.app/api/cron/pick-reminders',
     headers := jsonb_build_object(
       'authorization', 'Bearer YOUR_CRON_SECRET',
       'content-type', 'application/json'
@@ -206,7 +249,7 @@ select cron.schedule(
 );
 ```
 
-Then verify job registration:
+Verify jobs:
 
 ```sql
 select jobid, jobname, schedule, active
@@ -214,35 +257,49 @@ from cron.job
 order by jobid desc;
 ```
 
-Replace placeholders first:
-- `https://your-project-name.vercel.app` with your real production domain
-- `YOUR_CRON_SECRET` with the same value stored in Vercel env vars
+## 8. GitHub Production Smoke E2E
 
-## 10) Optional: Custom Domain
+Workflow:
 
-In Vercel:
+```text
+.github/workflows/production-smoke-e2e.yml
+```
 
-1. `Settings` -> `Domains`
-2. Add your domain and follow DNS instructions
-3. Update:
-   - `NEXT_PUBLIC_SITE_URL` in Vercel
-   - Supabase `Site URL`
-   - Supabase redirect URL for `/auth/callback`
+Required GitHub repository secrets:
 
-Redeploy after changing env vars.
+```text
+NEXT_PUBLIC_SUPABASE_URL
+SUPABASE_SERVICE_ROLE_KEY
+```
 
-## Troubleshooting: `MIDDLEWARE_INVOCATION_FAILED`
+Optional repository variable:
 
-If you see `500: INTERNAL_SERVER_ERROR` with `MIDDLEWARE_INVOCATION_FAILED`, the most common cause
-is missing Supabase env vars in Vercel Production.
+```text
+PRODUCTION_BASE_URL=https://moundhoundspickem.vercel.app
+```
 
-Check in Vercel (`Project -> Settings -> Environment Variables`) that these are present for
-**Production**:
+The workflow can run automatically after successful deployments or manually from the GitHub
+Actions tab.
 
-- `NEXT_PUBLIC_SUPABASE_URL`
-- `NEXT_PUBLIC_SUPABASE_ANON_KEY`
-- `SUPABASE_SERVICE_ROLE_KEY`
-- `CRON_SECRET`
-- `NEXT_PUBLIC_SITE_URL`
+## Troubleshooting
 
-After updating env vars, redeploy and test again.
+`500: MIDDLEWARE_INVOCATION_FAILED`
+
+Usually means a required Vercel env var is missing in Production. Check:
+
+```text
+NEXT_PUBLIC_SUPABASE_URL
+NEXT_PUBLIC_SUPABASE_ANON_KEY
+SUPABASE_SERVICE_ROLE_KEY
+NEXT_PUBLIC_SITE_URL
+CRON_SECRET
+```
+
+`401` from cron endpoint
+
+The `Authorization: Bearer <CRON_SECRET>` header does not match Vercel's `CRON_SECRET`, or the
+deployment has not been redeployed since the env var changed.
+
+Auth redirects to localhost in production
+
+Update `NEXT_PUBLIC_SITE_URL` in Vercel and Supabase Auth URL Configuration, then redeploy.
