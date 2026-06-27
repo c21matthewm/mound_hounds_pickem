@@ -2,10 +2,37 @@ import fs from "node:fs";
 import path from "node:path";
 import { createClient } from "@supabase/supabase-js";
 
-const TEST_NAME_PREFIXES = ["[PW E2E ", "[PW INDY ", "[PW AUTH ", "[TEST FLOW "];
-const TEST_RACE_PREFIXES = ["[PW E2E ", "[PW INDY ", "[TEST FLOW "];
-const TEST_DRIVER_PREFIXES = ["[PW E2E ", "[PW INDY ", "[TEST FLOW "];
-const TEST_EMAIL_PREFIXES = ["pw-e2e-", "pw-indy-", "pw-auth-"];
+const PLAYWRIGHT_NAME_PREFIXES = ["[PW E2E ", "[PW INDY ", "[PW AUTH "];
+const PLAYWRIGHT_RACE_PREFIXES = ["[PW E2E ", "[PW INDY "];
+const PLAYWRIGHT_DRIVER_PREFIXES = ["[PW E2E ", "[PW INDY "];
+
+const PLAYWRIGHT_RUN_ID = "[0-9a-f]{8}";
+const PLAYWRIGHT_PROFILE_PATTERNS = [
+  new RegExp(`^\\[PW E2E ${PLAYWRIGHT_RUN_ID}\\] (Admin|Participant[1-3]) Team$`),
+  new RegExp(`^\\[PW E2E ${PLAYWRIGHT_RUN_ID}\\] (Admin|Participant[1-3]) Owner$`),
+  new RegExp(`^\\[PW INDY ${PLAYWRIGHT_RUN_ID}\\] (Admin|Participant) Team$`),
+  new RegExp(`^\\[PW INDY ${PLAYWRIGHT_RUN_ID}\\] (Admin|Participant) Owner$`),
+  new RegExp(`^\\[PW AUTH ${PLAYWRIGHT_RUN_ID}\\] Team ${PLAYWRIGHT_RUN_ID}$`),
+  new RegExp(`^\\[PW AUTH ${PLAYWRIGHT_RUN_ID}\\] Tester$`)
+];
+const PLAYWRIGHT_RACE_PATTERNS = [
+  new RegExp(`^\\[PW E2E ${PLAYWRIGHT_RUN_ID}\\] Race [AB]$`),
+  new RegExp(`^\\[PW INDY ${PLAYWRIGHT_RUN_ID}\\] Indianapolis 500$`)
+];
+const PLAYWRIGHT_DRIVER_PATTERNS = [
+  new RegExp(`^\\[PW E2E ${PLAYWRIGHT_RUN_ID}\\] Driver G[1-6] #[1-9][0-9]*$`),
+  new RegExp(`^\\[PW INDY ${PLAYWRIGHT_RUN_ID}\\] Qualifier [0-9]{2}$`)
+];
+const PLAYWRIGHT_FEEDBACK_PATTERNS = [
+  new RegExp(
+    `^\\[PW E2E ${PLAYWRIGHT_RUN_ID}\\] Feedback smoke check: form submission from automated e2e test\\.$`
+  )
+];
+const PLAYWRIGHT_AUTH_EMAIL_PATTERNS = [
+  new RegExp(`^pw-e2e-${PLAYWRIGHT_RUN_ID}-(admin|participant[1-3])@example\\.com$`),
+  new RegExp(`^pw-indy-${PLAYWRIGHT_RUN_ID}-(admin|participant)@example\\.com$`),
+  new RegExp(`^pw-auth-${PLAYWRIGHT_RUN_ID}@example\\.com$`)
+];
 
 const apply = process.argv.includes("--apply");
 
@@ -76,6 +103,24 @@ const uniqueBy = (rows, key) => {
   });
 };
 
+const matchesAnyPattern = (value, patterns) =>
+  typeof value === "string" && patterns.some((pattern) => pattern.test(value));
+
+const isPlaywrightProfile = (profile) =>
+  matchesAnyPattern(profile.team_name, PLAYWRIGHT_PROFILE_PATTERNS) ||
+  matchesAnyPattern(profile.full_name, PLAYWRIGHT_PROFILE_PATTERNS);
+
+const isPlaywrightRace = (race) => matchesAnyPattern(race.race_name, PLAYWRIGHT_RACE_PATTERNS);
+
+const isPlaywrightDriver = (driver) =>
+  matchesAnyPattern(driver.driver_name, PLAYWRIGHT_DRIVER_PATTERNS);
+
+const isPlaywrightFeedback = (feedback) =>
+  matchesAnyPattern(feedback.details, PLAYWRIGHT_FEEDBACK_PATTERNS);
+
+const isPlaywrightAuthUser = (user) =>
+  matchesAnyPattern(user.email, PLAYWRIGHT_AUTH_EMAIL_PATTERNS);
+
 const selectByPrefixes = async ({ table, column, select, prefixes }) => {
   const rows = [];
   for (const prefix of prefixes) {
@@ -104,9 +149,7 @@ const listAllTestAuthUsers = async () => {
 
     const currentUsers = data?.users ?? [];
     users.push(
-      ...currentUsers.filter((user) =>
-        TEST_EMAIL_PREFIXES.some((prefix) => user.email?.startsWith(prefix))
-      )
+      ...currentUsers.filter(isPlaywrightAuthUser)
     );
 
     if (currentUsers.length < perPage) {
@@ -149,42 +192,54 @@ const deleteByUserIds = async ({ table, userIds, label }) => {
 };
 
 const main = async () => {
-  const [races, driversByName, profilesByTeam, profilesByFullName, feedbackByDetails, authUsers] =
+  const [
+    raceCandidates,
+    driverCandidates,
+    profileTeamCandidates,
+    profileFullNameCandidates,
+    feedbackCandidates,
+    authUsers
+  ] =
     await Promise.all([
       selectByPrefixes({
         table: "races",
         column: "race_name",
         select: "id,race_name",
-        prefixes: TEST_RACE_PREFIXES
+        prefixes: PLAYWRIGHT_RACE_PREFIXES
       }),
       selectByPrefixes({
         table: "drivers",
         column: "driver_name",
         select: "id,driver_name",
-        prefixes: TEST_DRIVER_PREFIXES
+        prefixes: PLAYWRIGHT_DRIVER_PREFIXES
       }),
       selectByPrefixes({
         table: "profiles",
         column: "team_name",
         select: "id,team_name,full_name",
-        prefixes: TEST_NAME_PREFIXES
+        prefixes: PLAYWRIGHT_NAME_PREFIXES
       }),
       selectByPrefixes({
         table: "profiles",
         column: "full_name",
         select: "id,team_name,full_name",
-        prefixes: TEST_NAME_PREFIXES
+        prefixes: PLAYWRIGHT_NAME_PREFIXES
       }),
       selectByPrefixes({
         table: "feedback_items",
         column: "details",
         select: "id,user_id,details",
-        prefixes: TEST_NAME_PREFIXES
+        prefixes: PLAYWRIGHT_NAME_PREFIXES
       }),
       listAllTestAuthUsers()
     ]);
 
-  const profiles = uniqueBy([...profilesByTeam, ...profilesByFullName], "id");
+  const races = uniqueBy(raceCandidates, "id").filter(isPlaywrightRace);
+  const driversByName = uniqueBy(driverCandidates, "id").filter(isPlaywrightDriver);
+  const profiles = uniqueBy([...profileTeamCandidates, ...profileFullNameCandidates], "id").filter(
+    isPlaywrightProfile
+  );
+  const feedbackByDetails = uniqueBy(feedbackCandidates, "id").filter(isPlaywrightFeedback);
   const authUserIds = new Set(authUsers.map((user) => user.id));
   profiles.forEach((profile) => authUserIds.add(profile.id));
 
@@ -195,6 +250,7 @@ const main = async () => {
   const feedbackIds = uniqueBy(feedbackByDetails, "id").map((feedback) => feedback.id);
 
   console.log(`Mode: ${apply ? "apply" : "dry-run"}`);
+  console.log("Safety: exact Playwright-generated names/emails only; no generic PW/Indy substring matching.");
   console.log(`Test races: ${raceIds.length}`);
   races.forEach((race) => console.log(`  race ${race.id}: ${race.race_name}`));
   console.log(`Test drivers: ${driverIds.length}`);

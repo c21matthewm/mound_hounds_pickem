@@ -62,41 +62,6 @@ export default async function DashboardPage({ searchParams }: PageProps) {
         </p>
       ) : null}
 
-      <section className="mt-6 rounded-2xl border border-slate-200 bg-white p-4 sm:p-5">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <h2 className="text-lg font-semibold text-slate-900">Profile Snapshot</h2>
-            <p className="mt-1 text-sm text-slate-600">Your active league identity.</p>
-          </div>
-        </div>
-        <dl className="mt-4 grid grid-cols-1 gap-3 text-sm sm:grid-cols-2 lg:grid-cols-3">
-          <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5">
-            <dt className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
-              Full Name
-            </dt>
-            <dd className="mt-0.5 font-medium text-slate-900">{profile.full_name}</dd>
-          </div>
-          <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5">
-            <dt className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
-              Team Name
-            </dt>
-            <dd className="mt-0.5 font-medium text-slate-900">{profile.team_name}</dd>
-          </div>
-          <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5">
-            <dt className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Email</dt>
-            <dd className="mt-0.5 break-all font-medium text-slate-900">{user.email ?? "-"}</dd>
-          </div>
-          {profile.role === "admin" ? (
-            <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5">
-              <dt className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
-                Role
-              </dt>
-              <dd className="mt-0.5 font-medium capitalize text-slate-900">{profile.role}</dd>
-            </div>
-          ) : null}
-        </dl>
-      </section>
-
       <section className="mt-6">
         <div className="flex items-start justify-between gap-3">
           <div>
@@ -105,7 +70,7 @@ export default async function DashboardPage({ searchParams }: PageProps) {
           <div className="shrink-0 rounded-lg border border-slate-300 bg-white p-1 shadow-sm">
             <div
               aria-hidden
-              className="h-14 w-14 rounded-md border border-slate-200 bg-slate-200 bg-cover bg-center"
+              className="h-16 w-16 rounded-md border border-slate-200 bg-slate-200 bg-cover bg-center"
               style={{ backgroundImage: `url('${MOUND_HOUND_IMAGE_PATH}')` }}
             />
           </div>
@@ -157,6 +122,41 @@ export default async function DashboardPage({ searchParams }: PageProps) {
             </Link>
           ) : null}
         </div>
+      </section>
+
+      <section className="mt-6 rounded-2xl border border-slate-200 bg-white p-4 sm:p-5">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h2 className="text-lg font-semibold text-slate-900">Profile Snapshot</h2>
+            <p className="mt-1 text-sm text-slate-600">Your active league identity.</p>
+          </div>
+        </div>
+        <dl className="mt-4 grid grid-cols-1 gap-3 text-sm sm:grid-cols-2 lg:grid-cols-3">
+          <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5">
+            <dt className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+              Full Name
+            </dt>
+            <dd className="mt-0.5 font-medium text-slate-900">{profile.full_name}</dd>
+          </div>
+          <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5">
+            <dt className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+              Team Name
+            </dt>
+            <dd className="mt-0.5 font-medium text-slate-900">{profile.team_name}</dd>
+          </div>
+          <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5">
+            <dt className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Email</dt>
+            <dd className="mt-0.5 break-all font-medium text-slate-900">{user.email ?? "-"}</dd>
+          </div>
+          {profile.role === "admin" ? (
+            <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5">
+              <dt className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                Role
+              </dt>
+              <dd className="mt-0.5 font-medium capitalize text-slate-900">{profile.role}</dd>
+            </div>
+          ) : null}
+        </dl>
       </section>
 
       <MobileBottomNav />
