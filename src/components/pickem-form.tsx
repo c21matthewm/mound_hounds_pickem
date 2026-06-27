@@ -3,11 +3,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
 type SelectionMap = Record<number, number | null>;
-const GROUP_NUMBERS = [1, 2, 3, 4, 5, 6] as const;
 const LEAVE_CONFIRM_MESSAGE = "You have unsaved Pick'em changes. Leave this page without saving?";
 
 type DriverOption = {
   championshipPoints: number;
+  detailText?: string;
   driverName: string;
   id: number;
   imageUrl: string | null;
@@ -17,6 +17,7 @@ type DriverGroup = {
   drivers: DriverOption[];
   groupNumber: number;
   isTopGroup: boolean;
+  selectionLabel?: string;
 };
 
 type Props = {
@@ -38,6 +39,7 @@ export function PickemForm({
   raceId,
   savedSelection
 }: Props) {
+  const groupNumbers = useMemo(() => groups.map((group) => group.groupNumber), [groups]);
   const [draftSelection, setDraftSelection] = useState<SelectionMap>(() => ({ ...savedSelection }));
   const [draftAverageSpeed, setDraftAverageSpeed] = useState(existingAverageSpeed);
   const formRef = useRef<HTMLFormElement | null>(null);
@@ -48,11 +50,18 @@ export function PickemForm({
 
   const hasUnsavedChanges = useMemo(() => {
     const averageSpeedChanged = draftAverageSpeed.trim() !== existingAverageSpeed.trim();
-    const picksChanged = GROUP_NUMBERS.some(
+    const picksChanged = groupNumbers.some(
       (groupNumber) => (draftSelection[groupNumber] ?? null) !== (savedSelection[groupNumber] ?? null)
     );
     return averageSpeedChanged || picksChanged;
-  }, [draftAverageSpeed, draftSelection, existingAverageSpeed, savedSelection]);
+  }, [draftAverageSpeed, draftSelection, existingAverageSpeed, groupNumbers, savedSelection]);
+  const selectedGroupCount = groupNumbers.filter(
+    (groupNumber) => draftSelection[groupNumber] !== null && draftSelection[groupNumber] !== undefined
+  ).length;
+  const missingGroupNumbers = groupNumbers.filter(
+    (groupNumber) => draftSelection[groupNumber] === null || draftSelection[groupNumber] === undefined
+  );
+  const showMobileActionBar = !picksLocked && (hasUnsavedChanges || missingGroupNumbers.length > 0);
 
   const clearSubmitIntent = () => {
     submitInProgressRef.current = false;
@@ -231,6 +240,7 @@ export function PickemForm({
 
         {groups.map((group) => (
           <section
+            id={`driver-group-${group.groupNumber}`}
             key={group.groupNumber}
             className="rounded-2xl border border-slate-200 bg-white p-5 md:p-6"
           >
@@ -242,7 +252,7 @@ export function PickemForm({
                 <h3 className="text-xl font-semibold text-slate-900">
                   Group {group.groupNumber}
                   <span className="ml-2 text-sm font-normal text-slate-500">
-                    {group.isTopGroup ? "Pick 1 of 4" : "Pick 1"}
+                    {group.selectionLabel ?? (group.isTopGroup ? "Pick 1 of 4" : "Pick 1")}
                   </span>
                 </h3>
               </div>
@@ -304,7 +314,7 @@ export function PickemForm({
                       <div>
                         <p className="pr-16 text-sm font-semibold text-slate-900">{driver.driverName}</p>
                         <p className="text-xs text-slate-600">
-                          Championship Pts: {driver.championshipPoints}
+                          {driver.detailText ?? `Championship Pts: ${driver.championshipPoints}`}
                         </p>
                       </div>
 
@@ -340,6 +350,44 @@ export function PickemForm({
         >
           {picksLocked ? "Picks are locked" : "Save Pick'em Form"}
         </button>
+
+        {showMobileActionBar ? (
+          <div className="fixed inset-x-3 bottom-[4.35rem] z-30 md:hidden">
+            <div className="mx-auto max-w-md rounded-lg border border-slate-200 bg-white/95 px-2.5 py-1.5 shadow-[0_18px_45px_-28px_rgba(15,23,42,0.9)] backdrop-blur">
+              <div className="flex items-center justify-between gap-2">
+                <p className="shrink-0 text-xs font-semibold text-slate-800">
+                  {selectedGroupCount}/{groupNumbers.length} groups
+                </p>
+                <div className="min-w-0 flex-1 overflow-x-auto">
+                  {missingGroupNumbers.length > 0 ? (
+                    <div className="flex w-max gap-1">
+                      {missingGroupNumbers.map((groupNumber) => (
+                        <a
+                          key={`missing-group-${groupNumber}`}
+                          className="rounded-md border border-amber-200 bg-amber-50 px-2 py-0.5 text-[11px] font-semibold text-amber-800"
+                          href={`#driver-group-${groupNumber}`}
+                        >
+                          G{groupNumber}
+                        </a>
+                      ))}
+                    </div>
+                  ) : (
+                    <span className="block truncate text-[11px] font-medium text-emerald-700">
+                      All groups selected
+                    </span>
+                  )}
+                </div>
+                <button
+                  className="shrink-0 rounded-md bg-slate-900 px-2.5 py-1.5 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
+                  disabled={!canSubmit}
+                  type="submit"
+                >
+                  Save
+                </button>
+              </div>
+            </div>
+          </div>
+        ) : null}
       </fieldset>
     </form>
   );

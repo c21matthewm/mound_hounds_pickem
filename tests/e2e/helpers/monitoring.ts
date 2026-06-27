@@ -15,10 +15,13 @@ const baseHostname = baseUrl?.hostname ?? "127.0.0.1";
 const baseOrigin = baseUrl?.origin ?? "http://127.0.0.1:3007";
 const isKnownHydrationMismatch = (message: string): boolean =>
   message.includes("Hydration failed because the server rendered HTML didn't match the client.");
+const isKnownNextPerformanceMeasureIssue = (message: string): boolean =>
+  message.includes("Failed to execute 'measure' on 'Performance'") &&
+  message.includes("cannot have a negative time stamp");
 
 export const trackClientIssues = (page: Page, label: string, collector: string[]) => {
   page.on("pageerror", (error) => {
-    if (isKnownHydrationMismatch(error.message)) {
+    if (isKnownHydrationMismatch(error.message) || isKnownNextPerformanceMeasureIssue(error.message)) {
       return;
     }
     collector.push(`[${label}] pageerror: ${error.message}`);

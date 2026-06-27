@@ -1,3 +1,4 @@
+import type { SupabaseClient } from "@supabase/supabase-js";
 import Link from "next/link";
 import {
   cleanupTestFlowDataAction,
@@ -6,6 +7,7 @@ import {
   deleteRaceAction,
   deleteDriverAction,
   importChampionshipStandingsAction,
+  importIndy500QualifyingOrderAction,
   importIndycarResultsAction,
   setRaceArchivedAction,
   setRaceWinnerAction,
@@ -20,10 +22,17 @@ import { requireAdmin } from "@/lib/admin";
 import { feedbackCategoryLabel, feedbackTypeLabel } from "@/lib/feedback";
 import { queryStringParam } from "@/lib/query";
 import {
+  normalizeRacePickFormat,
+  pickGroupCountForFormat,
+  type RacePickFormat
+} from "@/lib/race-format";
+import { isMissingColumnError } from "@/lib/supabase/schema-compat";
+import {
   formatLeagueDateTime,
   formatLeagueDateTimeLocalInput,
   LEAGUE_TIME_ZONE
 } from "@/lib/timezone";
+import { assignWeeklyRanks, calculateOfficialSpeedDelta } from "@/lib/weekly-ranking";
 
 type DriverRow = {
   championship_points: number;
@@ -39,6 +48,8 @@ type RaceRow = {
   archived_at: string | null;
   id: number;
   is_archived: boolean;
+  official_winning_average_speed: number | string | null;
+  pick_format: RacePickFormat;
   payout: number | string;
   qualifying_start_at: string;
   race_date: string;
@@ -64,6 +75,27 @@ type ResultRow = {
   race_id: number;
 };
 
+type PickSummaryRow = {
+  average_speed: number | string;
+  driver_group1_id: number;
+  driver_group2_id: number;
+  driver_group3_id: number;
+  driver_group4_id: number;
+  driver_group5_id: number;
+  driver_group6_id: number;
+  driver_group7_id: number | null;
+  driver_group8_id: number | null;
+  race_id: number;
+  user_id: string;
+};
+
+type RaceDriverGroupRow = {
+  driver_id: number;
+  group_number: number;
+  qualifying_position: number | null;
+  race_id: number;
+};
+
 type FeedbackItemRow = {
   category: string;
   created_at: string;
@@ -79,6 +111,39 @@ type PageProps = {
 
 type AdminTab = "drivers" | "races" | "results" | "feedback";
 
+type ScoringAuditDriverCell = {
+  driverName: string | null;
+  groupNumber: number;
+  points: number | null;
+};
+
+type ScoringAuditRow = {
+  averageSpeed: number | null;
+  driverCells: ScoringAuditDriverCell[];
+  points: number;
+  rank: number;
+  submittedPick: boolean;
+  teamName: string;
+  tiebreakDelta: number | null;
+  userId: string;
+};
+
+type ScoringAudit = {
+  groupCount: number;
+  highestPossibleScore: number;
+  lowestPossibleScore: number;
+  noPickCount: number;
+  officialWinningAverageSpeed: number | null;
+  pickFormat: RacePickFormat;
+  raceDate: string;
+  raceId: number;
+  raceName: string;
+  resultCount: number;
+  rows: ScoringAuditRow[];
+  submittedPickCount: number;
+  winnerTeamName: string | null;
+};
+
 const formatDateTime = (value: string): string =>
   formatLeagueDateTime(value, { dateStyle: "medium", timeStyle: "short" });
 
@@ -93,6 +158,315 @@ const parseAdminTab = (value: string | undefined): AdminTab => {
   return "drivers";
 };
 
+const asNumber = (value: number | string | null | undefined): number => {
+  if (typeof value === "number") {
+    return value;
+  }
+
+  if (typeof value === "string") {
+    const parsed = Number(value);
+    if (!Number.isNaN(parsed)) {
+      return parsed;
+    }
+  }
+
+  return 0;
+};
+
+const formatOptionalDecimal = (value: number | null, digits = 3): string =>
+  value === null ? "-" : value.toFixed(digits);
+
+const loadAdminRaces = async (supabase: SupabaseClient) => {
+  const fields =
+    "id,race_name,pick_format,title_image_url,qualifying_start_at,race_date,payout,official_winning_average_speed,is_archived,archived_at,winner_profile_id,winner_source,winner_is_manual_override,winner_auto_eligible_at,winner_set_at";
+  const legacyFields =
+    "id,race_name,title_image_url,qualifying_start_at,race_date,payout,official_winning_average_speed,is_archived,archived_at,winner_profile_id,winner_source,winner_is_manual_override,winner_auto_eligible_at,winner_set_at";
+
+  const response = await supabase.from("races").select(fields).order("race_date", { ascending: false });
+  if (!response.error || !isMissingColumnError(response.error, "pick_format")) {
+    return response;
+  }
+
+  const legacyResponse = await supabase
+    .from("races")
+    .select(legacyFields)
+    .order("race_date", { ascending: false });
+
+  return {
+    ...legacyResponse,
+    data: (legacyResponse.data ?? []).map((race) => ({
+      ...race,
+      pick_format: "standard" as const
+    }))
+  };
+};
+
+const loadRaceDriverGroups = async (supabase: SupabaseClient) => {
+  const response = await supabase
+    .from("race_driver_groups")
+    .select("race_id,driver_id,group_number,qualifying_position");
+  if (!response.error || !isMissingColumnError(response.error, "qualifying_position")) {
+    return response;
+  }
+
+  const legacyResponse = await supabase.from("race_driver_groups").select("race_id,driver_id,group_number");
+
+  return {
+    ...legacyResponse,
+    data: (legacyResponse.data ?? []).map((row) => ({
+      ...row,
+      qualifying_position: null
+    }))
+  };
+};
+
+const loadAdminPicks = async (supabase: SupabaseClient) => {
+  const response = await supabase.from("picks").select(
+    "user_id,race_id,average_speed,driver_group1_id,driver_group2_id,driver_group3_id,driver_group4_id,driver_group5_id,driver_group6_id,driver_group7_id,driver_group8_id"
+  );
+
+  if (
+    !response.error ||
+    (!isMissingColumnError(response.error, "driver_group7_id") &&
+      !isMissingColumnError(response.error, "driver_group8_id"))
+  ) {
+    return response;
+  }
+
+  const legacyResponse = await supabase.from("picks").select(
+    "user_id,race_id,average_speed,driver_group1_id,driver_group2_id,driver_group3_id,driver_group4_id,driver_group5_id,driver_group6_id"
+  );
+
+  return {
+    ...legacyResponse,
+    data: (legacyResponse.data ?? []).map((pick) => ({
+      ...pick,
+      driver_group7_id: null,
+      driver_group8_id: null
+    }))
+  };
+};
+
+const keyForRaceDriver = (raceId: number, driverId: number): string => `${raceId}:${driverId}`;
+const keyForRaceUser = (raceId: number, userId: string): string => `${raceId}:${userId}`;
+
+const pickDriverIdsForGroupCount = (
+  pick: PickSummaryRow | null,
+  groupCount: number
+): Array<number | null> =>
+  [
+    pick?.driver_group1_id ?? null,
+    pick?.driver_group2_id ?? null,
+    pick?.driver_group3_id ?? null,
+    pick?.driver_group4_id ?? null,
+    pick?.driver_group5_id ?? null,
+    pick?.driver_group6_id ?? null,
+    pick?.driver_group7_id ?? null,
+    pick?.driver_group8_id ?? null
+  ].slice(0, groupCount);
+
+const buildPickedDriverGroupByRaceDriver = (picks: PickSummaryRow[]): Map<string, number> => {
+  const pickedDriverGroupByRaceDriver = new Map<string, number>();
+
+  picks.forEach((pick) => {
+    const groupedDriverIds: Array<[number, number]> = [
+      [pick.driver_group1_id, 1],
+      [pick.driver_group2_id, 2],
+      [pick.driver_group3_id, 3],
+      [pick.driver_group4_id, 4],
+      [pick.driver_group5_id, 5],
+      [pick.driver_group6_id, 6],
+      [pick.driver_group7_id, 7],
+      [pick.driver_group8_id, 8]
+    ].filter((row): row is [number, number] => row[0] !== null);
+
+    groupedDriverIds.forEach(([driverId, groupNumber]) => {
+      const key = keyForRaceDriver(pick.race_id, driverId);
+      if (!pickedDriverGroupByRaceDriver.has(key)) {
+        pickedDriverGroupByRaceDriver.set(key, groupNumber);
+      }
+    });
+  });
+
+  return pickedDriverGroupByRaceDriver;
+};
+
+const resolveRaceDriverGroup = (
+  raceId: number,
+  driverId: number,
+  raceDriverGroupByRaceDriver: Map<string, number>,
+  pickedDriverGroupByRaceDriver: Map<string, number>,
+  currentDriverGroupById: Map<number, number>
+): number | undefined =>
+  raceDriverGroupByRaceDriver.get(keyForRaceDriver(raceId, driverId)) ??
+  pickedDriverGroupByRaceDriver.get(keyForRaceDriver(raceId, driverId)) ??
+  currentDriverGroupById.get(driverId);
+
+const computeRaceExtremes = ({
+  currentDriverGroupById,
+  groupCount,
+  pickedDriverGroupByRaceDriver,
+  raceDriverGroupByRaceDriver,
+  raceId,
+  results
+}: {
+  currentDriverGroupById: Map<number, number>;
+  groupCount: number;
+  pickedDriverGroupByRaceDriver: Map<string, number>;
+  raceDriverGroupByRaceDriver: Map<string, number>;
+  raceId: number;
+  results: ResultRow[];
+}): { highest: number; lowest: number } => {
+  const pointsByGroup = new Map<number, number[]>();
+  for (let groupNumber = 1; groupNumber <= groupCount; groupNumber += 1) {
+    pointsByGroup.set(groupNumber, []);
+  }
+
+  results.forEach((result) => {
+    const groupNumber = resolveRaceDriverGroup(
+      raceId,
+      result.driver_id,
+      raceDriverGroupByRaceDriver,
+      pickedDriverGroupByRaceDriver,
+      currentDriverGroupById
+    );
+    if (!groupNumber || groupNumber < 1 || groupNumber > groupCount) {
+      return;
+    }
+
+    const groupPoints = pointsByGroup.get(groupNumber) ?? [];
+    groupPoints.push(asNumber(result.points));
+    pointsByGroup.set(groupNumber, groupPoints);
+  });
+
+  let highest = 0;
+  let lowest = 0;
+  for (let groupNumber = 1; groupNumber <= groupCount; groupNumber += 1) {
+    const groupPoints = pointsByGroup.get(groupNumber) ?? [];
+    if (groupPoints.length === 0) {
+      continue;
+    }
+
+    highest += Math.max(...groupPoints);
+    lowest += Math.min(...groupPoints);
+  }
+
+  return { highest, lowest };
+};
+
+const buildScoringAudits = ({
+  drivers,
+  participants,
+  picks,
+  raceDriverGroups,
+  races,
+  results
+}: {
+  drivers: DriverRow[];
+  participants: WinnerProfileRow[];
+  picks: PickSummaryRow[];
+  raceDriverGroups: RaceDriverGroupRow[];
+  races: RaceRow[];
+  results: ResultRow[];
+}): ScoringAudit[] => {
+  const driverNameById = new Map(drivers.map((driver) => [driver.id, driver.driver_name]));
+  const currentDriverGroupById = new Map(drivers.map((driver) => [driver.id, driver.group_number]));
+  const pickedDriverGroupByRaceDriver = buildPickedDriverGroupByRaceDriver(picks);
+  const raceDriverGroupByRaceDriver = new Map(
+    raceDriverGroups.map((row) => [keyForRaceDriver(row.race_id, row.driver_id), row.group_number])
+  );
+  const resultPointsByRaceDriver = new Map(
+    results.map((result) => [keyForRaceDriver(result.race_id, result.driver_id), asNumber(result.points)])
+  );
+  const resultsByRaceId = new Map<number, ResultRow[]>();
+  results.forEach((result) => {
+    const raceResults = resultsByRaceId.get(result.race_id) ?? [];
+    raceResults.push(result);
+    resultsByRaceId.set(result.race_id, raceResults);
+  });
+  const pickByRaceUser = new Map(picks.map((pick) => [keyForRaceUser(pick.race_id, pick.user_id), pick]));
+
+  return races
+    .flatMap((race) => {
+      const raceResults = resultsByRaceId.get(race.id) ?? [];
+      if (raceResults.length === 0) {
+        return [];
+      }
+
+      const pickFormat = normalizeRacePickFormat(race.pick_format);
+      const groupCount = pickGroupCountForFormat(pickFormat);
+      const officialWinningAverageSpeed =
+        race.official_winning_average_speed === null
+          ? null
+          : asNumber(race.official_winning_average_speed);
+      const extremes = computeRaceExtremes({
+        currentDriverGroupById,
+        groupCount,
+        pickedDriverGroupByRaceDriver,
+        raceDriverGroupByRaceDriver,
+        raceId: race.id,
+        results: raceResults
+      });
+      const submittedUserIds = new Set(
+        picks.filter((pick) => pick.race_id === race.id).map((pick) => pick.user_id)
+      );
+      const rankedRows = assignWeeklyRanks(
+        participants.map((participant) => {
+          const pick = pickByRaceUser.get(keyForRaceUser(race.id, participant.id)) ?? null;
+          const driverCells = pickDriverIdsForGroupCount(pick, groupCount).map((driverId, index) => ({
+            driverName: driverId === null ? null : (driverNameById.get(driverId) ?? `Driver #${driverId}`),
+            groupNumber: index + 1,
+            points:
+              driverId === null
+                ? null
+                : (resultPointsByRaceDriver.get(keyForRaceDriver(race.id, driverId)) ?? 0)
+          }));
+          const points = pick
+            ? driverCells.reduce((sum, cell) => sum + (cell.points ?? 0), 0)
+            : extremes.lowest;
+
+          return {
+            averageSpeed: pick ? asNumber(pick.average_speed) : null,
+            driverCells,
+            points,
+            submittedPick: pick !== null,
+            teamName: participant.team_name,
+            userId: participant.id
+          };
+        }),
+        officialWinningAverageSpeed
+      );
+
+      return [
+        {
+          groupCount,
+          highestPossibleScore: extremes.highest,
+          lowestPossibleScore: extremes.lowest,
+          noPickCount: Math.max(0, participants.length - submittedUserIds.size),
+          officialWinningAverageSpeed,
+          pickFormat,
+          raceDate: race.race_date,
+          raceId: race.id,
+          raceName: race.race_name,
+          resultCount: raceResults.length,
+          rows: rankedRows.map((row) => ({
+            averageSpeed: row.averageSpeed,
+            driverCells: row.driverCells,
+            points: row.points,
+            rank: row.rank,
+            submittedPick: row.submittedPick,
+            teamName: row.teamName,
+            tiebreakDelta: calculateOfficialSpeedDelta(row.averageSpeed, officialWinningAverageSpeed),
+            userId: row.userId
+          })),
+          submittedPickCount: submittedUserIds.size,
+          winnerTeamName: rankedRows[0]?.teamName ?? null
+        }
+      ];
+    })
+    .sort((a, b) => new Date(b.raceDate).getTime() - new Date(a.raceDate).getTime());
+};
+
 export default async function AdminPage({ searchParams }: PageProps) {
   const params = await searchParams;
   const message = queryStringParam(params.message);
@@ -101,18 +475,20 @@ export default async function AdminPage({ searchParams }: PageProps) {
 
   const { profile, supabase } = await requireAdmin();
 
-  const [driversResponse, racesResponse, resultsResponse, profilesResponse, feedbackResponse] =
-    await Promise.all([
+  const [
+    driversResponse,
+    racesResponse,
+    resultsResponse,
+    profilesResponse,
+    feedbackResponse,
+    picksResponse,
+    raceDriverGroupsResponse
+  ] = await Promise.all([
     supabase
       .from("drivers")
       .select("id,driver_name,image_url,current_standing,group_number,is_active,championship_points")
       .order("current_standing", { ascending: true }),
-    supabase
-      .from("races")
-      .select(
-        "id,race_name,title_image_url,qualifying_start_at,race_date,payout,is_archived,archived_at,winner_profile_id,winner_source,winner_is_manual_override,winner_auto_eligible_at,winner_set_at"
-      )
-      .order("race_date", { ascending: false }),
+    loadAdminRaces(supabase),
     supabase
       .from("results")
       .select("id,race_id,driver_id,points")
@@ -126,7 +502,9 @@ export default async function AdminPage({ searchParams }: PageProps) {
     supabase
       .from("feedback_items")
       .select("id,user_id,feedback_type,category,details,created_at")
-      .order("created_at", { ascending: false })
+      .order("created_at", { ascending: false }),
+    loadAdminPicks(supabase),
+    loadRaceDriverGroups(supabase)
   ]);
 
   const loadError =
@@ -134,14 +512,31 @@ export default async function AdminPage({ searchParams }: PageProps) {
     racesResponse.error?.message ??
     resultsResponse.error?.message ??
     profilesResponse.error?.message ??
-    feedbackResponse.error?.message;
+    feedbackResponse.error?.message ??
+    picksResponse.error?.message ??
+    raceDriverGroupsResponse.error?.message;
 
   const drivers: DriverRow[] = (driversResponse.data ?? []) as DriverRow[];
   const races: RaceRow[] = (racesResponse.data ?? []) as RaceRow[];
   const activeRaces = races.filter((race) => !race.is_archived);
+  const activeIndy500Races = activeRaces.filter(
+    (race) => normalizeRacePickFormat(race.pick_format) === "indy_500"
+  );
   const results: ResultRow[] = (resultsResponse.data ?? []) as ResultRow[];
   const winnerProfiles: WinnerProfileRow[] = (profilesResponse.data ?? []) as WinnerProfileRow[];
   const feedbackItems: FeedbackItemRow[] = (feedbackResponse.data ?? []) as FeedbackItemRow[];
+  const pickRows: PickSummaryRow[] = (picksResponse.data ?? []) as PickSummaryRow[];
+  const raceDriverGroups: RaceDriverGroupRow[] = (
+    raceDriverGroupsResponse.data ?? []
+  ) as RaceDriverGroupRow[];
+  const scoringAudits = buildScoringAudits({
+    drivers,
+    participants: winnerProfiles,
+    picks: pickRows,
+    raceDriverGroups,
+    races,
+    results
+  });
 
   const driverNameById = new Map(drivers.map((driver) => [driver.id, driver.driver_name]));
   const teamNameByProfileId = new Map(winnerProfiles.map((profile) => [profile.id, profile.team_name]));
@@ -491,6 +886,21 @@ export default async function AdminPage({ searchParams }: PageProps) {
 
           <label className="block">
             <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-600">
+              Pick rules
+            </span>
+            <select
+              className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+              data-testid="admin-race-create-pick-format"
+              defaultValue="standard"
+              name="pick_format"
+            >
+              <option value="standard">Standard (6 picks, locks at qualifying)</option>
+              <option value="indy_500">Indianapolis 500 (8 picks, locks at race start)</option>
+            </select>
+          </label>
+
+          <label className="block">
+            <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-600">
               Title image upload
             </span>
             <input
@@ -580,7 +990,8 @@ export default async function AdminPage({ searchParams }: PageProps) {
         </form>
         <p className="mt-2 text-xs text-slate-500">
           Auto winner uses highest weekly points. If first place is tied, tiebreak uses closest
-          pick to the official race average speed (winner&apos;s speed), then team name.
+          pick to the official race average speed (winner&apos;s speed), then team name. Teams
+          without submitted picks are included at the race&apos;s lowest possible score.
           When race results are updated, auto-calculation is rescheduled for about 15 minutes later.
         </p>
 
@@ -592,6 +1003,7 @@ export default async function AdminPage({ searchParams }: PageProps) {
                 <th className="px-3 py-2 font-semibold">Title Image</th>
                 <th className="px-3 py-2 font-semibold">Qualifying</th>
                 <th className="px-3 py-2 font-semibold">Race Start</th>
+                <th className="px-3 py-2 font-semibold">Pick Rules</th>
                 <th className="px-3 py-2 font-semibold">Payout</th>
                 <th className="px-3 py-2 font-semibold">Status</th>
                 <th className="px-3 py-2 font-semibold">Fantasy Winner</th>
@@ -600,7 +1012,7 @@ export default async function AdminPage({ searchParams }: PageProps) {
             <tbody>
               {races.length === 0 ? (
                 <tr>
-                  <td className="px-3 py-3 text-slate-600" colSpan={7}>
+                  <td className="px-3 py-3 text-slate-600" colSpan={8}>
                     No races yet.
                   </td>
                 </tr>
@@ -622,6 +1034,15 @@ export default async function AdminPage({ searchParams }: PageProps) {
                     </td>
                     <td className="px-3 py-2">{formatDateTime(race.qualifying_start_at)}</td>
                     <td className="px-3 py-2">{formatDateTime(race.race_date)}</td>
+                    <td className="px-3 py-2">
+                      {normalizeRacePickFormat(race.pick_format) === "indy_500" ? (
+                        <span className="inline-flex rounded-full border border-cyan-300 bg-cyan-50 px-2 py-0.5 text-xs font-semibold text-cyan-800">
+                          Indy 500
+                        </span>
+                      ) : (
+                        <span className="text-xs text-slate-600">Standard</span>
+                      )}
+                    </td>
                     <td className="px-3 py-2">${Number(race.payout).toFixed(2)}</td>
                     <td className="px-3 py-2">
                       {race.is_archived ? (
@@ -723,6 +1144,15 @@ export default async function AdminPage({ searchParams }: PageProps) {
                     type="number"
                   />
 
+                  <select
+                    className="w-full rounded-md border border-slate-300 px-2 py-2 text-sm md:col-span-2"
+                    defaultValue={normalizeRacePickFormat(race.pick_format)}
+                    name="pick_format"
+                  >
+                    <option value="standard">Standard rules</option>
+                    <option value="indy_500">Indianapolis 500 rules</option>
+                  </select>
+
                   <input
                     accept="image/png,image/jpeg,image/webp,image/gif,image/avif"
                     className="w-full rounded-md border border-slate-300 px-2 py-2 text-xs md:col-span-2"
@@ -805,11 +1235,215 @@ export default async function AdminPage({ searchParams }: PageProps) {
           </p>
         ) : null}
 
+        <form
+          action={importIndy500QualifyingOrderAction}
+          className="mt-5 rounded-md border border-cyan-200 bg-cyan-50 p-4"
+          data-testid="admin-indy-qualifying-import-form"
+        >
+          <input name="tab" type="hidden" value="results" />
+          <h3 className="text-sm font-semibold text-slate-900">
+            Indianapolis 500 Qualifying Order
+          </h3>
+          <p className="mt-1 text-xs text-slate-600">
+            For Indy 500 races only: paste the 33-car qualifying order to create 8 pick groups.
+            Groups 1-7 have 4 drivers; Group 8 has 5 drivers.
+          </p>
+          <div className="mt-3 grid gap-3 md:grid-cols-4">
+            <label className="block md:col-span-1">
+              <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-600">
+                Indy 500 race
+              </span>
+              <select
+                required
+                className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+                data-testid="admin-indy-qualifying-race-select"
+                name="race_id"
+              >
+                <option value="">
+                  {activeIndy500Races.length > 0 ? "Select race" : "No active Indy 500 races"}
+                </option>
+                {activeIndy500Races.map((race) => (
+                  <option key={race.id} value={String(race.id)}>
+                    {race.race_name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="block md:col-span-3">
+              <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-600">
+                Qualifying order paste
+              </span>
+              <textarea
+                required
+                className="h-32 w-full rounded-md border border-slate-300 px-3 py-2 font-mono text-xs"
+                data-testid="admin-indy-qualifying-paste"
+                name="qualifying_order_paste"
+                placeholder={"1\t10\tAlex Palou\n2\t5\tPato O'Ward\n3\t2\tJosef Newgarden"}
+              />
+            </label>
+          </div>
+          <button
+            className="mt-3 rounded-md bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-700"
+            data-testid="admin-indy-qualifying-submit"
+            type="submit"
+          >
+            Import qualifying order
+          </button>
+        </form>
+
         <AdminResultsImportForm
           action={importIndycarResultsAction}
-          activeRaces={activeRaces.map((race) => ({ id: race.id, raceName: race.race_name }))}
-          drivers={drivers.map((driver) => ({ driverName: driver.driver_name, id: driver.id }))}
+          activeRaces={activeRaces.map((race) => ({
+            id: race.id,
+            pickFormat: normalizeRacePickFormat(race.pick_format),
+            raceName: race.race_name
+          }))}
+          drivers={drivers.map((driver) => ({
+            driverName: driver.driver_name,
+            groupNumber: driver.group_number,
+            id: driver.id
+          }))}
+          participants={winnerProfiles.map((winnerProfile) => ({
+            id: winnerProfile.id,
+            teamName: winnerProfile.team_name
+          }))}
+          picks={pickRows}
+          raceDriverGroups={raceDriverGroups}
         />
+
+        <section
+          className="mt-5 rounded-lg border border-slate-200 bg-slate-50 p-4"
+          data-testid="admin-scoring-audit"
+        >
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h3 className="text-sm font-semibold uppercase tracking-wide text-slate-800">
+                Scoring Audit
+              </h3>
+              <p className="mt-1 text-xs text-slate-600">
+                Saved result sets are collapsed by default after the latest audit.
+              </p>
+            </div>
+            <span className="rounded-md border border-slate-300 bg-white px-2 py-1 text-xs font-semibold text-slate-700">
+              {scoringAudits.length} race{scoringAudits.length === 1 ? "" : "s"}
+            </span>
+          </div>
+
+          {scoringAudits.length === 0 ? (
+            <p className="mt-3 rounded-md border border-dashed border-slate-300 bg-white px-3 py-3 text-sm text-slate-600">
+              No saved race results are available to audit yet.
+            </p>
+          ) : (
+            <div className="mt-3 grid gap-3">
+              {scoringAudits.map((audit, auditIndex) => (
+                <details
+                  className="rounded-md border border-slate-200 bg-white"
+                  data-testid={`admin-scoring-audit-race-${audit.raceId}`}
+                  key={`scoring-audit-${audit.raceId}`}
+                  open={auditIndex === 0}
+                >
+                  <summary className="cursor-pointer px-3 py-3 text-sm font-semibold text-slate-900">
+                    <span className="flex flex-wrap items-center justify-between gap-2">
+                      <span>
+                        {audit.raceName}{" "}
+                        <span className="font-normal text-slate-500">
+                          ({normalizeRacePickFormat(audit.pickFormat) === "indy_500" ? "Indy 500" : "Standard"})
+                        </span>
+                      </span>
+                      <span className="text-xs font-medium text-slate-600">
+                        Winner: {audit.winnerTeamName ?? "-"}
+                      </span>
+                    </span>
+                  </summary>
+
+                  <div className="border-t border-slate-200 p-3">
+                    <dl className="grid gap-2 text-sm sm:grid-cols-2 lg:grid-cols-4">
+                      <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2">
+                        <dt className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                          Results
+                        </dt>
+                        <dd className="mt-0.5 font-semibold text-slate-900">
+                          {audit.resultCount} rows
+                        </dd>
+                      </div>
+                      <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2">
+                        <dt className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                          Picks
+                        </dt>
+                        <dd className="mt-0.5 font-semibold text-slate-900">
+                          {audit.submittedPickCount} submitted / {audit.noPickCount} fallback
+                        </dd>
+                      </div>
+                      <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2">
+                        <dt className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                          Range
+                        </dt>
+                        <dd className="mt-0.5 font-semibold text-slate-900">
+                          {audit.lowestPossibleScore}-{audit.highestPossibleScore}
+                        </dd>
+                      </div>
+                      <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2">
+                        <dt className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                          Official Avg Speed
+                        </dt>
+                        <dd className="mt-0.5 font-semibold text-slate-900">
+                          {formatOptionalDecimal(audit.officialWinningAverageSpeed)}
+                        </dd>
+                      </div>
+                    </dl>
+
+                    <div className="mt-3 max-h-80 overflow-auto rounded-md border border-slate-200">
+                      <table className="min-w-full text-left text-xs">
+                        <thead className="bg-slate-50 text-slate-700">
+                          <tr>
+                            <th className="px-2 py-1.5 font-semibold">Rank</th>
+                            <th className="px-2 py-1.5 font-semibold">Team</th>
+                            <th className="px-2 py-1.5 font-semibold">Score</th>
+                            <th className="px-2 py-1.5 font-semibold">Source</th>
+                            <th className="px-2 py-1.5 font-semibold">Avg Speed</th>
+                            <th className="px-2 py-1.5 font-semibold">Delta</th>
+                            <th className="px-2 py-1.5 font-semibold">Pick Detail</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {audit.rows.map((row) => {
+                            const pickDetail = row.submittedPick
+                              ? row.driverCells
+                                  .map((cell) =>
+                                    `G${cell.groupNumber}: ${cell.driverName ?? "No pick"} (${cell.points ?? "-"})`
+                                  )
+                                  .join(" | ")
+                              : `Lowest possible score fallback (${audit.lowestPossibleScore})`;
+
+                            return (
+                              <tr key={`${audit.raceId}-${row.userId}`} className="border-t border-slate-200">
+                                <td className="px-2 py-1.5 font-semibold">#{row.rank}</td>
+                                <td className="px-2 py-1.5 font-medium text-slate-900">{row.teamName}</td>
+                                <td className="px-2 py-1.5 font-semibold">{row.points}</td>
+                                <td className="px-2 py-1.5">
+                                  {row.submittedPick ? (
+                                    <span className="font-semibold text-emerald-700">Submitted</span>
+                                  ) : (
+                                    <span className="font-semibold text-amber-700">Fallback</span>
+                                  )}
+                                </td>
+                                <td className="px-2 py-1.5">{formatOptionalDecimal(row.averageSpeed)}</td>
+                                <td className="px-2 py-1.5">{formatOptionalDecimal(row.tiebreakDelta)}</td>
+                                <td className="max-w-[420px] px-2 py-1.5 text-slate-600">
+                                  <span className="line-clamp-2">{pickDetail}</span>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                </details>
+              ))}
+            </div>
+          )}
+        </section>
 
         <form
           action={upsertResultAction}
@@ -881,41 +1515,46 @@ export default async function AdminPage({ searchParams }: PageProps) {
           </div>
         </form>
 
-        <div className="mt-5 overflow-x-auto rounded-md border border-slate-200">
-          <table className="min-w-full text-left text-sm">
-            <thead className="bg-slate-50 text-slate-700">
-              <tr>
-                <th className="px-3 py-2 font-semibold">Race</th>
-                <th className="px-3 py-2 font-semibold">Driver</th>
-                <th className="px-3 py-2 font-semibold">Points</th>
-              </tr>
-            </thead>
-            <tbody>
-              {sortedResults.length === 0 ? (
+        <details className="mt-5 rounded-md border border-slate-200 bg-white">
+          <summary className="cursor-pointer px-3 py-3 text-sm font-semibold text-slate-900">
+            Saved result rows ({sortedResults.length})
+          </summary>
+          <div className="max-h-96 overflow-auto border-t border-slate-200">
+            <table className="min-w-full text-left text-sm">
+              <thead className="bg-slate-50 text-slate-700">
                 <tr>
-                  <td className="px-3 py-3 text-slate-600" colSpan={3}>
-                    No results entered yet.
-                  </td>
+                  <th className="px-3 py-2 font-semibold">Race</th>
+                  <th className="px-3 py-2 font-semibold">Driver</th>
+                  <th className="px-3 py-2 font-semibold">Points</th>
                 </tr>
-              ) : (
-                sortedResults.map((result) => {
-                  const race = raceById.get(result.race_id);
-                  return (
-                    <tr key={result.id} className="border-t border-slate-200">
-                      <td className="px-3 py-2">
-                        {race ? `${race.race_name} (${formatDateTime(race.race_date)})` : `Race #${result.race_id}`}
-                      </td>
-                      <td className="px-3 py-2">
-                        {driverNameById.get(result.driver_id) ?? `Driver #${result.driver_id}`}
-                      </td>
-                      <td className="px-3 py-2">{result.points}</td>
-                    </tr>
-                  );
-                })
-              )}
-            </tbody>
-          </table>
-        </div>
+              </thead>
+              <tbody>
+                {sortedResults.length === 0 ? (
+                  <tr>
+                    <td className="px-3 py-3 text-slate-600" colSpan={3}>
+                      No results entered yet.
+                    </td>
+                  </tr>
+                ) : (
+                  sortedResults.map((result) => {
+                    const race = raceById.get(result.race_id);
+                    return (
+                      <tr key={result.id} className="border-t border-slate-200">
+                        <td className="px-3 py-2">
+                          {race ? `${race.race_name} (${formatDateTime(race.race_date)})` : `Race #${result.race_id}`}
+                        </td>
+                        <td className="px-3 py-2">
+                          {driverNameById.get(result.driver_id) ?? `Driver #${result.driver_id}`}
+                        </td>
+                        <td className="px-3 py-2">{result.points}</td>
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
+          </div>
+        </details>
         </section>
       ) : null}
 

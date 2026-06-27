@@ -12,7 +12,16 @@ import {
 import { uploadRaceTitleImage } from "@/lib/race-images";
 import { requireAdmin } from "@/lib/admin";
 import { normalizeDriverName, parseIndycarResultsPaste } from "@/lib/indycar-results";
+import { parseQualifyingOrderPaste } from "@/lib/qualifying-order";
+import {
+  INDY_500_QUALIFYING_FIELD_SIZE,
+  indy500GroupForQualifyingPosition,
+  isRacePickFormat,
+  normalizeRacePickFormat,
+  type RacePickFormat
+} from "@/lib/race-format";
 import { createServiceRoleSupabaseClient } from "@/lib/supabase/service-role";
+import { isMissingColumnError, withMigrationHint } from "@/lib/supabase/schema-compat";
 import { parseLeagueDateTimeLocalInput } from "@/lib/timezone";
 
 const asText = (value: FormDataEntryValue | null): string =>
@@ -25,6 +34,12 @@ type AdminTab = "drivers" | "races" | "results" | "feedback";
 type RaceStatusRow = {
   id: number;
   is_archived: boolean;
+  pick_format: RacePickFormat;
+};
+
+type RacePickFormatRow = {
+  id: number;
+  pick_format: RacePickFormat;
 };
 
 const parseAdminTab = (value: string): AdminTab | null => {
@@ -34,6 +49,11 @@ const parseAdminTab = (value: string): AdminTab | null => {
 
   return null;
 };
+
+const parseRacePickFormat = (value: string): RacePickFormat =>
+  isRacePickFormat(value) ? value : "standard";
+
+const INDY_500_MIGRATION_FILE = "supabase/migrations/20260528_add_indy_500_pick_format.sql";
 
 const adminRedirect = (key: "error" | "message", value: string, tab?: AdminTab): never => {
   const params = new URLSearchParams({ [key]: value });
@@ -175,11 +195,27 @@ async function refreshDriverChampionshipPointsFromResults(supabase: SupabaseClie
 }
 
 async function ensureRaceIsActive(supabase: SupabaseClient, raceId: number) {
-  const { data: race, error } = await supabase
+  let { data: race, error } = await supabase
     .from("races")
-    .select("id,is_archived")
+    .select("id,is_archived,pick_format")
     .eq("id", raceId)
     .maybeSingle<RaceStatusRow>();
+
+  if (error && isMissingColumnError(error, "pick_format")) {
+    const legacyResponse = await supabase
+      .from("races")
+      .select("id,is_archived")
+      .eq("id", raceId)
+      .maybeSingle<Omit<RaceStatusRow, "pick_format">>();
+
+    error = legacyResponse.error;
+    race = legacyResponse.data
+      ? {
+          ...legacyResponse.data,
+          pick_format: "standard"
+        }
+      : null;
+  }
 
   if (error) {
     throw new Error(error.message);
@@ -195,6 +231,36 @@ async function ensureRaceIsActive(supabase: SupabaseClient, raceId: number) {
 }
 
 async function ensureRaceDriverGroupSnapshot(supabase: SupabaseClient, raceId: number) {
+  let { data: race, error: raceError } = await supabase
+    .from("races")
+    .select("id,pick_format")
+    .eq("id", raceId)
+    .maybeSingle<RacePickFormatRow>();
+
+  if (raceError && isMissingColumnError(raceError, "pick_format")) {
+    const legacyResponse = await supabase
+      .from("races")
+      .select("id")
+      .eq("id", raceId)
+      .maybeSingle<{ id: number }>();
+
+    raceError = legacyResponse.error;
+    race = legacyResponse.data
+      ? {
+          ...legacyResponse.data,
+          pick_format: "standard"
+        }
+      : null;
+  }
+
+  if (raceError) {
+    throw new Error(raceError.message);
+  }
+
+  if (!race) {
+    throw new Error("Selected race was not found.");
+  }
+
   const { data: existingRows, error: existingRowsError } = await supabase
     .from("race_driver_groups")
     .select("race_id")
@@ -207,6 +273,10 @@ async function ensureRaceDriverGroupSnapshot(supabase: SupabaseClient, raceId: n
 
   if ((existingRows ?? []).length > 0) {
     return;
+  }
+
+  if (normalizeRacePickFormat(race.pick_format) === "indy_500") {
+    throw new Error("Upload Indianapolis 500 qualifying order before saving results.");
   }
 
   const { data: activeDrivers, error: activeDriversError } = await supabase
@@ -397,16 +467,31 @@ export async function deleteDriverAction(formData: FormData) {
   }
   const driverIdValue = driverId as number;
 
-  const [pickUsageResponse, resultUsageResponse] = await Promise.all([
+  const [initialPickUsageResponse, resultUsageResponse] = await Promise.all([
     supabase
+      .from("picks")
+      .select("id")
+      .or(
+        `driver_group1_id.eq.${driverIdValue},driver_group2_id.eq.${driverIdValue},driver_group3_id.eq.${driverIdValue},driver_group4_id.eq.${driverIdValue},driver_group5_id.eq.${driverIdValue},driver_group6_id.eq.${driverIdValue},driver_group7_id.eq.${driverIdValue},driver_group8_id.eq.${driverIdValue}`
+      )
+      .limit(1),
+    supabase.from("results").select("id").eq("driver_id", driverIdValue).limit(1)
+  ]);
+  let pickUsageResponse = initialPickUsageResponse;
+
+  if (
+    pickUsageResponse.error &&
+    (isMissingColumnError(pickUsageResponse.error, "driver_group7_id") ||
+      isMissingColumnError(pickUsageResponse.error, "driver_group8_id"))
+  ) {
+    pickUsageResponse = await supabase
       .from("picks")
       .select("id")
       .or(
         `driver_group1_id.eq.${driverIdValue},driver_group2_id.eq.${driverIdValue},driver_group3_id.eq.${driverIdValue},driver_group4_id.eq.${driverIdValue},driver_group5_id.eq.${driverIdValue},driver_group6_id.eq.${driverIdValue}`
       )
-      .limit(1),
-    supabase.from("results").select("id").eq("driver_id", driverIdValue).limit(1)
-  ]);
+      .limit(1);
+  }
 
   if (pickUsageResponse.error) {
     redirectWithTab("error", pickUsageResponse.error.message);
@@ -562,6 +647,7 @@ export async function createRaceAction(formData: FormData) {
   const qualifyingStartInput = asText(formData.get("qualifying_start_at"));
   const titleImageUrlInput = asText(formData.get("title_image_url"));
   const titleImageFile = getFormFile(formData, "title_image_file");
+  const pickFormat = parseRacePickFormat(asText(formData.get("pick_format")));
   const payoutValue = parseNonNegativeNumber(asText(formData.get("payout")));
   const raceDate = parseLeagueDateTimeLocalInput(raceDateInput);
   const qualifyingStartAt = parseLeagueDateTimeLocalInput(qualifyingStartInput);
@@ -588,9 +674,10 @@ export async function createRaceAction(formData: FormData) {
     redirectWithTab("error", "Qualifying start must be at or before race start.");
   }
 
-  const { data: insertedRace, error } = await supabase
+  let { data: insertedRace, error } = await supabase
     .from("races")
     .insert({
+      pick_format: pickFormat,
       payout: payoutValue,
       qualifying_start_at: qualifyingStartAt,
       race_date: raceDate,
@@ -599,6 +686,30 @@ export async function createRaceAction(formData: FormData) {
     })
     .select("id")
     .single();
+
+  if (error && isMissingColumnError(error, "pick_format")) {
+    if (pickFormat === "indy_500") {
+      redirectWithTab(
+        "error",
+        withMigrationHint("Indianapolis 500 pick rules require the latest database migration.", INDY_500_MIGRATION_FILE)
+      );
+    }
+
+    const legacyResponse = await supabase
+      .from("races")
+      .insert({
+        payout: payoutValue,
+        qualifying_start_at: qualifyingStartAt,
+        race_date: raceDate,
+        race_name: raceName,
+        title_image_url: titleImageUrlInput || null
+      })
+      .select("id")
+      .single();
+
+    insertedRace = legacyResponse.data;
+    error = legacyResponse.error;
+  }
 
   if (error) {
     redirectWithTab("error", error.message);
@@ -652,6 +763,7 @@ export async function updateRaceAction(formData: FormData) {
   const qualifyingStartInput = asText(formData.get("qualifying_start_at"));
   const titleImageUrlInput = asText(formData.get("title_image_url"));
   const titleImageFile = getFormFile(formData, "title_image_file");
+  const pickFormat = parseRacePickFormat(asText(formData.get("pick_format")));
   const payoutValue = parseNonNegativeNumber(asText(formData.get("payout")));
 
   if (!raceId || !raceName || payoutValue === null) {
@@ -695,9 +807,10 @@ export async function updateRaceAction(formData: FormData) {
     }
   }
 
-  const { error } = await supabase
+  let { error } = await supabase
     .from("races")
     .update({
+      pick_format: pickFormat,
       payout: payoutValue,
       qualifying_start_at: qualifyingStartAt,
       race_date: raceDate,
@@ -705,6 +818,28 @@ export async function updateRaceAction(formData: FormData) {
       title_image_url: titleImageUrl
     })
     .eq("id", raceIdValue);
+
+  if (error && isMissingColumnError(error, "pick_format")) {
+    if (pickFormat === "indy_500") {
+      redirectWithTab(
+        "error",
+        withMigrationHint("Indianapolis 500 pick rules require the latest database migration.", INDY_500_MIGRATION_FILE)
+      );
+    }
+
+    const legacyResponse = await supabase
+      .from("races")
+      .update({
+        payout: payoutValue,
+        qualifying_start_at: qualifyingStartAt,
+        race_date: raceDate,
+        race_name: raceName,
+        title_image_url: titleImageUrl
+      })
+      .eq("id", raceIdValue);
+
+    error = legacyResponse.error;
+  }
 
   if (error) {
     redirectWithTab("error", error.message);
@@ -856,6 +991,189 @@ export async function setRaceWinnerAction(formData: FormData) {
   revalidatePath("/admin");
   revalidatePath("/leaderboard");
   redirectWithTab("message", winnerProfileId ? "Fantasy winner updated." : "Fantasy winner recalculated.");
+}
+
+export async function importIndy500QualifyingOrderAction(formData: FormData) {
+  const { supabase } = await requireAdmin();
+  const tab = parseAdminTab(asText(formData.get("tab"))) ?? "results";
+  const redirectWithTab = (key: "error" | "message", value: string): never =>
+    adminRedirect(key, value, tab);
+
+  const raceIdInput = parsePositiveInteger(asText(formData.get("race_id")));
+  const rawPaste = asText(formData.get("qualifying_order_paste"));
+
+  if (raceIdInput === null) {
+    redirectWithTab("error", "Select an Indianapolis 500 race before importing qualifying order.");
+  }
+  const raceId = raceIdInput as number;
+
+  const { data: race, error: raceError } = await supabase
+    .from("races")
+    .select("id,race_name,is_archived,pick_format")
+    .eq("id", raceId)
+    .maybeSingle<RaceStatusRow & { race_name: string }>();
+
+  if (raceError) {
+    if (isMissingColumnError(raceError, "pick_format")) {
+      redirectWithTab(
+        "error",
+        withMigrationHint("Indianapolis 500 qualifying order requires the latest database migration.", INDY_500_MIGRATION_FILE)
+      );
+    }
+
+    redirectWithTab("error", raceError.message);
+  }
+  if (!race) {
+    redirectWithTab("error", "Selected race was not found.");
+  }
+  const selectedRace = race as RaceStatusRow & { race_name: string };
+
+  if (selectedRace.is_archived) {
+    redirectWithTab("error", "Selected race is archived. Unarchive it before importing qualifying order.");
+  }
+  if (normalizeRacePickFormat(selectedRace.pick_format) !== "indy_500") {
+    redirectWithTab("error", "Qualifying order upload is only available for races marked Indianapolis 500.");
+  }
+
+  if (!rawPaste) {
+    redirectWithTab("error", "Paste the 33-car Indianapolis 500 qualifying order before importing.");
+  }
+
+  const parsed = parseQualifyingOrderPaste(rawPaste);
+  if (parsed.rows.length === 0) {
+    redirectWithTab("error", "No qualifying order rows were detected.");
+  }
+
+  const rowsByPosition = new Map<number, (typeof parsed.rows)[number]>();
+  const duplicatePositions = new Set<number>();
+  parsed.rows.forEach((row) => {
+    if (rowsByPosition.has(row.position)) {
+      duplicatePositions.add(row.position);
+      return;
+    }
+    rowsByPosition.set(row.position, row);
+  });
+
+  if (duplicatePositions.size > 0) {
+    redirectWithTab(
+      "error",
+      `Duplicate qualifying position(s): ${Array.from(duplicatePositions).sort((a, b) => a - b).join(", ")}`
+    );
+  }
+
+  const missingPositions: number[] = [];
+  for (let position = 1; position <= INDY_500_QUALIFYING_FIELD_SIZE; position += 1) {
+    if (!rowsByPosition.has(position)) {
+      missingPositions.push(position);
+    }
+  }
+
+  if (missingPositions.length > 0 || rowsByPosition.size !== INDY_500_QUALIFYING_FIELD_SIZE) {
+    redirectWithTab(
+      "error",
+      `Indianapolis 500 qualifying order must include positions 1-${INDY_500_QUALIFYING_FIELD_SIZE}. Missing: ${missingPositions.join(", ") || "none"}.`
+    );
+  }
+
+  const { data: drivers, error: driversError } = await supabase
+    .from("drivers")
+    .select("id,driver_name");
+
+  if (driversError) {
+    redirectWithTab("error", driversError.message);
+  }
+
+  const driverMap = new Map<string, { id: number; name: string }>();
+  (drivers ?? []).forEach((driver) => {
+    driverMap.set(normalizeDriverName(driver.driver_name), {
+      id: driver.id,
+      name: driver.driver_name
+    });
+  });
+
+  const unmatchedNames = new Set<string>();
+  const duplicateDriverNames = new Set<string>();
+  const seenDriverIds = new Set<number>();
+  const payload: Array<{
+    driver_id: number;
+    group_number: number;
+    qualifying_position: number;
+    race_id: number;
+  }> = [];
+
+  Array.from(rowsByPosition.values())
+    .sort((a, b) => a.position - b.position)
+    .forEach((row) => {
+      const match = driverMap.get(normalizeDriverName(row.driverName));
+      if (!match) {
+        unmatchedNames.add(row.driverName);
+        return;
+      }
+      if (seenDriverIds.has(match.id)) {
+        duplicateDriverNames.add(match.name);
+        return;
+      }
+
+      const groupNumber = indy500GroupForQualifyingPosition(row.position);
+      if (!groupNumber) {
+        return;
+      }
+
+      seenDriverIds.add(match.id);
+      payload.push({
+        driver_id: match.id,
+        group_number: groupNumber,
+        qualifying_position: row.position,
+        race_id: raceId
+      });
+    });
+
+  if (unmatchedNames.size > 0) {
+    redirectWithTab(
+      "error",
+      `Could not match these qualifying drivers in your database: ${Array.from(unmatchedNames).join(", ")}`
+    );
+  }
+
+  if (duplicateDriverNames.size > 0) {
+    redirectWithTab(
+      "error",
+      `Duplicate driver(s) in qualifying order: ${Array.from(duplicateDriverNames).join(", ")}`
+    );
+  }
+
+  if (payload.length !== INDY_500_QUALIFYING_FIELD_SIZE) {
+    redirectWithTab(
+      "error",
+      `Expected ${INDY_500_QUALIFYING_FIELD_SIZE} matched qualifying rows, got ${payload.length}.`
+    );
+  }
+
+  const { error: deleteExistingError } = await supabase
+    .from("race_driver_groups")
+    .delete()
+    .eq("race_id", raceId);
+
+  if (deleteExistingError) {
+    redirectWithTab("error", deleteExistingError.message);
+  }
+
+  const { error: insertError } = await supabase.from("race_driver_groups").insert(payload);
+
+  if (insertError) {
+    redirectWithTab("error", insertError.message);
+  }
+
+  revalidatePath("/admin");
+  revalidatePath("/picks");
+  revalidatePath("/leaderboard");
+
+  const ignoredSummary =
+    parsed.ignoredLineCount > 0 ? ` ${parsed.ignoredLineCount} line(s) ignored.` : "";
+  redirectWithTab(
+    "message",
+    `Imported Indianapolis 500 qualifying order for ${selectedRace.race_name}: ${payload.length} drivers across 8 groups.${ignoredSummary}`
+  );
 }
 
 export async function upsertResultAction(formData: FormData) {

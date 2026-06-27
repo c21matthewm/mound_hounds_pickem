@@ -16,6 +16,8 @@ season standings, league rules, feedback, and admin operations.
 
 - Participants submit one driver from each of six groups before qualifying starts.
 - Driver groups are based on active driver championship standings.
+- Indianapolis 500 races are the exception: participants pick after qualifying order is uploaded,
+  choose one driver from each of eight qualifying-order groups, and picks lock at race start.
 - Race results update driver championship points and regenerate groups for the next race.
 - Race scoring uses the group mapping that was active for that race, not whatever the current
   groups become after results are saved.
@@ -112,6 +114,12 @@ whenever results are inserted:
 supabase/migrations/20260310_auto_snapshot_race_groups_on_results_insert.sql
 ```
 
+The latest Indy 500 pick-format migration is:
+
+```text
+supabase/migrations/20260528_add_indy_500_pick_format.sql
+```
+
 After creating your first user account, promote it to admin in Supabase SQL Editor:
 
 ```sql
@@ -126,11 +134,13 @@ where p.id = u.id
 
 1. Import preseason championship standings or manage drivers manually.
 2. Add races with race start, qualifying start, payout, and optional title image.
-3. Participants submit picks before qualifying.
-4. After a race, import INDYCAR results or enter driver points manually.
-5. Results save official points, snapshot race groups if needed, refresh driver championship
+3. For the Indianapolis 500, mark the race with Indy 500 pick rules and import its 33-car
+   qualifying order.
+4. Participants submit picks before the race-specific pick deadline.
+5. After a race, import INDYCAR results or enter driver points manually.
+6. Results save official points, snapshot race groups if needed, refresh driver championship
    standings, refresh driver groups for the next race, and schedule fantasy winner calculation.
-6. Use the leaderboard tabs to review standings, locked picks by race, and participant analytics.
+7. Use the leaderboard tabs to review standings, locked picks by race, and participant analytics.
 
 Example paste formats live in:
 
