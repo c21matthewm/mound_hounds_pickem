@@ -4,6 +4,7 @@
   "private": true,
   "scripts": {
     "build": "next build",
+    "cleanup:playwright-artifacts": "node scripts/cleanup-playwright-artifacts.mjs",
     "dev": "next dev",
     "e2e": "playwright test",
     "e2e:smoke": "playwright test tests/e2e/public-auth.spec.ts",
