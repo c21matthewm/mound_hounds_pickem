@@ -654,8 +654,38 @@ test.describe.serial("Full App Flow", () => {
       [pickB[5], 38],
       [pickB[6], 36]
     ]);
+    const driverNameById = new Map(
+      Array.from(driverCoverage.byGroup.values())
+        .flat()
+        .map((driver) => [driver.id, driver.driver_name])
+    );
+    const standardPreviewPaste = [
+      "Pos\tStart\tCar\tDriver\tTeam\tLaps\tLed\tStatusLaps\tTime\tAvg Speed\tStatus\tPoints",
+      ...Array.from(pointsByPickB.entries()).map(([driverId, points], index) => {
+        const position = index + 1;
+        const driverName = driverNameById.get(driverId) ?? `Driver ${driverId}`;
+        const averageSpeed = (179.5 - index / 10).toFixed(3);
+        return `${position}\t${position}\t${driverId}\t${driverName}\t${TEST_PREFIX} Team\t100\t0\t0\t01:00:00\t${averageSpeed}\tRunning\t${points}`;
+      })
+    ].join("\n");
 
     await adminPage.goto("/admin?tab=results");
+    const resultsImportForm = adminPage.getByTestId("admin-results-import-form");
+    await resultsImportForm.getByTestId("admin-results-import-race-select").selectOption(String(raceA.id));
+    await resultsImportForm.getByTestId("admin-results-import-paste").fill(standardPreviewPaste);
+    await resultsImportForm.getByTestId("admin-results-import-preview").click();
+    await expect(resultsImportForm).toContainText(`Publish Preview: ${raceAName}`);
+    await expect(resultsImportForm).toContainText("Standard format: 6 championship-standing groups.");
+    await expect(resultsImportForm).toContainText("6 groups");
+    await expect(resultsImportForm).toContainText("Matched Drivers");
+    await expect(resultsImportForm).toContainText("Unmatched Rows");
+    await expect(resultsImportForm).toContainText("Winner Avg Speed");
+    await expect(resultsImportForm).toContainText("Highest Possible");
+    await expect(resultsImportForm).toContainText("Lowest Possible");
+    await expect(resultsImportForm).toContainText("No-Pick Users");
+    await expect(resultsImportForm).toContainText("Preview is clean. Ready to publish.");
+    await expect(resultsImportForm.getByTestId("admin-results-import-submit")).toBeEnabled();
+
     const manualResultsForm = adminPage.getByTestId("admin-results-manual-form");
     for (const [driverId, points] of pointsByPickB.entries()) {
       await manualResultsForm.locator('select[name="race_id"]').selectOption(String(raceA.id));

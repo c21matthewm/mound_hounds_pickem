@@ -334,7 +334,7 @@ export default async function LeaderboardPage({ searchParams }: PageProps) {
                   />
                 </div>
                 <div className="rounded-xl border border-cyan-100 bg-cyan-50 px-4 py-3 text-sm text-cyan-900">
-                  Picks unlock here after qualifying starts. Results add per-driver scores.
+                  Picks unlock here after the race pick deadline. Results add per-driver scores.
                 </div>
               </div>
 

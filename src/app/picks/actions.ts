@@ -3,6 +3,13 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { isProfileComplete, type ProfileRow } from "@/lib/profile";
+import {
+  groupNumbersForCount,
+  normalizeRacePickFormat,
+  pickGroupCountForFormat,
+  pickLockAtForRace
+} from "@/lib/race-format";
+import { isMissingColumnError } from "@/lib/supabase/schema-compat";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
 
 const asText = (value: FormDataEntryValue | null): string =>
@@ -53,30 +60,34 @@ export async function saveWeeklyPickAction(formData: FormData) {
 
   const raceId = parsePositiveInt(asText(formData.get("race_id")));
   const averageSpeed = parsePositiveDecimal(asText(formData.get("average_speed")));
-  const groupSelections = [
-    parsePositiveInt(asText(formData.get("driver_group1_id"))),
-    parsePositiveInt(asText(formData.get("driver_group2_id"))),
-    parsePositiveInt(asText(formData.get("driver_group3_id"))),
-    parsePositiveInt(asText(formData.get("driver_group4_id"))),
-    parsePositiveInt(asText(formData.get("driver_group5_id"))),
-    parsePositiveInt(asText(formData.get("driver_group6_id")))
-  ];
 
-  if (!raceId || !averageSpeed || groupSelections.some((value) => value === null)) {
+  if (!raceId || !averageSpeed) {
     picksErrorRedirect("A race, average speed, and one driver from each group are required.");
   }
 
-  const selectedDriverIds = groupSelections as number[];
-  const uniqueCount = new Set(selectedDriverIds).size;
-  if (uniqueCount !== 6) {
-    picksErrorRedirect("You must select 6 different drivers (one per group).");
-  }
+  const raceIdValue = raceId as number;
 
-  const { data: race, error: raceError } = await supabase
+  let { data: race, error: raceError } = await supabase
     .from("races")
-    .select("id,race_date,qualifying_start_at,is_archived")
-    .eq("id", raceId)
+    .select("id,race_date,qualifying_start_at,is_archived,pick_format")
+    .eq("id", raceIdValue)
     .maybeSingle();
+
+  if (raceError && isMissingColumnError(raceError, "pick_format")) {
+    const legacyRaceResponse = await supabase
+      .from("races")
+      .select("id,race_date,qualifying_start_at,is_archived")
+      .eq("id", raceIdValue)
+      .maybeSingle();
+
+    race = legacyRaceResponse.data
+      ? {
+          ...legacyRaceResponse.data,
+          pick_format: "standard"
+        }
+      : null;
+    raceError = legacyRaceResponse.error;
+  }
 
   if (raceError || !race) {
     picksErrorRedirect("Selected race not found.");
@@ -85,14 +96,38 @@ export async function saveWeeklyPickAction(formData: FormData) {
   if (raceIsArchived) {
     picksErrorRedirect("This race has been archived and no longer accepts picks.");
   }
-  const qualifyingStartAt = (race as { qualifying_start_at: string }).qualifying_start_at;
 
-  const qualifyingTime = new Date(qualifyingStartAt);
-  if (qualifyingTime.getTime() <= Date.now()) {
-    picksErrorRedirect("Picks are locked because qualifying has already started.");
+  const pickFormat = normalizeRacePickFormat((race as { pick_format?: string | null }).pick_format);
+  const groupCount = pickGroupCountForFormat(pickFormat);
+  const groupSelections = groupNumbersForCount(groupCount).map((groupNumber) =>
+    parsePositiveInt(asText(formData.get(`driver_group${groupNumber}_id`)))
+  );
+
+  if (groupSelections.some((value) => value === null)) {
+    picksErrorRedirect(
+      `A race, average speed, and one driver from each of ${groupCount} groups are required.`
+    );
   }
 
-  const { error: upsertError } = await supabase.from("picks").upsert(
+  const selectedDriverIds = groupSelections as number[];
+  const uniqueCount = new Set(selectedDriverIds).size;
+  if (uniqueCount !== groupCount) {
+    picksErrorRedirect(`You must select ${groupCount} different drivers (one per group).`);
+  }
+
+  const pickLockAt = pickLockAtForRace(
+    race as { pick_format?: string | null; qualifying_start_at: string; race_date: string }
+  );
+  const pickLockTime = new Date(pickLockAt);
+  if (pickLockTime.getTime() <= Date.now()) {
+    picksErrorRedirect(
+      pickFormat === "indy_500"
+        ? "Picks are locked because the race has already started."
+        : "Picks are locked because qualifying has already started."
+    );
+  }
+
+  let { error: upsertError } = await supabase.from("picks").upsert(
     {
       average_speed: averageSpeed,
       driver_group1_id: selectedDriverIds[0],
@@ -101,11 +136,37 @@ export async function saveWeeklyPickAction(formData: FormData) {
       driver_group4_id: selectedDriverIds[3],
       driver_group5_id: selectedDriverIds[4],
       driver_group6_id: selectedDriverIds[5],
-      race_id: raceId,
+      driver_group7_id: pickFormat === "indy_500" ? selectedDriverIds[6] : null,
+      driver_group8_id: pickFormat === "indy_500" ? selectedDriverIds[7] : null,
+      race_id: raceIdValue,
       user_id: user.id
     },
     { onConflict: "user_id,race_id" }
   );
+
+  if (
+    upsertError &&
+    pickFormat === "standard" &&
+    (isMissingColumnError(upsertError, "driver_group7_id") ||
+      isMissingColumnError(upsertError, "driver_group8_id"))
+  ) {
+    const legacyUpsertResponse = await supabase.from("picks").upsert(
+      {
+        average_speed: averageSpeed,
+        driver_group1_id: selectedDriverIds[0],
+        driver_group2_id: selectedDriverIds[1],
+        driver_group3_id: selectedDriverIds[2],
+        driver_group4_id: selectedDriverIds[3],
+        driver_group5_id: selectedDriverIds[4],
+        driver_group6_id: selectedDriverIds[5],
+        race_id: raceIdValue,
+        user_id: user.id
+      },
+      { onConflict: "user_id,race_id" }
+    );
+
+    upsertError = legacyUpsertResponse.error;
+  }
 
   if (upsertError) {
     picksErrorRedirect(upsertError.message);

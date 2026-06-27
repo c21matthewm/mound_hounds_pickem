@@ -1,7 +1,9 @@
 import "server-only";
 
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { pickLockAtForRace } from "@/lib/race-format";
 import { createServiceRoleSupabaseClient } from "@/lib/supabase/service-role";
+import { isMissingColumnError } from "@/lib/supabase/schema-compat";
 import { formatLeagueDateTime, LEAGUE_TIME_ZONE } from "@/lib/timezone";
 
 type ReminderType = "4d" | "2d" | "2h";
@@ -16,7 +18,9 @@ type ReminderWindow = {
 
 type UpcomingRace = {
   id: number;
+  pick_format: string | null;
   qualifying_start_at: string;
+  race_date: string;
   race_name: string;
 };
 
@@ -162,12 +166,17 @@ const loadAuthEmailsByUserId = async (
     users.forEach((user) => {
       const userId = user.id;
       const email = user.email?.trim();
-      if (targetIds.has(userId) && email) {
+      if (!targetIds.has(userId)) {
+        return;
+      }
+
+      if (email) {
         emailByUserId.set(userId, email);
       }
+      targetIds.delete(userId);
     });
 
-    if (users.length < perPage) {
+    if (targetIds.size === 0 || users.length < perPage) {
       break;
     }
 
@@ -181,7 +190,8 @@ const buildReminderMessage = (
   race: UpcomingRace,
   reminderWindow: ReminderWindow
 ): { smsText: string; subject: string; text: string } => {
-  const pickDeadlineText = formatLeagueDateTime(race.qualifying_start_at, {
+  const pickLockAt = pickLockAtForRace(race);
+  const pickDeadlineText = formatLeagueDateTime(pickLockAt, {
     dateStyle: "full",
     timeStyle: "short"
   });
@@ -193,12 +203,12 @@ const buildReminderMessage = (
     "Pit lane reminder from the Mound Hounds Pick'em League.",
     "",
     `Race: ${race.race_name}`,
-    `Pick deadline (qualifying): ${pickDeadlineText} (${LEAGUE_TIME_ZONE})`,
+    `Pick deadline: ${pickDeadlineText} (${LEAGUE_TIME_ZONE})`,
     "",
     "You have not submitted picks yet for this race.",
     `Submit your picks here: ${picksUrl}`,
     "",
-    "Get your lineup locked before qualifying starts. Good luck and enjoy the race weekend!"
+    "Get your lineup locked before the pick deadline. Good luck and enjoy the race weekend!"
   ].join("\n");
 
   const smsText = [
@@ -322,18 +332,41 @@ export async function sendDuePickReminders(): Promise<PickReminderSummary> {
   const supabase = createServiceRoleSupabaseClient();
   const now = new Date();
 
-  const { data: upcomingRace, error: raceError } = await supabase
+  let { data: upcomingRaces, error: raceError } = await supabase
     .from("races")
-    .select("id,race_name,qualifying_start_at")
+    .select("id,race_name,pick_format,qualifying_start_at,race_date")
     .eq("is_archived", false)
-    .gt("qualifying_start_at", now.toISOString())
-    .order("qualifying_start_at", { ascending: true })
-    .limit(1)
-    .maybeSingle<UpcomingRace>();
+    .gt("race_date", now.toISOString())
+    .order("race_date", { ascending: true })
+    .limit(20);
+
+  if (raceError && isMissingColumnError(raceError, "pick_format")) {
+    const legacyRaceResponse = await supabase
+      .from("races")
+      .select("id,race_name,qualifying_start_at,race_date")
+      .eq("is_archived", false)
+      .gt("race_date", now.toISOString())
+      .order("race_date", { ascending: true })
+      .limit(20);
+
+    upcomingRaces = (legacyRaceResponse.data ?? []).map((race) => ({
+      ...race,
+      pick_format: "standard"
+    }));
+    raceError = legacyRaceResponse.error;
+  }
 
   if (raceError) {
     throw new Error(`Failed loading upcoming race for reminders: ${raceError.message}`);
   }
+
+  const upcomingRace =
+    ((upcomingRaces ?? []) as UpcomingRace[])
+      .filter((race) => Date.parse(pickLockAtForRace(race)) > now.getTime())
+      .sort(
+        (a, b) =>
+          Date.parse(pickLockAtForRace(a)) - Date.parse(pickLockAtForRace(b))
+      )[0] ?? null;
 
   if (!upcomingRace) {
     return {
@@ -351,7 +384,7 @@ export async function sendDuePickReminders(): Promise<PickReminderSummary> {
     };
   }
 
-  const msUntilDeadline = Date.parse(upcomingRace.qualifying_start_at) - now.getTime();
+  const msUntilDeadline = Date.parse(pickLockAtForRace(upcomingRace)) - now.getTime();
   const reminderWindow = getReminderWindow(msUntilDeadline);
   if (!reminderWindow) {
     return {

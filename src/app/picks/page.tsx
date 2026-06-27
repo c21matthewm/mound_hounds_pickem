@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
+import { isMissingColumnError } from "@/lib/supabase/schema-compat";
 import { MobileBottomNav } from "@/components/mobile-bottom-nav";
 import { PickSubmissionSnapshot } from "@/components/pick-submission-snapshot";
 import { SignOutButton } from "@/components/sign-out-button";
@@ -7,6 +8,13 @@ import { saveWeeklyPickAction } from "@/app/picks/actions";
 import { PickemForm } from "@/components/pickem-form";
 import { isProfileComplete, type ProfileRow } from "@/lib/profile";
 import { queryStringParam } from "@/lib/query";
+import {
+  groupNumbersForCount,
+  normalizeRacePickFormat,
+  pickGroupCountForFormat,
+  pickLockAtForRace,
+  type RacePickFormat
+} from "@/lib/race-format";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
 import {
   formatLeagueDateTime,
@@ -26,6 +34,7 @@ type DriverRow = {
 
 type RaceRow = {
   id: number;
+  pick_format?: RacePickFormat | null;
   payout: number | string;
   qualifying_start_at: string;
   race_date: string;
@@ -41,29 +50,38 @@ type PickRow = {
   driver_group4_id: number;
   driver_group5_id: number;
   driver_group6_id: number;
+  driver_group7_id: number | null;
+  driver_group8_id: number | null;
   id: number;
   updated_at: string;
+};
+
+type RaceDriverGroupRow = {
+  driver_id: number;
+  group_number: number;
+  qualifying_position: number | null;
+  race_id: number;
 };
 
 type PageProps = {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 };
 
-const GROUP_NUMBERS = [1, 2, 3, 4, 5, 6] as const;
 const PICKEM_RACE_BUFFER_MS = 24 * 60 * 60 * 1000;
 const PICKEM_RACE_SELECT_FIELDS = "id,race_name,title_image_url,qualifying_start_at,race_date,payout";
 
 const formatRaceDate = (value: string): string =>
   formatLeagueDateTime(value, { dateStyle: "full", timeStyle: "short" });
 
-const selectedByGroup = (pick: PickRow | null): Record<number, number | null> => ({
-  1: pick?.driver_group1_id ?? null,
-  2: pick?.driver_group2_id ?? null,
-  3: pick?.driver_group3_id ?? null,
-  4: pick?.driver_group4_id ?? null,
-  5: pick?.driver_group5_id ?? null,
-  6: pick?.driver_group6_id ?? null
-});
+const selectedByGroup = (pick: PickRow | null, groupNumbers: number[]): Record<number, number | null> => {
+  const selected: Record<number, number | null> = {};
+  groupNumbers.forEach((groupNumber) => {
+    const key = `driver_group${groupNumber}_id` as keyof PickRow;
+    const value = pick?.[key];
+    selected[groupNumber] = typeof value === "number" ? value : null;
+  });
+  return selected;
+};
 
 export default async function PicksPage({ searchParams }: PageProps) {
   const params = await searchParams;
@@ -175,7 +193,25 @@ export default async function PicksPage({ searchParams }: PageProps) {
     );
   }
 
-  const [driversResponse, existingPickResponse] = await Promise.all([
+  const pickFormatResponse = await supabase
+    .from("races")
+    .select("pick_format")
+    .eq("id", upcomingRace.id)
+    .maybeSingle<{ pick_format: RacePickFormat | null }>();
+  if (!pickFormatResponse.error) {
+    upcomingRace = {
+      ...upcomingRace,
+      pick_format: pickFormatResponse.data?.pick_format ?? "standard"
+    };
+  }
+
+  const racePickFormat = normalizeRacePickFormat(upcomingRace.pick_format);
+  const groupCount = pickGroupCountForFormat(racePickFormat);
+  const groupNumbers = groupNumbersForCount(groupCount);
+  const pickLockAt = pickLockAtForRace(upcomingRace);
+  const isIndy500Pickem = racePickFormat === "indy_500";
+
+  const [driversResponse, existingPickResponse, raceDriverGroupsResponse] = await Promise.all([
     supabase
       .from("drivers")
       .select("id,driver_name,image_url,championship_points,current_standing,group_number,is_active")
@@ -185,22 +221,70 @@ export default async function PicksPage({ searchParams }: PageProps) {
     supabase
       .from("picks")
       .select(
+        "id,driver_group1_id,driver_group2_id,driver_group3_id,driver_group4_id,driver_group5_id,driver_group6_id,driver_group7_id,driver_group8_id,average_speed,updated_at"
+      )
+      .eq("race_id", upcomingRace.id)
+      .eq("user_id", user.id)
+      .maybeSingle<PickRow>(),
+    supabase
+      .from("race_driver_groups")
+      .select("race_id,driver_id,group_number,qualifying_position")
+      .eq("race_id", upcomingRace.id)
+      .order("group_number", { ascending: true })
+      .order("qualifying_position", { ascending: true })
+  ]);
+
+  let existingPick = existingPickResponse.data ?? null;
+  if (
+    existingPickResponse.error &&
+    (isMissingColumnError(existingPickResponse.error, "driver_group7_id") ||
+      isMissingColumnError(existingPickResponse.error, "driver_group8_id"))
+  ) {
+    const legacyPickResponse = await supabase
+      .from("picks")
+      .select(
         "id,driver_group1_id,driver_group2_id,driver_group3_id,driver_group4_id,driver_group5_id,driver_group6_id,average_speed,updated_at"
       )
       .eq("race_id", upcomingRace.id)
       .eq("user_id", user.id)
-      .maybeSingle<PickRow>()
-  ]);
+      .maybeSingle<Omit<PickRow, "driver_group7_id" | "driver_group8_id">>();
+
+    existingPick = legacyPickResponse.data
+      ? {
+          ...legacyPickResponse.data,
+          driver_group7_id: null,
+          driver_group8_id: null
+        }
+      : null;
+  }
+
+  let raceDriverGroups: RaceDriverGroupRow[] = (raceDriverGroupsResponse.data ?? []) as RaceDriverGroupRow[];
+  if (
+    raceDriverGroupsResponse.error &&
+    isMissingColumnError(raceDriverGroupsResponse.error, "qualifying_position")
+  ) {
+    const legacyRaceDriverGroupsResponse = await supabase
+      .from("race_driver_groups")
+      .select("race_id,driver_id,group_number")
+      .eq("race_id", upcomingRace.id)
+      .order("group_number", { ascending: true });
+
+    raceDriverGroups = (legacyRaceDriverGroupsResponse.data ?? []).map((row) => ({
+      ...row,
+      qualifying_position: null
+    })) as RaceDriverGroupRow[];
+  }
 
   const activeDrivers: DriverRow[] = (driversResponse.data ?? []) as DriverRow[];
-  const existingPick = existingPickResponse.data ?? null;
-  const selectedMap = selectedByGroup(existingPick);
-  const picksLocked = Date.parse(upcomingRace.qualifying_start_at) <= now.getTime();
+  const selectedMap = selectedByGroup(existingPick, groupNumbers);
+  const picksLocked = Date.parse(pickLockAt) <= now.getTime();
   const driverNameById = new Map<number, string>();
+  const driverById = new Map<number, DriverRow>();
   activeDrivers.forEach((driver) => {
     driverNameById.set(driver.id, driver.driver_name);
+    driverById.set(driver.id, driver);
   });
-  const savedPickSummary = GROUP_NUMBERS.flatMap((groupNumber) => {
+  const savedPickSummary = groupNumbers.flatMap((groupNumber) => {
     const driverId = selectedMap[groupNumber];
     if (!driverId) {
       return [];
@@ -214,27 +298,54 @@ export default async function PicksPage({ searchParams }: PageProps) {
     ];
   });
 
-  const driversByGroup = new Map<number, DriverRow[]>();
-  GROUP_NUMBERS.forEach((groupNumber) => driversByGroup.set(groupNumber, []));
-  activeDrivers.forEach((driver) => {
-    const existing = driversByGroup.get(driver.group_number) ?? [];
-    existing.push(driver);
-    driversByGroup.set(driver.group_number, existing);
-  });
+  const driversByGroup = new Map<number, Array<DriverRow & { qualifyingPosition?: number | null }>>();
+  groupNumbers.forEach((groupNumber) => driversByGroup.set(groupNumber, []));
+  if (isIndy500Pickem) {
+    raceDriverGroups.forEach((raceGroup) => {
+      const driver = driverById.get(raceGroup.driver_id);
+      if (!driver || raceGroup.group_number < 1 || raceGroup.group_number > groupCount) {
+        return;
+      }
 
-  const missingGroups = GROUP_NUMBERS.filter(
+      const existing = driversByGroup.get(raceGroup.group_number) ?? [];
+      existing.push({
+        ...driver,
+        qualifyingPosition: raceGroup.qualifying_position
+      });
+      driversByGroup.set(raceGroup.group_number, existing);
+    });
+  } else {
+    activeDrivers.forEach((driver) => {
+      const existing = driversByGroup.get(driver.group_number) ?? [];
+      existing.push(driver);
+      driversByGroup.set(driver.group_number, existing);
+    });
+  }
+
+  const missingGroups = groupNumbers.filter(
     (groupNumber) => (driversByGroup.get(groupNumber) ?? []).length === 0
   );
   const canSubmit = missingGroups.length === 0 && !picksLocked;
-  const pickGroups = GROUP_NUMBERS.map((groupNumber) => ({
+  const pickGroups = groupNumbers.map((groupNumber) => ({
     drivers: (driversByGroup.get(groupNumber) ?? []).map((driver) => ({
       championshipPoints: driver.championship_points,
+      detailText:
+        isIndy500Pickem && driver.qualifyingPosition
+          ? `Qualifying Position: ${driver.qualifyingPosition}`
+          : undefined,
       driverName: driver.driver_name,
       id: driver.id,
       imageUrl: driver.image_url
     })),
     groupNumber,
-    isTopGroup: groupNumber <= 5
+    isTopGroup: !isIndy500Pickem && groupNumber <= 5,
+    selectionLabel: isIndy500Pickem
+      ? groupNumber < groupCount
+        ? "Pick 1 of 4"
+        : "Pick 1 of 5"
+      : groupNumber <= 5
+        ? "Pick 1 of 4"
+        : "Pick 1"
   }));
 
   return (
@@ -297,8 +408,10 @@ export default async function PicksPage({ searchParams }: PageProps) {
           </div>
           <div className="mt-5 grid gap-3 text-sm md:grid-cols-2 lg:grid-cols-4">
             <div className="rounded-xl border border-white/15 bg-white/10 p-3">
-              <p className="text-xs font-semibold uppercase tracking-wide text-slate-300">Pick Deadline</p>
-              <p className="mt-1 font-medium">{formatRaceDate(upcomingRace.qualifying_start_at)}</p>
+              <p className="text-xs font-semibold uppercase tracking-wide text-slate-300">
+                {isIndy500Pickem ? "Pick Lock (Race Start)" : "Pick Deadline"}
+              </p>
+              <p className="mt-1 font-medium">{formatRaceDate(pickLockAt)}</p>
             </div>
             <div className="rounded-xl border border-white/15 bg-white/10 p-3">
               <p className="text-xs font-semibold uppercase tracking-wide text-slate-300">Race Start</p>
@@ -309,10 +422,19 @@ export default async function PicksPage({ searchParams }: PageProps) {
               <p className="mt-1 font-medium">${Number(upcomingRace.payout).toFixed(2)}</p>
             </div>
             <div className="rounded-xl border border-white/15 bg-white/10 p-3">
-              <p className="text-xs font-semibold uppercase tracking-wide text-slate-300">Timezone</p>
-              <p className="mt-1 font-medium">{LEAGUE_TIME_ZONE}</p>
+              <p className="text-xs font-semibold uppercase tracking-wide text-slate-300">
+                {isIndy500Pickem ? "Pick Format" : "Timezone"}
+              </p>
+              <p className="mt-1 font-medium">
+                {isIndy500Pickem ? "Indy 500: 8 picks" : LEAGUE_TIME_ZONE}
+              </p>
             </div>
           </div>
+          {isIndy500Pickem ? (
+            <p className="mt-4 rounded-xl border border-cyan-300/30 bg-cyan-300/10 px-3 py-2 text-xs text-cyan-50">
+              Indianapolis 500 picks use qualifying-order groups and lock when the race starts.
+            </p>
+          ) : null}
           <p className="mt-4 text-xs text-slate-200">
             Please visit the{" "}
             <a
@@ -336,15 +458,19 @@ export default async function PicksPage({ searchParams }: PageProps) {
 
       <PickSubmissionSnapshot
         latestSavedAt={existingPick?.updated_at ?? null}
-        qualifyingStartAt={upcomingRace.qualifying_start_at}
+        qualifyingStartAt={pickLockAt}
         savedAverageSpeed={existingPick ? String(existingPick.average_speed) : null}
         savedPicks={savedPickSummary}
       />
 
       {missingGroups.length > 0 ? (
         <p className="mt-6 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
-          Picks are unavailable because these groups have no active drivers:{" "}
-          {missingGroups.map((group) => `Group ${group}`).join(", ")}. Update drivers in admin.
+          {isIndy500Pickem
+            ? "Picks are unavailable until admin imports the Indianapolis 500 qualifying order with all 33 drivers."
+            : "Picks are unavailable because these groups have no active drivers: "}
+          {!isIndy500Pickem
+            ? `${missingGroups.map((group) => `Group ${group}`).join(", ")}. Update drivers in admin.`
+            : null}
         </p>
       ) : null}
       <PickemForm

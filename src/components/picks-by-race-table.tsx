@@ -6,6 +6,15 @@ import {
   calculateOfficialSpeedDelta,
   isTopPointsTie
 } from "@/lib/weekly-ranking";
+import { groupNumbersForCount } from "@/lib/race-format";
+import {
+  compareNullableNumber,
+  compareText,
+  numericMatch,
+  sortIndicator,
+  textMatch,
+  type SortDirection
+} from "@/lib/table-utils";
 
 type DriverCell = {
   driverName: string | null;
@@ -33,102 +42,30 @@ type TieBreakRow = {
   userId: string;
 };
 
-type SortDirection = "asc" | "desc";
-
 type SortKey =
   | "rank"
   | "teamName"
   | "totalPoints"
   | "averageSpeed"
-  | "driver1"
-  | "driver2"
-  | "driver3"
-  | "driver4"
-  | "driver5"
-  | "driver6"
-  | "score1"
-  | "score2"
-  | "score3"
-  | "score4"
-  | "score5"
-  | "score6";
+  | `driver${number}`
+  | `score${number}`;
 
-type ColumnFilters = Record<SortKey, string>;
+type ColumnFilters = Record<string, string>;
 
-const DEFAULT_FILTERS: ColumnFilters = {
-  averageSpeed: "",
-  driver1: "",
-  driver2: "",
-  driver3: "",
-  driver4: "",
-  driver5: "",
-  driver6: "",
-  rank: "",
-  score1: "",
-  score2: "",
-  score3: "",
-  score4: "",
-  score5: "",
-  score6: "",
-  teamName: "",
-  totalPoints: ""
-};
+const createDefaultFilters = (groupCount: number): ColumnFilters => {
+  const filters: ColumnFilters = {
+    averageSpeed: "",
+    rank: "",
+    teamName: "",
+    totalPoints: ""
+  };
 
-const textMatch = (value: string, filterValue: string): boolean => {
-  const normalizedFilter = filterValue.trim().toLowerCase();
-  if (!normalizedFilter) {
-    return true;
+  for (let groupNumber = 1; groupNumber <= groupCount; groupNumber += 1) {
+    filters[`driver${groupNumber}`] = "";
+    filters[`score${groupNumber}`] = "";
   }
 
-  return value.toLowerCase().includes(normalizedFilter);
-};
-
-const numericMatch = (value: number | null, filterValue: string): boolean => {
-  const normalizedFilter = filterValue.trim();
-  if (!normalizedFilter) {
-    return true;
-  }
-  if (value === null) {
-    return false;
-  }
-
-  const compareMatch = normalizedFilter.match(/^(<=|>=|<|>)\s*(-?\d+(?:\.\d+)?)$/);
-  if (compareMatch) {
-    const operator = compareMatch[1];
-    const threshold = Number(compareMatch[2]);
-    if (operator === "<") return value < threshold;
-    if (operator === "<=") return value <= threshold;
-    if (operator === ">") return value > threshold;
-    if (operator === ">=") return value >= threshold;
-  }
-
-  const rangeMatch = normalizedFilter.match(/^(-?\d+(?:\.\d+)?)\s*-\s*(-?\d+(?:\.\d+)?)$/);
-  if (rangeMatch) {
-    const left = Number(rangeMatch[1]);
-    const right = Number(rangeMatch[2]);
-    const min = Math.min(left, right);
-    const max = Math.max(left, right);
-    return value >= min && value <= max;
-  }
-
-  const exact = Number(normalizedFilter);
-  if (!Number.isNaN(exact)) {
-    return value === exact;
-  }
-
-  return String(value).includes(normalizedFilter);
-};
-
-const sortIndicator = (
-  key: SortKey,
-  activeKey: SortKey,
-  direction: SortDirection
-): string => {
-  if (key !== activeKey) {
-    return "↕";
-  }
-
-  return direction === "asc" ? "↑" : "↓";
+  return filters;
 };
 
 const defaultSortDirection = (key: SortKey): SortDirection => {
@@ -139,20 +76,6 @@ const defaultSortDirection = (key: SortKey): SortDirection => {
   return "desc";
 };
 
-const compareNullableNumber = (
-  a: number | null,
-  b: number | null,
-  direction: SortDirection
-): number => {
-  if (a === null && b === null) return 0;
-  if (a === null) return 1;
-  if (b === null) return -1;
-  return direction === "asc" ? a - b : b - a;
-};
-
-const compareText = (a: string, b: string, direction: SortDirection): number =>
-  direction === "asc" ? a.localeCompare(b) : b.localeCompare(a);
-
 const filterInputClassName =
   "w-full rounded border border-slate-300 px-1.5 py-1 text-[11px] leading-tight text-slate-700 placeholder:text-slate-400";
 
@@ -160,7 +83,12 @@ const formatAverageSpeed = (value: number | null): string =>
   value !== null ? value.toFixed(3) : "-";
 
 export function PicksByRaceTable({ officialWinningAverageSpeed, resultsPosted, rows }: Props) {
-  const [filters, setFilters] = useState<ColumnFilters>(DEFAULT_FILTERS);
+  const groupCount = Math.max(6, ...rows.map((row) => row.drivers.length));
+  const groupNumbers = useMemo(
+    () => groupNumbersForCount(groupCount),
+    [groupCount]
+  );
+  const [filters, setFilters] = useState<ColumnFilters>(() => createDefaultFilters(groupCount));
   const [sortKey, setSortKey] = useState<SortKey>(resultsPosted ? "rank" : "teamName");
   const [sortDirection, setSortDirection] = useState<SortDirection>(
     defaultSortDirection(resultsPosted ? "rank" : "teamName")
@@ -182,7 +110,7 @@ export function PicksByRaceTable({ officialWinningAverageSpeed, resultsPosted, r
   };
 
   const resetView = () => {
-    setFilters(DEFAULT_FILTERS);
+    setFilters(createDefaultFilters(groupCount));
     const initialSortKey: SortKey = resultsPosted ? "rank" : "teamName";
     setSortKey(initialSortKey);
     setSortDirection(defaultSortDirection(initialSortKey));
@@ -190,27 +118,44 @@ export function PicksByRaceTable({ officialWinningAverageSpeed, resultsPosted, r
 
   const filteredAndSortedRows = useMemo(() => {
     const filtered = rows.filter((row) => {
-      return (
+      const baseMatches =
         numericMatch(row.rank, filters.rank) &&
         textMatch(row.teamName, filters.teamName) &&
         numericMatch(row.totalPoints, filters.totalPoints) &&
-        numericMatch(row.averageSpeed, filters.averageSpeed) &&
-        textMatch(row.drivers[0]?.driverName ?? "", filters.driver1) &&
-        textMatch(row.drivers[1]?.driverName ?? "", filters.driver2) &&
-        textMatch(row.drivers[2]?.driverName ?? "", filters.driver3) &&
-        textMatch(row.drivers[3]?.driverName ?? "", filters.driver4) &&
-        textMatch(row.drivers[4]?.driverName ?? "", filters.driver5) &&
-        textMatch(row.drivers[5]?.driverName ?? "", filters.driver6) &&
-        numericMatch(row.drivers[0]?.points ?? null, filters.score1) &&
-        numericMatch(row.drivers[1]?.points ?? null, filters.score2) &&
-        numericMatch(row.drivers[2]?.points ?? null, filters.score3) &&
-        numericMatch(row.drivers[3]?.points ?? null, filters.score4) &&
-        numericMatch(row.drivers[4]?.points ?? null, filters.score5) &&
-        numericMatch(row.drivers[5]?.points ?? null, filters.score6)
-      );
+        numericMatch(row.averageSpeed, filters.averageSpeed);
+
+      if (!baseMatches) {
+        return false;
+      }
+
+      return groupNumbers.every((groupNumber) => {
+        const groupCell = row.drivers[groupNumber - 1];
+        return (
+          textMatch(groupCell?.driverName ?? "", filters[`driver${groupNumber}`] ?? "") &&
+          numericMatch(groupCell?.points ?? null, filters[`score${groupNumber}`] ?? "")
+        );
+      });
     });
 
     const sorted = [...filtered].sort((a, b) => {
+      if (sortKey.startsWith("driver")) {
+        const groupIndex = Number(sortKey.replace("driver", "")) - 1;
+        return compareText(
+          a.drivers[groupIndex]?.driverName ?? "",
+          b.drivers[groupIndex]?.driverName ?? "",
+          sortDirection
+        );
+      }
+
+      if (sortKey.startsWith("score")) {
+        const groupIndex = Number(sortKey.replace("score", "")) - 1;
+        return compareNullableNumber(
+          a.drivers[groupIndex]?.points ?? null,
+          b.drivers[groupIndex]?.points ?? null,
+          sortDirection
+        );
+      }
+
       switch (sortKey) {
         case "rank":
           return compareNullableNumber(a.rank, b.rank, sortDirection);
@@ -220,37 +165,13 @@ export function PicksByRaceTable({ officialWinningAverageSpeed, resultsPosted, r
           return compareNullableNumber(a.totalPoints, b.totalPoints, sortDirection);
         case "averageSpeed":
           return compareNullableNumber(a.averageSpeed, b.averageSpeed, sortDirection);
-        case "driver1":
-          return compareText(a.drivers[0]?.driverName ?? "", b.drivers[0]?.driverName ?? "", sortDirection);
-        case "driver2":
-          return compareText(a.drivers[1]?.driverName ?? "", b.drivers[1]?.driverName ?? "", sortDirection);
-        case "driver3":
-          return compareText(a.drivers[2]?.driverName ?? "", b.drivers[2]?.driverName ?? "", sortDirection);
-        case "driver4":
-          return compareText(a.drivers[3]?.driverName ?? "", b.drivers[3]?.driverName ?? "", sortDirection);
-        case "driver5":
-          return compareText(a.drivers[4]?.driverName ?? "", b.drivers[4]?.driverName ?? "", sortDirection);
-        case "driver6":
-          return compareText(a.drivers[5]?.driverName ?? "", b.drivers[5]?.driverName ?? "", sortDirection);
-        case "score1":
-          return compareNullableNumber(a.drivers[0]?.points ?? null, b.drivers[0]?.points ?? null, sortDirection);
-        case "score2":
-          return compareNullableNumber(a.drivers[1]?.points ?? null, b.drivers[1]?.points ?? null, sortDirection);
-        case "score3":
-          return compareNullableNumber(a.drivers[2]?.points ?? null, b.drivers[2]?.points ?? null, sortDirection);
-        case "score4":
-          return compareNullableNumber(a.drivers[3]?.points ?? null, b.drivers[3]?.points ?? null, sortDirection);
-        case "score5":
-          return compareNullableNumber(a.drivers[4]?.points ?? null, b.drivers[4]?.points ?? null, sortDirection);
-        case "score6":
-          return compareNullableNumber(a.drivers[5]?.points ?? null, b.drivers[5]?.points ?? null, sortDirection);
         default:
           return 0;
       }
     });
 
     return sorted;
-  }, [filters, rows, sortDirection, sortKey]);
+  }, [filters, groupNumbers, rows, sortDirection, sortKey]);
 
   const tieBreakRows = useMemo(() => {
     if (!resultsPosted || !selectedRow || selectedRow.totalPoints === null) {
@@ -350,7 +271,7 @@ export function PicksByRaceTable({ officialWinningAverageSpeed, resultsPosted, r
                   Average Speed {sortIndicator("averageSpeed", sortKey, sortDirection)}
                 </button>
               </th>
-              {Array.from({ length: 6 }, (_, index) => index + 1).map((groupNumber) => (
+              {groupNumbers.map((groupNumber) => (
                 <Fragment key={`group-columns-${groupNumber}`}>
                   <th className="px-3 py-2 font-semibold">
                     <button
@@ -413,7 +334,7 @@ export function PicksByRaceTable({ officialWinningAverageSpeed, resultsPosted, r
                   value={filters.averageSpeed}
                 />
               </th>
-              {Array.from({ length: 6 }, (_, index) => index + 1).map((groupNumber) => (
+              {groupNumbers.map((groupNumber) => (
                 <Fragment key={`group-filters-${groupNumber}`}>
                   <th className="px-3 py-2">
                     <input
@@ -423,7 +344,7 @@ export function PicksByRaceTable({ officialWinningAverageSpeed, resultsPosted, r
                       }
                       placeholder="Driver..."
                       type="text"
-                      value={filters[`driver${groupNumber}` as SortKey]}
+                      value={filters[`driver${groupNumber}`] ?? ""}
                     />
                   </th>
                   <th className="px-3 py-2">
@@ -434,7 +355,7 @@ export function PicksByRaceTable({ officialWinningAverageSpeed, resultsPosted, r
                       }
                       placeholder=">=30"
                       type="text"
-                      value={filters[`score${groupNumber}` as SortKey]}
+                      value={filters[`score${groupNumber}`] ?? ""}
                     />
                   </th>
                 </Fragment>
@@ -444,7 +365,7 @@ export function PicksByRaceTable({ officialWinningAverageSpeed, resultsPosted, r
           <tbody>
             {filteredAndSortedRows.length === 0 ? (
               <tr>
-                <td className="px-3 py-4 text-sm text-slate-600" colSpan={16}>
+                <td className="px-3 py-4 text-sm text-slate-600" colSpan={4 + groupCount * 2}>
                   No rows match your current filters.
                 </td>
               </tr>
@@ -467,7 +388,7 @@ export function PicksByRaceTable({ officialWinningAverageSpeed, resultsPosted, r
                     {resultsPosted ? (row.totalPoints ?? 0) : "-"}
                   </td>
                   <td className="px-3 py-2">{formatAverageSpeed(row.averageSpeed)}</td>
-                  {Array.from({ length: 6 }, (_, offset) => offset + 1).map((groupNumber) => {
+                  {groupNumbers.map((groupNumber) => {
                     const groupCell = row.drivers[groupNumber - 1];
                     return (
                       <Fragment key={`${row.userId}-group-${groupNumber}`}>

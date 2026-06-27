@@ -124,6 +124,12 @@ supabase/migrations/20260310_auto_snapshot_race_groups_on_results_insert.sql
 That migration ensures driver groups are snapshotted as soon as race results are inserted, even if
 results are inserted outside the normal admin UI path.
 
+Latest Indy 500 pick-format migration:
+
+```text
+supabase/migrations/20260528_add_indy_500_pick_format.sql
+```
+
 ## 5. Promote Admin
 
 After signing up with your commissioner/admin account, run this in Supabase SQL Editor:
