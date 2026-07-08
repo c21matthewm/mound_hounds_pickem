@@ -81,6 +81,7 @@ const changeClassName = (value: number): string => {
 export function StandingsTable({ raceColumns, rows }: Props) {
   const defaultFilters = useMemo(() => createDefaultFilters(raceColumns), [raceColumns]);
   const [filters, setFilters] = useState<ColumnFilters>(defaultFilters);
+  const [showFilters, setShowFilters] = useState(false);
   const [sortKey, setSortKey] = useState<SortKey>("currentStanding");
   const [sortDirection, setSortDirection] = useState<SortDirection>("asc");
 
@@ -163,17 +164,70 @@ export function StandingsTable({ raceColumns, rows }: Props) {
             of {rows.length} teams. Filters only change your view.
           </p>
         </div>
-        <button
-          className="rounded-md border border-white/25 bg-white/10 px-3 py-1.5 text-xs font-semibold text-white hover:bg-white/20"
-          data-testid="standings-reset"
-          onClick={resetView}
-          type="button"
-        >
-          Reset view
-        </button>
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            className="rounded-md border border-white/25 bg-white/10 px-3 py-1.5 text-xs font-semibold text-white hover:bg-white/20"
+            data-testid="standings-filter-toggle"
+            onClick={() => setShowFilters((previous) => !previous)}
+            type="button"
+          >
+            {showFilters ? "Hide filters" : "Advanced filters"}
+          </button>
+          <button
+            className="rounded-md border border-white/25 bg-white/10 px-3 py-1.5 text-xs font-semibold text-white hover:bg-white/20"
+            data-testid="standings-reset"
+            onClick={resetView}
+            type="button"
+          >
+            Reset view
+          </button>
+        </div>
       </div>
 
-      <div className="overflow-x-auto">
+      <div className="divide-y divide-slate-200 md:hidden">
+        {filteredAndSortedRows.length === 0 ? (
+          <p className="px-4 py-4 text-sm text-slate-600">No rows match your current filters.</p>
+        ) : (
+          filteredAndSortedRows.map((row) => {
+            const recentRaceColumns = raceColumns.slice(-3);
+
+            return (
+              <article key={`mobile-standings-${row.userId}`} className="px-4 py-3">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                      Rank #{row.currentStanding}
+                    </p>
+                    <h3 className="mt-0.5 truncate text-base font-semibold text-slate-900">
+                      {row.teamName}
+                    </h3>
+                  </div>
+                  <div className="text-right">
+                    <p className="text-lg font-semibold text-slate-900">{row.totalPoints}</p>
+                    <p className="text-xs text-slate-500">points</p>
+                  </div>
+                </div>
+                <div className="mt-3 flex flex-wrap items-center gap-1.5">
+                  <span className={`inline-flex rounded-full border px-2 py-0.5 text-xs font-semibold ${changeClassName(row.change)}`}>
+                    {formatChange(row.change)}
+                  </span>
+                  {recentRaceColumns.map((race) => (
+                    <span
+                      key={`mobile-standings-${row.userId}-${race.raceId}`}
+                      className="rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-xs font-medium text-slate-700"
+                      title={race.raceName}
+                    >
+                      {race.raceName}: {row.racePointsByRaceId[race.raceId] ?? 0}
+                    </span>
+                  ))}
+                </div>
+              </article>
+            );
+          })
+        )}
+      </div>
+
+      <div className="hidden overflow-x-auto md:block">
         <table className="min-w-full text-left text-sm">
           <thead className="bg-slate-50 text-slate-700">
             <tr>
@@ -218,56 +272,58 @@ export function StandingsTable({ raceColumns, rows }: Props) {
                 </th>
               ))}
             </tr>
-            <tr>
-              <th className="px-3 py-2">
-                <input
-                  className={filterInputClassName}
-                  onChange={(event) => updateFilter("change", event.target.value)}
-                  placeholder=">=1"
-                  type="text"
-                  value={filters.change ?? ""}
-                />
-              </th>
-              <th className="px-3 py-2">
-                <input
-                  className={filterInputClassName}
-                  onChange={(event) => updateFilter("currentStanding", event.target.value)}
-                  placeholder="<=5"
-                  type="text"
-                  value={filters.currentStanding ?? ""}
-                />
-              </th>
-              <th className="px-3 py-2">
-                <input
-                  className={filterInputClassName}
-                  data-testid="standings-filter-team"
-                  onChange={(event) => updateFilter("teamName", event.target.value)}
-                  placeholder="Team contains..."
-                  type="text"
-                  value={filters.teamName ?? ""}
-                />
-              </th>
-              <th className="px-3 py-2">
-                <input
-                  className={filterInputClassName}
-                  onChange={(event) => updateFilter("totalPoints", event.target.value)}
-                  placeholder=">=300"
-                  type="text"
-                  value={filters.totalPoints ?? ""}
-                />
-              </th>
-              {raceColumns.map((race) => (
-                <th key={`race-filter-${race.raceId}`} className="px-3 py-2">
+            {showFilters ? (
+              <tr>
+                <th className="px-3 py-2">
                   <input
                     className={filterInputClassName}
-                    onChange={(event) => updateFilter(`race-${race.raceId}`, event.target.value)}
-                    placeholder=">=20"
+                    onChange={(event) => updateFilter("change", event.target.value)}
+                    placeholder=">=1"
                     type="text"
-                    value={filters[`race-${race.raceId}`] ?? ""}
+                    value={filters.change ?? ""}
                   />
                 </th>
-              ))}
-            </tr>
+                <th className="px-3 py-2">
+                  <input
+                    className={filterInputClassName}
+                    onChange={(event) => updateFilter("currentStanding", event.target.value)}
+                    placeholder="<=5"
+                    type="text"
+                    value={filters.currentStanding ?? ""}
+                  />
+                </th>
+                <th className="px-3 py-2">
+                  <input
+                    className={filterInputClassName}
+                    data-testid="standings-filter-team"
+                    onChange={(event) => updateFilter("teamName", event.target.value)}
+                    placeholder="Team contains..."
+                    type="text"
+                    value={filters.teamName ?? ""}
+                  />
+                </th>
+                <th className="px-3 py-2">
+                  <input
+                    className={filterInputClassName}
+                    onChange={(event) => updateFilter("totalPoints", event.target.value)}
+                    placeholder=">=300"
+                    type="text"
+                    value={filters.totalPoints ?? ""}
+                  />
+                </th>
+                {raceColumns.map((race) => (
+                  <th key={`race-filter-${race.raceId}`} className="px-3 py-2">
+                    <input
+                      className={filterInputClassName}
+                      onChange={(event) => updateFilter(`race-${race.raceId}`, event.target.value)}
+                      placeholder=">=20"
+                      type="text"
+                      value={filters[`race-${race.raceId}`] ?? ""}
+                    />
+                  </th>
+                ))}
+              </tr>
+            ) : null}
           </thead>
           <tbody>
             {filteredAndSortedRows.length === 0 ? (

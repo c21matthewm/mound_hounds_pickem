@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
+import { AuthenticatedPageShell } from "@/components/authenticated-page-shell";
 import { MobileBottomNav } from "@/components/mobile-bottom-nav";
 import { SignOutButton } from "@/components/sign-out-button";
 import { submitFeedbackAction } from "@/app/feedback/actions";
@@ -71,40 +72,23 @@ export default async function FeedbackPage({ searchParams }: PageProps) {
   const myFeedback: FeedbackItemRow[] = (myFeedbackRows ?? []) as FeedbackItemRow[];
 
   return (
-    <main className="mx-auto flex min-h-screen max-w-4xl flex-col px-6 py-10 pb-24 md:pb-10">
-      <header className="relative flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <p className="inline-flex rounded-full border border-blue-200 bg-blue-50 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-blue-700">
-            Feedback
-          </p>
-          <h1 className="mt-3 text-3xl font-semibold tracking-tight">Bug Reports & Improvements</h1>
-          <p className="mt-2 text-sm text-slate-600">
-            We love to continually improve and value your feedback.
-          </p>
-        </div>
-
-        <div className="flex items-center gap-2">
+    <AuthenticatedPageShell
+      actions={
+        <>
           <Link
             className="rounded-md border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100"
             href="/dashboard"
           >
             Dashboard
           </Link>
-          <Link
-            className="rounded-md border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100"
-            href="/picks"
-          >
-            Pick&apos;em Form
-          </Link>
-          <Link
-            className="rounded-md border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100"
-            href="/leaderboard"
-          >
-            Leaderboard
-          </Link>
-          <SignOutButton />
-        </div>
-      </header>
+          <SignOutButton className="static" />
+        </>
+      }
+      description="Report bugs or suggest improvements for league admins to review."
+      eyebrow="Feedback"
+      maxWidth="max-w-4xl"
+      title="Bug Reports & Improvements"
+    >
 
       {message ? (
         <p className="mt-6 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
@@ -196,32 +180,28 @@ export default async function FeedbackPage({ searchParams }: PageProps) {
         {myFeedback.length === 0 ? (
           <p className="mt-3 text-sm text-slate-600">No feedback submitted yet.</p>
         ) : (
-          <div className="mt-3 overflow-x-auto rounded-md border border-slate-200">
-            <table className="min-w-full text-left text-sm">
-              <thead className="bg-slate-50 text-slate-700">
-                <tr>
-                  <th className="px-3 py-2 font-semibold">Submitted</th>
-                  <th className="px-3 py-2 font-semibold">Type</th>
-                  <th className="px-3 py-2 font-semibold">Category</th>
-                  <th className="px-3 py-2 font-semibold">Summary</th>
-                </tr>
-              </thead>
-              <tbody>
-                {myFeedback.map((item) => (
-                  <tr key={item.id} className="border-t border-slate-200">
-                    <td className="px-3 py-2">{formatDateTime(item.created_at)}</td>
-                    <td className="px-3 py-2">{feedbackTypeLabel(item.feedback_type)}</td>
-                    <td className="px-3 py-2">{feedbackCategoryLabel(item.category)}</td>
-                    <td className="px-3 py-2">{detailPreview(item.details)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+          <div className="mt-3 grid gap-2">
+            {myFeedback.map((item) => (
+              <article key={item.id} className="rounded-md border border-slate-200 bg-slate-50 px-3 py-3">
+                <div className="flex flex-wrap items-start justify-between gap-2">
+                  <div>
+                    <p className="text-sm font-semibold text-slate-900">
+                      {feedbackCategoryLabel(item.category)}
+                    </p>
+                    <p className="mt-0.5 text-xs text-slate-500">{formatDateTime(item.created_at)}</p>
+                  </div>
+                  <span className="rounded-full border border-slate-200 bg-white px-2 py-0.5 text-xs font-semibold text-slate-700">
+                    {feedbackTypeLabel(item.feedback_type)}
+                  </span>
+                </div>
+                <p className="mt-2 text-sm text-slate-700">{detailPreview(item.details)}</p>
+              </article>
+            ))}
           </div>
         )}
       </section>
 
       <MobileBottomNav />
-    </main>
+    </AuthenticatedPageShell>
   );
 }

@@ -15,6 +15,7 @@ import {
   updateDriverAction,
   upsertResultAction
 } from "@/app/admin/actions";
+import { AuthenticatedPageShell } from "@/components/authenticated-page-shell";
 import { AdminResultsImportForm } from "@/components/admin-results-import-form";
 import { ConfirmSubmitButton } from "@/components/confirm-submit-button";
 import { SignOutButton } from "@/components/sign-out-button";
@@ -548,9 +549,6 @@ export default async function AdminPage({ searchParams }: PageProps) {
     return new Date(bRaceDate).getTime() - new Date(aRaceDate).getTime() || b.points - a.points;
   });
 
-  const feedbackDetailPreview = (value: string): string =>
-    value.length > 220 ? `${value.slice(0, 217)}...` : value;
-
   const tabLinkClass = (tab: AdminTab): string =>
     `rounded-md px-3 py-2 text-sm font-medium ${
       activeTab === tab
@@ -559,30 +557,27 @@ export default async function AdminPage({ searchParams }: PageProps) {
     }`;
 
   return (
-    <main className="mx-auto flex min-h-screen max-w-7xl flex-col px-6 py-10">
-      <header className="relative flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <p className="inline-flex rounded-full border border-blue-200 bg-blue-50 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-blue-700">
-            League Ops
-          </p>
-          <h1 className="mt-3 text-3xl font-semibold tracking-tight">Admin Dashboard</h1>
-          <p className="mt-2 text-sm text-slate-600">
-            League admin tools for drivers, races, and official results.
-          </p>
-          <p className="mt-1 text-xs text-slate-500">
-            Signed in as <span className="font-semibold">{profile.team_name}</span>
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
+    <AuthenticatedPageShell
+      actions={
+        <>
           <Link
             className="rounded-md border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100"
             href="/dashboard"
           >
             Back to dashboard
           </Link>
-          <SignOutButton />
-        </div>
-      </header>
+          <SignOutButton className="static" />
+        </>
+      }
+      description={
+        <>
+          Signed in as <span className="font-semibold text-slate-900">{profile.team_name}</span>.
+        </>
+      }
+      eyebrow="League Ops"
+      maxWidth="max-w-7xl"
+      title="Admin Dashboard"
+    >
 
       {error ? (
         <p className="mt-6 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
@@ -625,33 +620,36 @@ export default async function AdminPage({ searchParams }: PageProps) {
           championship points and group placement update automatically from race results.
         </p>
 
-        <form
-          action={importChampionshipStandingsAction}
-          className="mt-5 rounded-md border border-slate-200 bg-slate-50 p-4"
-          data-testid="admin-standings-import-form"
-        >
-          <input name="tab" type="hidden" value="drivers" />
-          <h3 className="text-sm font-semibold text-slate-900">Import Championship Standings</h3>
-          <p className="mt-1 text-xs text-slate-600">
-            Paste rows like `docs/examples/championship-standings-sample.txt` (Rank, Driver,
-            Engine, Points, ...). The importer maps Rank, Driver, and Points for one-time
-            seed/correction updates.
-          </p>
-          <textarea
-            required
-            className="mt-3 h-36 w-full rounded-md border border-slate-300 px-3 py-2 font-mono text-xs"
-            data-testid="admin-standings-import-input"
-            name="standings_paste"
-            placeholder={"1\tAlex Palou\tHonda\t711\t0\t17\t8\t6\t14\t15\t778"}
-          />
-          <button
-            className="mt-3 rounded-md bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-700"
-            data-testid="admin-standings-import-submit"
-            type="submit"
+        <details className="mt-5 rounded-md border border-slate-200 bg-slate-50">
+          <summary className="cursor-pointer px-4 py-3 text-sm font-semibold text-slate-900">
+            Import / correction tools
+          </summary>
+          <form
+            action={importChampionshipStandingsAction}
+            className="border-t border-slate-200 p-4"
+            data-testid="admin-standings-import-form"
           >
-            Import standings
-          </button>
-        </form>
+            <input name="tab" type="hidden" value="drivers" />
+            <h3 className="text-sm font-semibold text-slate-900">Import Championship Standings</h3>
+            <p className="mt-1 text-xs text-slate-600">
+              Use for preseason seeding or corrections. The importer maps Rank, Driver, and Points.
+            </p>
+            <textarea
+              required
+              className="mt-3 h-36 w-full rounded-md border border-slate-300 px-3 py-2 font-mono text-xs"
+              data-testid="admin-standings-import-input"
+              name="standings_paste"
+              placeholder={"1\tAlex Palou\tHonda\t711\t0\t17\t8\t6\t14\t15\t778"}
+            />
+            <button
+              className="mt-3 rounded-md bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-700"
+              data-testid="admin-standings-import-submit"
+              type="submit"
+            >
+              Import standings
+            </button>
+          </form>
+        </details>
 
         <form
           action={createDriverAction}
@@ -723,15 +721,10 @@ export default async function AdminPage({ searchParams }: PageProps) {
             </p>
           ) : (
             drivers.map((driver) => (
-              <div key={driver.id} className="rounded-md border border-slate-200 p-3">
-                <p className="mb-2 text-xs text-slate-600">
-                  Group <span className="font-semibold">{driver.group_number}</span> | Rank{" "}
-                  <span className="font-semibold">#{driver.current_standing}</span> | Pts{" "}
-                  <span className="font-semibold">{driver.championship_points}</span>
-                </p>
-
-                <div className="grid gap-2 md:grid-cols-12">
-                  <div className="md:col-span-1 flex items-center">
+              <details key={driver.id} className="rounded-md border border-slate-200 bg-white">
+                <summary className="cursor-pointer px-3 py-3">
+                  <div className="inline-flex w-full flex-wrap items-center justify-between gap-3 align-middle">
+                    <div className="flex min-w-0 items-center gap-3">
                     {driver.image_url ? (
                       // eslint-disable-next-line @next/next/no-img-element
                       <img
@@ -744,11 +737,29 @@ export default async function AdminPage({ searchParams }: PageProps) {
                         IMG
                       </div>
                     )}
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-semibold text-slate-900">{driver.driver_name}</p>
+                        <p className="text-xs text-slate-500">
+                          Group {driver.group_number} · Rank #{driver.current_standing} · {driver.championship_points} pts
+                        </p>
+                      </div>
+                    </div>
+                    <span
+                      className={`rounded-full border px-2 py-0.5 text-xs font-semibold ${
+                        driver.is_active
+                          ? "border-emerald-300 bg-emerald-50 text-emerald-800"
+                          : "border-slate-300 bg-slate-50 text-slate-600"
+                      }`}
+                    >
+                      {driver.is_active ? "Active" : "Inactive"}
+                    </span>
                   </div>
+                </summary>
 
+                <div className="grid gap-2 border-t border-slate-200 p-3 md:grid-cols-12">
                   <form
                     action={updateDriverAction}
-                    className="grid gap-2 md:col-span-10 md:grid-cols-10"
+                    className="grid gap-2 md:col-span-11 md:grid-cols-10"
                     data-testid={`admin-driver-edit-form-${driver.id}`}
                   >
                     <input name="driver_id" type="hidden" value={String(driver.id)} />
@@ -806,7 +817,7 @@ export default async function AdminPage({ searchParams }: PageProps) {
                     </ConfirmSubmitButton>
                   </form>
                 </div>
-              </div>
+              </details>
             ))
           )}
         </div>
@@ -935,175 +946,166 @@ export default async function AdminPage({ searchParams }: PageProps) {
           </div>
         </form>
 
-        <form
-          action={setRaceWinnerAction}
-          className="mt-6 grid gap-3 rounded-md border border-slate-200 bg-slate-50 p-4 md:grid-cols-3"
-          data-testid="admin-race-winner-form"
-        >
-          <input name="tab" type="hidden" value="races" />
-          <label className="block">
-            <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-600">
-              Race
-            </span>
-            <select
-              required
-              className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
-              data-testid="admin-race-winner-race-select"
-              name="race_id"
-            >
-              <option value="">{activeRaces.length > 0 ? "Select race" : "No active races"}</option>
-              {activeRaces.map((race) => (
-                <option key={race.id} value={String(race.id)}>
-                  {race.race_name} (Qualifying: {formatDateTime(race.qualifying_start_at)})
-                </option>
-              ))}
-            </select>
-          </label>
+        <details className="mt-6 rounded-md border border-slate-200 bg-slate-50">
+          <summary className="cursor-pointer px-4 py-3 text-sm font-semibold text-slate-900">
+            Advanced winner tools
+          </summary>
+          <form
+            action={setRaceWinnerAction}
+            className="grid gap-3 border-t border-slate-200 p-4 md:grid-cols-3"
+            data-testid="admin-race-winner-form"
+          >
+            <input name="tab" type="hidden" value="races" />
+            <label className="block">
+              <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-600">
+                Race
+              </span>
+              <select
+                required
+                className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+                data-testid="admin-race-winner-race-select"
+                name="race_id"
+              >
+                <option value="">{activeRaces.length > 0 ? "Select race" : "No active races"}</option>
+                {activeRaces.map((race) => (
+                  <option key={race.id} value={String(race.id)}>
+                    {race.race_name} (Qualifying: {formatDateTime(race.qualifying_start_at)})
+                  </option>
+                ))}
+              </select>
+            </label>
 
-          <label className="block">
-            <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-600">
-              Fantasy winner
-            </span>
-            <select
-              className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
-              data-testid="admin-race-winner-profile-select"
-              name="winner_profile_id"
-            >
-              <option value="">Auto-calculate now (clear manual override)</option>
-              {winnerProfiles.map((winnerProfile) => (
-                <option key={winnerProfile.id} value={winnerProfile.id}>
-                  {winnerProfile.team_name}
-                </option>
-              ))}
-            </select>
-          </label>
+            <label className="block">
+              <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-600">
+                Fantasy winner
+              </span>
+              <select
+                className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+                data-testid="admin-race-winner-profile-select"
+                name="winner_profile_id"
+              >
+                <option value="">Auto-calculate now (clear manual override)</option>
+                {winnerProfiles.map((winnerProfile) => (
+                  <option key={winnerProfile.id} value={winnerProfile.id}>
+                    {winnerProfile.team_name}
+                  </option>
+                ))}
+              </select>
+            </label>
 
-          <div className="flex items-end">
-            <button
-              className="w-full rounded-md bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-700"
-              data-testid="admin-race-winner-submit"
-              type="submit"
-            >
-              Save fantasy winner
-            </button>
-          </div>
-        </form>
-        <p className="mt-2 text-xs text-slate-500">
-          Auto winner uses highest weekly points. If first place is tied, tiebreak uses closest
-          pick to the official race average speed (winner&apos;s speed), then team name. Teams
-          without submitted picks are included at the race&apos;s lowest possible score.
-          When race results are updated, auto-calculation is rescheduled for about 15 minutes later.
-        </p>
+            <div className="flex items-end">
+              <button
+                className="w-full rounded-md bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-700"
+                data-testid="admin-race-winner-submit"
+                type="submit"
+              >
+                Save fantasy winner
+              </button>
+            </div>
+            <p className="text-xs text-slate-500 md:col-span-3">
+              Auto winner uses highest weekly points, then closest official average speed tiebreak, then team name.
+            </p>
+          </form>
+        </details>
 
-        <div className="mt-5 overflow-x-auto rounded-md border border-slate-200">
-          <table className="min-w-full text-left text-sm">
-            <thead className="bg-slate-50 text-slate-700">
-              <tr>
-                <th className="px-3 py-2 font-semibold">Race</th>
-                <th className="px-3 py-2 font-semibold">Title Image</th>
-                <th className="px-3 py-2 font-semibold">Qualifying</th>
-                <th className="px-3 py-2 font-semibold">Race Start</th>
-                <th className="px-3 py-2 font-semibold">Pick Rules</th>
-                <th className="px-3 py-2 font-semibold">Payout</th>
-                <th className="px-3 py-2 font-semibold">Status</th>
-                <th className="px-3 py-2 font-semibold">Fantasy Winner</th>
-              </tr>
-            </thead>
-            <tbody>
-              {races.length === 0 ? (
-                <tr>
-                  <td className="px-3 py-3 text-slate-600" colSpan={8}>
-                    No races yet.
-                  </td>
-                </tr>
-              ) : (
-                races.map((race) => (
-                  <tr key={race.id} className="border-t border-slate-200">
-                    <td className="px-3 py-2">{race.race_name}</td>
-                    <td className="px-3 py-2">
+        <div className="mt-5 grid gap-3">
+          {races.length === 0 ? (
+            <p className="rounded-md border border-dashed border-slate-300 bg-slate-50 px-3 py-3 text-sm text-slate-600">
+              No races yet.
+            </p>
+          ) : (
+            races.map((race) => (
+              <details key={`race-edit-${race.id}`} className="rounded-md border border-slate-200 bg-white">
+                <summary className="cursor-pointer px-3 py-3">
+                  <div className="inline-flex w-full flex-wrap items-center justify-between gap-3 align-middle">
+                    <div className="flex min-w-0 items-center gap-3">
                       {race.title_image_url ? (
                         // eslint-disable-next-line @next/next/no-img-element
                         <img
                           alt={`${race.race_name} title`}
-                          className="h-10 w-20 rounded border border-slate-200 object-cover"
+                          className="h-12 w-20 rounded border border-slate-200 object-cover"
                           src={race.title_image_url}
                         />
                       ) : (
-                        <span className="text-xs text-slate-500">No image</span>
+                        <div className="flex h-12 w-20 items-center justify-center rounded border border-dashed border-slate-300 text-[10px] font-semibold text-slate-500">
+                          NO IMAGE
+                        </div>
                       )}
-                    </td>
-                    <td className="px-3 py-2">{formatDateTime(race.qualifying_start_at)}</td>
-                    <td className="px-3 py-2">{formatDateTime(race.race_date)}</td>
-                    <td className="px-3 py-2">
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-semibold text-slate-900">{race.race_name}</p>
+                        <p className="text-xs text-slate-500">
+                          Race {formatDateTime(race.race_date)} · ${Number(race.payout).toFixed(2)}
+                        </p>
+                      </div>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2">
                       {normalizeRacePickFormat(race.pick_format) === "indy_500" ? (
-                        <span className="inline-flex rounded-full border border-cyan-300 bg-cyan-50 px-2 py-0.5 text-xs font-semibold text-cyan-800">
+                        <span className="rounded-full border border-cyan-300 bg-cyan-50 px-2 py-0.5 text-xs font-semibold text-cyan-800">
                           Indy 500
                         </span>
                       ) : (
-                        <span className="text-xs text-slate-600">Standard</span>
+                        <span className="rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-xs font-semibold text-slate-600">
+                          Standard
+                        </span>
                       )}
-                    </td>
-                    <td className="px-3 py-2">${Number(race.payout).toFixed(2)}</td>
-                    <td className="px-3 py-2">
                       {race.is_archived ? (
-                        <div>
-                          <div className="inline-flex rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 text-xs font-semibold text-amber-800">
-                            Archived
-                          </div>
-                          <div className="mt-1 text-xs text-slate-500">
-                            {race.archived_at ? formatDateTime(race.archived_at) : "-"}
-                          </div>
-                        </div>
+                        <span className="rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 text-xs font-semibold text-amber-800">
+                          Archived
+                        </span>
                       ) : (
-                        <span className="inline-flex rounded-full border border-emerald-300 bg-emerald-50 px-2 py-0.5 text-xs font-semibold text-emerald-800">
+                        <span className="rounded-full border border-emerald-300 bg-emerald-50 px-2 py-0.5 text-xs font-semibold text-emerald-800">
                           Active
                         </span>
                       )}
-                    </td>
-                    <td className="px-3 py-2">
-                      <div className="font-medium text-slate-900">
+                    </div>
+                  </div>
+                </summary>
+
+                <div className="border-t border-slate-200 p-3">
+                  <dl className="grid gap-2 text-sm sm:grid-cols-2 lg:grid-cols-4">
+                    <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2">
+                      <dt className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                        Qualifying
+                      </dt>
+                      <dd className="mt-0.5 font-medium text-slate-900">
+                        {formatDateTime(race.qualifying_start_at)}
+                      </dd>
+                    </div>
+                    <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2">
+                      <dt className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                        Fantasy Winner
+                      </dt>
+                      <dd className="mt-0.5 font-medium text-slate-900">
                         {race.winner_profile_id
                           ? teamNameByProfileId.get(race.winner_profile_id) ?? `Team ${race.winner_profile_id}`
                           : "Not set"}
-                      </div>
-                      <div className="mt-1 text-xs text-slate-500">
+                      </dd>
+                    </div>
+                    <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2">
+                      <dt className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                        Winner Status
+                      </dt>
+                      <dd className="mt-0.5 font-medium text-slate-900">
                         {race.winner_auto_eligible_at
                           ? `Auto pending ${formatDateTime(race.winner_auto_eligible_at)}`
                           : race.winner_set_at
-                            ? `${race.winner_source === "manual" ? "Manual" : "Auto"} set ${formatDateTime(race.winner_set_at)}`
-                            : "Awaiting race results"}
-                      </div>
-                      {race.winner_is_manual_override ? (
-                        <div className="mt-1 text-xs font-medium text-amber-700">Manual override enabled</div>
-                      ) : null}
-                    </td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
+                            ? `${race.winner_source === "manual" ? "Manual" : "Auto"} set`
+                            : "Awaiting results"}
+                      </dd>
+                    </div>
+                    <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2">
+                      <dt className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                        Archive
+                      </dt>
+                      <dd className="mt-0.5 font-medium text-slate-900">
+                        {race.archived_at ? formatDateTime(race.archived_at) : "-"}
+                      </dd>
+                    </div>
+                  </dl>
 
-        <div className="mt-6">
-          <h3 className="text-sm font-semibold uppercase tracking-wide text-slate-700">
-            Edit Existing Races
-          </h3>
-          <p className="mt-1 text-xs text-slate-500">
-            Update race fields inline, or delete a race if needed.
-          </p>
-        </div>
-
-        <div className="mt-3 grid gap-3">
-          {races.length === 0 ? (
-            <p className="rounded-md border border-dashed border-slate-300 bg-slate-50 px-3 py-3 text-sm text-slate-600">
-              No races to edit.
-            </p>
-          ) : (
-            races.map((race) => (
-              <div key={`race-edit-${race.id}`} className="rounded-md border border-slate-200 p-3">
                 <form
                   action={updateRaceAction}
-                  className="grid gap-2 md:grid-cols-12"
+                  className="mt-3 grid gap-2 md:grid-cols-12"
                   data-testid={`admin-race-edit-form-${race.id}`}
                 >
                   <input name="race_id" type="hidden" value={String(race.id)} />
@@ -1177,43 +1179,46 @@ export default async function AdminPage({ searchParams }: PageProps) {
                   </button>
                 </form>
 
-                <form action={deleteRaceAction} className="mt-2 flex justify-end">
-                  <input name="race_id" type="hidden" value={String(race.id)} />
-                  <input name="tab" type="hidden" value="races" />
-                  <ConfirmSubmitButton
-                    className="rounded-md border border-red-300 px-2 py-2 text-xs font-semibold text-red-700 hover:bg-red-50"
-                    confirmMessage={`Delete ${race.race_name}? This will remove all picks and race results for this event.`}
-                    data-testid={`admin-race-delete-${race.id}`}
-                    formNoValidate
-                    type="submit"
-                  >
-                    Delete race
-                  </ConfirmSubmitButton>
-                </form>
+                  <div className="mt-3 flex flex-wrap justify-end gap-2">
+                    <form action={setRaceArchivedAction}>
+                      <input name="race_id" type="hidden" value={String(race.id)} />
+                      <input name="tab" type="hidden" value="races" />
+                      <input name="archive" type="hidden" value={race.is_archived ? "false" : "true"} />
+                      <ConfirmSubmitButton
+                        className={`rounded-md px-2 py-2 text-xs font-semibold ${
+                          race.is_archived
+                            ? "border border-emerald-300 text-emerald-700 hover:bg-emerald-50"
+                            : "border border-amber-300 text-amber-800 hover:bg-amber-50"
+                        }`}
+                        confirmMessage={
+                          race.is_archived
+                            ? `Unarchive ${race.race_name}? It will return to active pick/result workflows.`
+                            : `Archive ${race.race_name}? This keeps data but removes it from active pick/result workflows.`
+                        }
+                        data-testid={`admin-race-archive-toggle-${race.id}`}
+                        formNoValidate
+                        type="submit"
+                      >
+                        {race.is_archived ? "Unarchive race" : "Archive race"}
+                      </ConfirmSubmitButton>
+                    </form>
 
-                <form action={setRaceArchivedAction} className="mt-2 flex justify-end">
-                  <input name="race_id" type="hidden" value={String(race.id)} />
-                  <input name="tab" type="hidden" value="races" />
-                  <input name="archive" type="hidden" value={race.is_archived ? "false" : "true"} />
-                  <ConfirmSubmitButton
-                    className={`rounded-md px-2 py-2 text-xs font-semibold ${
-                      race.is_archived
-                        ? "border border-emerald-300 text-emerald-700 hover:bg-emerald-50"
-                        : "border border-amber-300 text-amber-800 hover:bg-amber-50"
-                    }`}
-                    confirmMessage={
-                      race.is_archived
-                        ? `Unarchive ${race.race_name}? It will return to active pick/result workflows.`
-                        : `Archive ${race.race_name}? This keeps data but removes it from active pick/result workflows.`
-                    }
-                    data-testid={`admin-race-archive-toggle-${race.id}`}
-                    formNoValidate
-                    type="submit"
-                  >
-                    {race.is_archived ? "Unarchive race" : "Archive race"}
-                  </ConfirmSubmitButton>
-                </form>
-              </div>
+                    <form action={deleteRaceAction}>
+                      <input name="race_id" type="hidden" value={String(race.id)} />
+                      <input name="tab" type="hidden" value="races" />
+                      <ConfirmSubmitButton
+                        className="rounded-md border border-red-300 px-2 py-2 text-xs font-semibold text-red-700 hover:bg-red-50"
+                        confirmMessage={`Delete ${race.race_name}? This will remove all picks and race results for this event.`}
+                        data-testid={`admin-race-delete-${race.id}`}
+                        formNoValidate
+                        type="submit"
+                      >
+                        Delete race
+                      </ConfirmSubmitButton>
+                    </form>
+                  </div>
+                </div>
+              </details>
             ))
           )}
         </div>
@@ -1235,61 +1240,73 @@ export default async function AdminPage({ searchParams }: PageProps) {
           </p>
         ) : null}
 
-        <form
-          action={importIndy500QualifyingOrderAction}
-          className="mt-5 rounded-md border border-cyan-200 bg-cyan-50 p-4"
-          data-testid="admin-indy-qualifying-import-form"
-        >
-          <input name="tab" type="hidden" value="results" />
-          <h3 className="text-sm font-semibold text-slate-900">
-            Indianapolis 500 Qualifying Order
-          </h3>
-          <p className="mt-1 text-xs text-slate-600">
-            For Indy 500 races only: paste the 33-car qualifying order to create 8 pick groups.
-            Groups 1-7 have 4 drivers; Group 8 has 5 drivers.
-          </p>
-          <div className="mt-3 grid gap-3 md:grid-cols-4">
-            <label className="block md:col-span-1">
-              <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-600">
-                Indy 500 race
-              </span>
-              <select
-                required
-                className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
-                data-testid="admin-indy-qualifying-race-select"
-                name="race_id"
-              >
-                <option value="">
-                  {activeIndy500Races.length > 0 ? "Select race" : "No active Indy 500 races"}
-                </option>
-                {activeIndy500Races.map((race) => (
-                  <option key={race.id} value={String(race.id)}>
-                    {race.race_name}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="block md:col-span-3">
-              <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-600">
-                Qualifying order paste
-              </span>
-              <textarea
-                required
-                className="h-32 w-full rounded-md border border-slate-300 px-3 py-2 font-mono text-xs"
-                data-testid="admin-indy-qualifying-paste"
-                name="qualifying_order_paste"
-                placeholder={"1\t10\tAlex Palou\n2\t5\tPato O'Ward\n3\t2\tJosef Newgarden"}
-              />
-            </label>
-          </div>
-          <button
-            className="mt-3 rounded-md bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-700"
-            data-testid="admin-indy-qualifying-submit"
-            type="submit"
+        <div className="mt-5 grid gap-2 text-sm md:grid-cols-4">
+          {["Qualifying setup", "Bulk preview", "Publish results", "Audit"].map((step, index) => (
+            <div key={step} className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2">
+              <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                Step {index + 1}
+              </p>
+              <p className="mt-0.5 font-semibold text-slate-900">{step}</p>
+            </div>
+          ))}
+        </div>
+
+        <details className="mt-5 rounded-md border border-cyan-200 bg-cyan-50">
+          <summary className="cursor-pointer px-4 py-3 text-sm font-semibold text-slate-900">
+            Indianapolis 500 qualifying order
+          </summary>
+          <form
+            action={importIndy500QualifyingOrderAction}
+            className="border-t border-cyan-200 p-4"
+            data-testid="admin-indy-qualifying-import-form"
           >
-            Import qualifying order
-          </button>
-        </form>
+            <input name="tab" type="hidden" value="results" />
+            <p className="text-xs text-slate-600">
+              For Indy 500 races only: paste the 33-car qualifying order to create 8 pick groups.
+            </p>
+            <div className="mt-3 grid gap-3 md:grid-cols-4">
+              <label className="block md:col-span-1">
+                <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-600">
+                  Indy 500 race
+                </span>
+                <select
+                  required
+                  className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+                  data-testid="admin-indy-qualifying-race-select"
+                  name="race_id"
+                >
+                  <option value="">
+                    {activeIndy500Races.length > 0 ? "Select race" : "No active Indy 500 races"}
+                  </option>
+                  {activeIndy500Races.map((race) => (
+                    <option key={race.id} value={String(race.id)}>
+                      {race.race_name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="block md:col-span-3">
+                <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-600">
+                  Qualifying order paste
+                </span>
+                <textarea
+                  required
+                  className="h-32 w-full rounded-md border border-slate-300 px-3 py-2 font-mono text-xs"
+                  data-testid="admin-indy-qualifying-paste"
+                  name="qualifying_order_paste"
+                  placeholder={"1\t10\tAlex Palou\n2\t5\tPato O'Ward\n3\t2\tJosef Newgarden"}
+                />
+              </label>
+            </div>
+            <button
+              className="mt-3 rounded-md bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-700"
+              data-testid="admin-indy-qualifying-submit"
+              type="submit"
+            >
+              Import qualifying order
+            </button>
+          </form>
+        </details>
 
         <AdminResultsImportForm
           action={importIndycarResultsAction}
@@ -1311,23 +1328,20 @@ export default async function AdminPage({ searchParams }: PageProps) {
           raceDriverGroups={raceDriverGroups}
         />
 
-        <section
-          className="mt-5 rounded-lg border border-slate-200 bg-slate-50 p-4"
+        <details
+          className="mt-5 rounded-lg border border-slate-200 bg-slate-50"
           data-testid="admin-scoring-audit"
         >
-          <div className="flex flex-wrap items-start justify-between gap-3">
-            <div>
-              <h3 className="text-sm font-semibold uppercase tracking-wide text-slate-800">
-                Scoring Audit
-              </h3>
-              <p className="mt-1 text-xs text-slate-600">
-                Saved result sets are collapsed by default after the latest audit.
-              </p>
-            </div>
+          <summary className="cursor-pointer px-4 py-3 text-sm font-semibold text-slate-900">
+            <span className="inline-flex w-full flex-wrap items-center justify-between gap-3 align-middle">
+              <span>Scoring Audit</span>
             <span className="rounded-md border border-slate-300 bg-white px-2 py-1 text-xs font-semibold text-slate-700">
               {scoringAudits.length} race{scoringAudits.length === 1 ? "" : "s"}
             </span>
-          </div>
+            </span>
+          </summary>
+
+          <div className="border-t border-slate-200 p-4">
 
           {scoringAudits.length === 0 ? (
             <p className="mt-3 rounded-md border border-dashed border-slate-300 bg-white px-3 py-3 text-sm text-slate-600">
@@ -1443,77 +1457,83 @@ export default async function AdminPage({ searchParams }: PageProps) {
               ))}
             </div>
           )}
-        </section>
-
-        <form
-          action={upsertResultAction}
-          className="mt-5 grid gap-3 md:grid-cols-4"
-          data-testid="admin-results-manual-form"
-        >
-          <input name="tab" type="hidden" value="results" />
-          <label className="block">
-            <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-600">
-              Race
-            </span>
-            <select
-              required
-              className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
-              data-testid="admin-results-manual-race-select"
-              name="race_id"
-            >
-              <option value="">{activeRaces.length > 0 ? "Select race" : "No active races"}</option>
-              {activeRaces.map((race) => (
-                <option key={race.id} value={String(race.id)}>
-                  {race.race_name}
-                </option>
-              ))}
-            </select>
-          </label>
-
-          <label className="block">
-            <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-600">
-              Driver
-            </span>
-            <select
-              required
-              className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
-              data-testid="admin-results-manual-driver-select"
-              name="driver_id"
-            >
-              <option value="">Select driver</option>
-              {drivers.map((driver) => (
-                <option key={driver.id} value={String(driver.id)}>
-                  {driver.driver_name}
-                </option>
-              ))}
-            </select>
-          </label>
-
-          <label className="block">
-            <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-600">
-              Points
-            </span>
-            <input
-              required
-              className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
-              data-testid="admin-results-manual-points"
-              min={0}
-              name="points"
-              step={1}
-              type="number"
-            />
-          </label>
-
-          <div className="flex items-end">
-            <button
-              className="w-full rounded-md bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-700"
-              data-testid="admin-results-manual-submit"
-              type="submit"
-            >
-              Save result
-            </button>
           </div>
-        </form>
+        </details>
+
+        <details className="mt-5 rounded-md border border-slate-200 bg-white">
+          <summary className="cursor-pointer px-4 py-3 text-sm font-semibold text-slate-900">
+            Manual result entry
+          </summary>
+          <form
+            action={upsertResultAction}
+            className="grid gap-3 border-t border-slate-200 p-4 md:grid-cols-4"
+            data-testid="admin-results-manual-form"
+          >
+            <input name="tab" type="hidden" value="results" />
+            <label className="block">
+              <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-600">
+                Race
+              </span>
+              <select
+                required
+                className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+                data-testid="admin-results-manual-race-select"
+                name="race_id"
+              >
+                <option value="">{activeRaces.length > 0 ? "Select race" : "No active races"}</option>
+                {activeRaces.map((race) => (
+                  <option key={race.id} value={String(race.id)}>
+                    {race.race_name}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label className="block">
+              <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-600">
+                Driver
+              </span>
+              <select
+                required
+                className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+                data-testid="admin-results-manual-driver-select"
+                name="driver_id"
+              >
+                <option value="">Select driver</option>
+                {drivers.map((driver) => (
+                  <option key={driver.id} value={String(driver.id)}>
+                    {driver.driver_name}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label className="block">
+              <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-600">
+                Points
+              </span>
+              <input
+                required
+                className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+                data-testid="admin-results-manual-points"
+                min={0}
+                name="points"
+                step={1}
+                type="number"
+              />
+            </label>
+
+            <div className="flex items-end">
+              <button
+                className="w-full rounded-md bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-700"
+                data-testid="admin-results-manual-submit"
+                type="submit"
+              >
+                Save result
+              </button>
+            </div>
+          </form>
+        </details>
 
         <details className="mt-5 rounded-md border border-slate-200 bg-white">
           <summary className="cursor-pointer px-3 py-3 text-sm font-semibold text-slate-900">
@@ -1566,55 +1586,62 @@ export default async function AdminPage({ searchParams }: PageProps) {
           </p>
           <p className="mt-1 text-xs text-slate-500">Times shown in {LEAGUE_TIME_ZONE}.</p>
 
-          <form action={cleanupTestFlowDataAction} className="mt-4">
-            <input name="tab" type="hidden" value="feedback" />
-            <ConfirmSubmitButton
-              className="rounded-md border border-amber-300 px-3 py-2 text-sm font-semibold text-amber-800 hover:bg-amber-50"
-              confirmMessage="Delete all [TEST FLOW ...] seeded races, test users, and test feedback?"
-              data-testid="admin-feedback-cleanup-test-data"
-              formNoValidate
-              type="submit"
-            >
-              Cleanup test flow data
-            </ConfirmSubmitButton>
-          </form>
-
-          <div className="mt-5 overflow-x-auto rounded-md border border-slate-200">
-            <table className="min-w-full text-left text-sm">
-              <thead className="bg-slate-50 text-slate-700">
-                <tr>
-                  <th className="px-3 py-2 font-semibold">Submitted</th>
-                  <th className="px-3 py-2 font-semibold">Team</th>
-                  <th className="px-3 py-2 font-semibold">Type</th>
-                  <th className="px-3 py-2 font-semibold">Category</th>
-                  <th className="px-3 py-2 font-semibold">Details</th>
-                </tr>
-              </thead>
-              <tbody>
-                {feedbackItems.length === 0 ? (
-                  <tr>
-                    <td className="px-3 py-3 text-slate-600" colSpan={5}>
-                      No feedback submissions yet.
-                    </td>
-                  </tr>
-                ) : (
-                  feedbackItems.map((item) => (
-                    <tr key={item.id} className="border-t border-slate-200 align-top">
-                      <td className="px-3 py-2 whitespace-nowrap">{formatDateTime(item.created_at)}</td>
-                      <td className="px-3 py-2">
-                        {teamNameByProfileId.get(item.user_id) ?? `User ${item.user_id}`}
-                      </td>
-                      <td className="px-3 py-2">{feedbackTypeLabel(item.feedback_type)}</td>
-                      <td className="px-3 py-2">{feedbackCategoryLabel(item.category)}</td>
-                      <td className="px-3 py-2">{feedbackDetailPreview(item.details)}</td>
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
+          <div className="mt-5 grid gap-3">
+            {feedbackItems.length === 0 ? (
+              <p className="rounded-md border border-dashed border-slate-300 bg-slate-50 px-3 py-3 text-sm text-slate-600">
+                No feedback submissions yet.
+              </p>
+            ) : (
+              feedbackItems.map((item) => (
+                <details key={item.id} className="rounded-md border border-slate-200 bg-white">
+                  <summary className="cursor-pointer px-3 py-3">
+                    <div className="inline-flex w-full flex-wrap items-center justify-between gap-3 align-middle">
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-semibold text-slate-900">
+                          {teamNameByProfileId.get(item.user_id) ?? `User ${item.user_id}`}
+                        </p>
+                        <p className="mt-0.5 text-xs text-slate-500">
+                          {formatDateTime(item.created_at)} · {feedbackCategoryLabel(item.category)}
+                        </p>
+                      </div>
+                      <span
+                        className={`rounded-full border px-2 py-0.5 text-xs font-semibold ${
+                          item.feedback_type === "bug"
+                            ? "border-red-200 bg-red-50 text-red-700"
+                            : "border-cyan-200 bg-cyan-50 text-cyan-800"
+                        }`}
+                      >
+                        {feedbackTypeLabel(item.feedback_type)}
+                      </span>
+                    </div>
+                  </summary>
+                  <div className="border-t border-slate-200 px-3 py-3 text-sm text-slate-700">
+                    <p>{item.details}</p>
+                  </div>
+                </details>
+              ))
+            )}
           </div>
+
+          <details className="mt-5 rounded-md border border-amber-200 bg-amber-50">
+            <summary className="cursor-pointer px-4 py-3 text-sm font-semibold text-amber-900">
+              Advanced maintenance
+            </summary>
+            <form action={cleanupTestFlowDataAction} className="border-t border-amber-200 p-4">
+              <input name="tab" type="hidden" value="feedback" />
+              <ConfirmSubmitButton
+                className="rounded-md border border-amber-300 bg-white px-3 py-2 text-sm font-semibold text-amber-800 hover:bg-amber-50"
+                confirmMessage="Delete all [TEST FLOW ...] seeded races, test users, and test feedback?"
+                data-testid="admin-feedback-cleanup-test-data"
+                formNoValidate
+                type="submit"
+              >
+                Cleanup test flow data
+              </ConfirmSubmitButton>
+            </form>
+          </details>
         </section>
       ) : null}
-    </main>
+    </AuthenticatedPageShell>
   );
 }
