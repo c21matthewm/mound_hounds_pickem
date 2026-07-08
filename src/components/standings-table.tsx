@@ -189,36 +189,36 @@ export function StandingsTable({ raceColumns, rows }: Props) {
           <p className="px-4 py-4 text-sm text-slate-600">No rows match your current filters.</p>
         ) : (
           filteredAndSortedRows.map((row) => {
-            const recentRaceColumns = raceColumns.slice(-3);
+            const recentRaceColumns = raceColumns.slice(-3).reverse();
 
             return (
-              <article key={`mobile-standings-${row.userId}`} className="px-4 py-3">
-                <div className="flex items-start justify-between gap-3">
+              <article key={`mobile-standings-${row.userId}`} className="px-3 py-2.5">
+                <div className="flex items-center justify-between gap-3">
                   <div className="min-w-0">
-                    <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                    <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
                       Rank #{row.currentStanding}
                     </p>
-                    <h3 className="mt-0.5 truncate text-base font-semibold text-slate-900">
+                    <h3 className="truncate text-sm font-semibold text-slate-900">
                       {row.teamName}
                     </h3>
                   </div>
-                  <div className="text-right">
-                    <p className="text-lg font-semibold text-slate-900">{row.totalPoints}</p>
-                    <p className="text-xs text-slate-500">points</p>
+                  <div className="shrink-0 text-right">
+                    <p className="text-base font-semibold text-slate-900">{row.totalPoints}</p>
+                    <p className="text-[11px] text-slate-500">pts</p>
                   </div>
                 </div>
-                <div className="mt-3 flex flex-wrap items-center gap-1.5">
-                  <span className={`inline-flex rounded-full border px-2 py-0.5 text-xs font-semibold ${changeClassName(row.change)}`}>
-                    {formatChange(row.change)}
-                  </span>
+                <div className="mt-2 grid gap-1">
                   {recentRaceColumns.map((race) => (
-                    <span
+                    <div
                       key={`mobile-standings-${row.userId}-${race.raceId}`}
-                      className="rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-xs font-medium text-slate-700"
+                      className="flex items-center justify-between gap-2 rounded-md border border-slate-200 bg-slate-50 px-2 py-1 text-xs text-slate-700"
                       title={race.raceName}
                     >
-                      {race.raceName}: {row.racePointsByRaceId[race.raceId] ?? 0}
-                    </span>
+                      <span className="truncate">{race.raceName}</span>
+                      <span className="font-semibold text-slate-900">
+                        {row.racePointsByRaceId[race.raceId] ?? 0}
+                      </span>
+                    </div>
                   ))}
                 </div>
               </article>
