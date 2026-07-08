@@ -1,16 +1,12 @@
-import fs from "node:fs";
-import path from "node:path";
 import { randomUUID } from "node:crypto";
-import { createClient } from "@supabase/supabase-js";
 import { expect, test, type Page } from "@playwright/test";
 import { trackClientIssues } from "./helpers/monitoring";
+import { cleanupPlaywrightArtifacts, supabase } from "./helpers/supabase";
 
 const LEAGUE_TIME_ZONE = "America/Indiana/Indianapolis";
 const TEST_PASSWORD = "Pw-Indy-Flow-2026!";
 const RUN_ID = randomUUID().slice(0, 8);
 const TEST_PREFIX = `[PW INDY ${RUN_ID}]`;
-const TEST_FLOW_NAME_PREFIX = "[PW INDY ";
-const TEST_FLOW_EMAIL_PREFIX = "pw-indy-";
 
 type Role = "admin" | "participant";
 
@@ -35,138 +31,6 @@ type RaceGroupSeed = {
   driver_id: number;
   group_number: number;
   qualifying_position: number | null;
-};
-
-const readEnvFromFile = (key: string): string | null => {
-  const envPath = path.join(process.cwd(), ".env.local");
-  if (!fs.existsSync(envPath)) {
-    return null;
-  }
-
-  const lines = fs.readFileSync(envPath, "utf8").split(/\r?\n/);
-  for (const line of lines) {
-    const trimmed = line.trim();
-    if (!trimmed || trimmed.startsWith("#")) {
-      continue;
-    }
-
-    const splitIndex = trimmed.indexOf("=");
-    if (splitIndex <= 0) {
-      continue;
-    }
-
-    const currentKey = trimmed.slice(0, splitIndex).trim();
-    if (currentKey !== key) {
-      continue;
-    }
-
-    const rawValue = trimmed.slice(splitIndex + 1).trim();
-    return rawValue.replace(/^['"]|['"]$/g, "");
-  }
-
-  return null;
-};
-
-const requiredEnv = (key: string): string => {
-  const fromProcess = process.env[key];
-  if (fromProcess && fromProcess.trim().length > 0) {
-    return fromProcess.trim();
-  }
-
-  const fromFile = readEnvFromFile(key);
-  if (fromFile && fromFile.trim().length > 0) {
-    return fromFile.trim();
-  }
-
-  throw new Error(`Missing required env var: ${key}`);
-};
-
-const supabase = createClient(
-  requiredEnv("NEXT_PUBLIC_SUPABASE_URL"),
-  requiredEnv("SUPABASE_SERVICE_ROLE_KEY"),
-  {
-    auth: {
-      autoRefreshToken: false,
-      persistSession: false
-    }
-  }
-);
-
-const loadAllPlaywrightIndyUserIds = async (): Promise<string[]> => {
-  const userIds: string[] = [];
-  let page = 1;
-  const perPage = 200;
-
-  while (true) {
-    const { data, error } = await supabase.auth.admin.listUsers({ page, perPage });
-    if (error) {
-      throw new Error(`Failed listing auth users for cleanup: ${error.message}`);
-    }
-
-    const users = data?.users ?? [];
-    users.forEach((user) => {
-      if (user.email?.startsWith(TEST_FLOW_EMAIL_PREFIX)) {
-        userIds.push(user.id);
-      }
-    });
-
-    if (users.length < perPage) {
-      break;
-    }
-    page += 1;
-  }
-
-  return userIds;
-};
-
-const cleanupPlaywrightIndyArtifacts = async () => {
-  const { data: seededRaces, error: seededRaceError } = await supabase
-    .from("races")
-    .select("id")
-    .ilike("race_name", `${TEST_FLOW_NAME_PREFIX}%`);
-  if (seededRaceError) {
-    throw new Error(`Failed listing seeded Indy races for cleanup: ${seededRaceError.message}`);
-  }
-
-  const seededRaceIds = (seededRaces ?? []).map((row) => Number(row.id)).filter(Number.isFinite);
-  if (seededRaceIds.length > 0) {
-    const { error: deleteRaceError } = await supabase.from("races").delete().in("id", seededRaceIds);
-    if (deleteRaceError) {
-      throw new Error(`Failed deleting seeded Indy races: ${deleteRaceError.message}`);
-    }
-  }
-
-  const { data: seededDrivers, error: seededDriverError } = await supabase
-    .from("drivers")
-    .select("id")
-    .ilike("driver_name", `${TEST_FLOW_NAME_PREFIX}%`);
-  if (seededDriverError) {
-    throw new Error(`Failed listing seeded Indy drivers for cleanup: ${seededDriverError.message}`);
-  }
-
-  const seededDriverIds = (seededDrivers ?? []).map((row) => Number(row.id)).filter(Number.isFinite);
-  if (seededDriverIds.length > 0) {
-    const { error: deleteDriverError } = await supabase.from("drivers").delete().in("id", seededDriverIds);
-    if (deleteDriverError) {
-      throw new Error(`Failed deleting seeded Indy drivers: ${deleteDriverError.message}`);
-    }
-  }
-
-  const seededUserIds = await loadAllPlaywrightIndyUserIds();
-  if (seededUserIds.length === 0) {
-    return;
-  }
-
-  await supabase.from("feedback_items").delete().in("user_id", seededUserIds);
-  await supabase.from("picks").delete().in("user_id", seededUserIds);
-  await supabase.from("profiles").delete().in("id", seededUserIds);
-
-  for (const userId of seededUserIds) {
-    const { error } = await supabase.auth.admin.deleteUser(userId);
-    if (error) {
-      throw new Error(`Failed deleting seeded Indy auth user ${userId}: ${error.message}`);
-    }
-  }
 };
 
 const toLocalInput = (value: Date): string => {
@@ -324,11 +188,11 @@ const loadRaceGroups = async (raceId: number): Promise<RaceGroupSeed[]> => {
 
 test.describe.serial("Indianapolis 500 Pick'em Flow", () => {
   test.beforeAll(async () => {
-    await cleanupPlaywrightIndyArtifacts();
+    await cleanupPlaywrightArtifacts({ recomputeDriverPoints: true });
   });
 
   test.afterAll(async () => {
-    await cleanupPlaywrightIndyArtifacts();
+    await cleanupPlaywrightArtifacts({ recomputeDriverPoints: true });
   });
 
   test("qualifying-order groups, 8-driver picks, race-start lock, preview, and leaderboard display", async ({
@@ -365,8 +229,8 @@ test.describe.serial("Indianapolis 500 Pick'em Flow", () => {
     await createRaceForm.getByTestId("admin-race-create-pick-format").selectOption("indy_500");
     await createRaceForm.getByTestId("admin-race-create-submit").click();
     await expect(adminPage.locator("main")).toContainText("Race added.");
-    await expect(adminPage.locator("table")).toContainText(raceName);
-    await expect(adminPage.locator("table").locator("tr", { hasText: raceName })).toContainText("Indy 500");
+    await expect(adminPage.locator("main")).toContainText(raceName);
+    await expect(adminPage.locator("details").filter({ hasText: raceName })).toContainText("Indy 500");
 
     const race = await getRaceByName(raceName);
     expect(race.pick_format).toBe("indy_500");
@@ -387,6 +251,7 @@ test.describe.serial("Indianapolis 500 Pick'em Flow", () => {
     await expect(participantPage.getByRole("button", { name: "Save Pick'em Form" })).toBeDisabled();
 
     await adminPage.goto("/admin?tab=results");
+    await adminPage.getByText("Indianapolis 500 qualifying order").click();
     const qualifyingForm = adminPage.getByTestId("admin-indy-qualifying-import-form");
     await expect(qualifyingForm.getByTestId("admin-indy-qualifying-race-select")).toContainText(raceName);
     await qualifyingForm.getByTestId("admin-indy-qualifying-race-select").selectOption(String(race.id));

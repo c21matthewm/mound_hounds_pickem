@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
+import { AuthenticatedPageShell } from "@/components/authenticated-page-shell";
 import { MobileBottomNav } from "@/components/mobile-bottom-nav";
 import { SignOutButton } from "@/components/sign-out-button";
 import { isProfileComplete, type ProfileRow } from "@/lib/profile";
@@ -26,28 +27,23 @@ export default async function ContactAdminPage() {
   }
 
   return (
-    <main className="mx-auto flex min-h-screen max-w-3xl flex-col px-6 py-16 pb-24 md:pb-16">
-      <header className="relative flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <p className="inline-flex rounded-full border border-blue-200 bg-blue-50 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-blue-700">
-            Support
-          </p>
-          <h1 className="mt-3 text-3xl font-semibold tracking-tight">Contact League Admin</h1>
-          <p className="mt-2 text-sm text-slate-600">
-            For league questions or issues, contact the league admin directly by email.
-          </p>
-        </div>
-
-        <div className="flex items-center gap-2">
+    <AuthenticatedPageShell
+      actions={
+        <>
           <Link
             className="rounded-md border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100"
             href="/dashboard"
           >
             Dashboard
           </Link>
-          <SignOutButton />
-        </div>
-      </header>
+          <SignOutButton className="static" />
+        </>
+      }
+      description="For league questions or issues, contact the league admin directly by email."
+      eyebrow="Support"
+      maxWidth="max-w-3xl"
+      title="Contact League Admin"
+    >
 
       <section className="mt-6 rounded-2xl border border-slate-200 bg-white p-6">
         <p className="text-sm text-slate-700">League admin email</p>
@@ -64,6 +60,6 @@ export default async function ContactAdminPage() {
         </p>
       </section>
       <MobileBottomNav />
-    </main>
+    </AuthenticatedPageShell>
   );
 }

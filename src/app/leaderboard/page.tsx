@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
+import { AuthenticatedPageShell } from "@/components/authenticated-page-shell";
 import { MobileBottomNav } from "@/components/mobile-bottom-nav";
 import { PicksRaceSelect } from "@/components/picks-race-select";
 import { SignOutButton } from "@/components/sign-out-button";
@@ -197,19 +198,9 @@ export default async function LeaderboardPage({ searchParams }: PageProps) {
   }, null);
 
   return (
-    <main className="mx-auto flex min-h-screen max-w-[1200px] flex-col px-6 py-10 pb-24 md:pb-10">
-      <header className="relative flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <p className="inline-flex rounded-full border border-blue-200 bg-blue-50 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-blue-700">
-            League Data
-          </p>
-          <h1 className="mt-3 text-3xl font-semibold tracking-tight">Season Leaderboard</h1>
-          <p className="mt-2 text-sm text-slate-600">
-            Standings, locked picks by race, and season-long performance trends.
-          </p>
-        </div>
-
-        <div className="flex items-center gap-2">
+    <AuthenticatedPageShell
+      actions={
+        <>
           <Link
             className="rounded-md border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100"
             href="/dashboard"
@@ -222,9 +213,13 @@ export default async function LeaderboardPage({ searchParams }: PageProps) {
           >
             Pick&apos;em Form
           </Link>
-          <SignOutButton />
-        </div>
-      </header>
+        </>
+      }
+      description="Standings, locked picks by race, and season-long performance trends."
+      eyebrow="League Data"
+      maxWidth="max-w-[1200px]"
+      title="Season Leaderboard"
+    >
 
       <nav className="mt-6">
         <ul className="inline-flex rounded-md border border-slate-300 bg-white p-1 text-sm">
@@ -661,6 +656,6 @@ export default async function LeaderboardPage({ searchParams }: PageProps) {
       ) : null}
 
       <MobileBottomNav />
-    </main>
+    </AuthenticatedPageShell>
   );
 }

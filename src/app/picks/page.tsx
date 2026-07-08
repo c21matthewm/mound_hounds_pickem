@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { isMissingColumnError } from "@/lib/supabase/schema-compat";
+import { AuthenticatedPageShell } from "@/components/authenticated-page-shell";
 import { MobileBottomNav } from "@/components/mobile-bottom-nav";
 import { PickSubmissionSnapshot } from "@/components/pick-submission-snapshot";
 import { SignOutButton } from "@/components/sign-out-button";
@@ -175,13 +176,12 @@ export default async function PicksPage({ searchParams }: PageProps) {
 
   if (!upcomingRace) {
     return (
-      <main className="mx-auto flex min-h-screen max-w-4xl flex-col px-6 py-16">
-        <header className="relative flex flex-wrap items-center justify-between gap-3">
-          <h1 className="text-3xl font-semibold tracking-tight">Pick&apos;em Form</h1>
-          <div className="flex items-center gap-2">
-            <SignOutButton />
-          </div>
-        </header>
+      <AuthenticatedPageShell
+        actions={<SignOutButton className="static" />}
+        eyebrow="Race Picks"
+        maxWidth="max-w-4xl"
+        title="Pick'em Form"
+      >
         <p className="mt-4 rounded-md border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
           No future race is scheduled yet for the {seasonRange.seasonYear} season. Add a race in
           admin with a start date in the future.
@@ -189,7 +189,7 @@ export default async function PicksPage({ searchParams }: PageProps) {
         <Link className="mt-4 text-sm font-semibold text-slate-900 underline" href="/dashboard">
           Back to dashboard
         </Link>
-      </main>
+      </AuthenticatedPageShell>
     );
   }
 
@@ -349,19 +349,9 @@ export default async function PicksPage({ searchParams }: PageProps) {
   }));
 
   return (
-    <main className="mx-auto flex min-h-screen max-w-6xl flex-col px-6 py-10 pb-24 md:pb-10">
-      <header className="relative flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <p className="inline-flex rounded-full border border-cyan-200 bg-cyan-50 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-cyan-700">
-            Race Picks
-          </p>
-          <h1 className="mt-3 text-3xl font-semibold tracking-tight">Pick&apos;em Form</h1>
-          <p className="mt-2 text-sm text-slate-600">
-            Team <span className="font-semibold">{profile.team_name}</span>
-          </p>
-        </div>
-
-        <div className="flex items-center gap-2">
+    <AuthenticatedPageShell
+      actions={
+        <>
           <Link
             className="rounded-md border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100"
             href="/dashboard"
@@ -374,9 +364,17 @@ export default async function PicksPage({ searchParams }: PageProps) {
           >
             Leaderboard
           </Link>
-          <SignOutButton />
-        </div>
-      </header>
+        </>
+      }
+      description={
+        <>
+          Team <span className="font-semibold text-slate-900">{profile.team_name}</span>
+        </>
+      }
+      eyebrow="Race Picks"
+      maxWidth="max-w-6xl"
+      title="Pick'em Form"
+    >
 
       <section className="mt-6 overflow-hidden rounded-3xl border border-slate-200 bg-white">
         {upcomingRace.title_image_url ? (
@@ -435,18 +433,6 @@ export default async function PicksPage({ searchParams }: PageProps) {
               Indianapolis 500 picks use qualifying-order groups and lock when the race starts.
             </p>
           ) : null}
-          <p className="mt-4 text-xs text-slate-200">
-            Please visit the{" "}
-            <a
-              className="font-semibold text-cyan-200 underline decoration-cyan-300/70 underline-offset-2 hover:text-cyan-100"
-              href="https://www.indycar.com/"
-              rel="noreferrer"
-              target="_blank"
-            >
-              official INDYCAR website
-            </a>{" "}
-            for additional information.
-          </p>
         </div>
       </section>
 
@@ -458,7 +444,6 @@ export default async function PicksPage({ searchParams }: PageProps) {
 
       <PickSubmissionSnapshot
         latestSavedAt={existingPick?.updated_at ?? null}
-        qualifyingStartAt={pickLockAt}
         savedAverageSpeed={existingPick ? String(existingPick.average_speed) : null}
         savedPicks={savedPickSummary}
       />
@@ -484,6 +469,6 @@ export default async function PicksPage({ searchParams }: PageProps) {
       />
 
       <MobileBottomNav />
-    </main>
+    </AuthenticatedPageShell>
   );
 }

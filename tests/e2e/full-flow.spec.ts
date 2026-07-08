@@ -1,16 +1,13 @@
-import fs from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
-import { createClient } from "@supabase/supabase-js";
 import { expect, test, type Dialog, type Page } from "@playwright/test";
 import { trackClientIssues } from "./helpers/monitoring";
+import { cleanupPlaywrightArtifacts, supabase } from "./helpers/supabase";
 
 const LEAGUE_TIME_ZONE = "America/Indiana/Indianapolis";
 const TEST_PASSWORD = "Pw-E2E-Flow-2026!";
 const RUN_ID = randomUUID().slice(0, 8);
 const TEST_PREFIX = `[PW E2E ${RUN_ID}]`;
-const TEST_FLOW_NAME_PREFIX = "[PW E2E ";
-const TEST_FLOW_EMAIL_PREFIX = "pw-e2e-";
 
 type Role = "admin" | "participant";
 
@@ -27,14 +24,6 @@ type DriverSeed = {
   id: number;
 };
 
-type DriverBaseline = {
-  championship_points: number;
-  current_standing: number;
-  group_number: number;
-  id: number;
-  is_active: boolean;
-};
-
 type RaceSeed = {
   id: number;
   is_archived: boolean;
@@ -49,152 +38,6 @@ type PickSelection = {
   4: number;
   5: number;
   6: number;
-};
-
-const readEnvFromFile = (key: string): string | null => {
-  const envPath = path.join(process.cwd(), ".env.local");
-  if (!fs.existsSync(envPath)) {
-    return null;
-  }
-
-  const lines = fs.readFileSync(envPath, "utf8").split(/\r?\n/);
-  for (const line of lines) {
-    const trimmed = line.trim();
-    if (!trimmed || trimmed.startsWith("#")) {
-      continue;
-    }
-
-    const splitIndex = trimmed.indexOf("=");
-    if (splitIndex <= 0) {
-      continue;
-    }
-
-    const currentKey = trimmed.slice(0, splitIndex).trim();
-    if (currentKey !== key) {
-      continue;
-    }
-
-    const rawValue = trimmed.slice(splitIndex + 1).trim();
-    return rawValue.replace(/^['"]|['"]$/g, "");
-  }
-
-  return null;
-};
-
-const requiredEnv = (key: string): string => {
-  const fromProcess = process.env[key];
-  if (fromProcess && fromProcess.trim().length > 0) {
-    return fromProcess.trim();
-  }
-
-  const fromFile = readEnvFromFile(key);
-  if (fromFile && fromFile.trim().length > 0) {
-    return fromFile.trim();
-  }
-
-  throw new Error(`Missing required env var: ${key}`);
-};
-
-const supabase = createClient(
-  requiredEnv("NEXT_PUBLIC_SUPABASE_URL"),
-  requiredEnv("SUPABASE_SERVICE_ROLE_KEY"),
-  {
-    auth: {
-      autoRefreshToken: false,
-      persistSession: false
-    }
-  }
-);
-
-const loadAllPlaywrightAuthUserIds = async (): Promise<string[]> => {
-  const userIds: string[] = [];
-  let page = 1;
-  const perPage = 200;
-
-  while (true) {
-    const { data, error } = await supabase.auth.admin.listUsers({ page, perPage });
-    if (error) {
-      throw new Error(`Failed listing auth users for cleanup: ${error.message}`);
-    }
-
-    const users = data?.users ?? [];
-    users.forEach((user) => {
-      if (user.email?.startsWith(TEST_FLOW_EMAIL_PREFIX)) {
-        userIds.push(user.id);
-      }
-    });
-
-    if (users.length < perPage) {
-      break;
-    }
-    page += 1;
-  }
-
-  return userIds;
-};
-
-const cleanupPlaywrightFlowArtifacts = async () => {
-  const { data: seededRaces, error: seededRaceError } = await supabase
-    .from("races")
-    .select("id")
-    .ilike("race_name", `${TEST_FLOW_NAME_PREFIX}%`);
-  if (seededRaceError) {
-    throw new Error(`Failed listing seeded races for cleanup: ${seededRaceError.message}`);
-  }
-  const seededRaceIds = (seededRaces ?? []).map((row) => Number(row.id)).filter((id) => Number.isFinite(id));
-  if (seededRaceIds.length > 0) {
-    const { error: deleteRaceError } = await supabase.from("races").delete().in("id", seededRaceIds);
-    if (deleteRaceError) {
-      throw new Error(`Failed deleting seeded races: ${deleteRaceError.message}`);
-    }
-  }
-
-  const { data: seededDrivers, error: seededDriverError } = await supabase
-    .from("drivers")
-    .select("id")
-    .ilike("driver_name", `${TEST_FLOW_NAME_PREFIX}%`);
-  if (seededDriverError) {
-    throw new Error(`Failed listing seeded drivers for cleanup: ${seededDriverError.message}`);
-  }
-  const seededDriverIds = (seededDrivers ?? [])
-    .map((row) => Number(row.id))
-    .filter((id) => Number.isFinite(id));
-  if (seededDriverIds.length > 0) {
-    const { error: deleteDriverError } = await supabase.from("drivers").delete().in("id", seededDriverIds);
-    if (deleteDriverError) {
-      throw new Error(`Failed deleting seeded drivers: ${deleteDriverError.message}`);
-    }
-  }
-
-  const seededUserIds = await loadAllPlaywrightAuthUserIds();
-  if (seededUserIds.length === 0) {
-    return;
-  }
-
-  const { error: deleteFeedbackError } = await supabase
-    .from("feedback_items")
-    .delete()
-    .in("user_id", seededUserIds);
-  if (deleteFeedbackError) {
-    throw new Error(`Failed deleting seeded feedback: ${deleteFeedbackError.message}`);
-  }
-
-  const { error: deletePicksError } = await supabase.from("picks").delete().in("user_id", seededUserIds);
-  if (deletePicksError) {
-    throw new Error(`Failed deleting seeded picks: ${deletePicksError.message}`);
-  }
-
-  const { error: deleteProfilesError } = await supabase.from("profiles").delete().in("id", seededUserIds);
-  if (deleteProfilesError) {
-    throw new Error(`Failed deleting seeded profiles: ${deleteProfilesError.message}`);
-  }
-
-  for (const userId of seededUserIds) {
-    const { error: deleteAuthError } = await supabase.auth.admin.deleteUser(userId);
-    if (deleteAuthError) {
-      throw new Error(`Failed deleting seeded auth user ${userId}: ${deleteAuthError.message}`);
-    }
-  }
 };
 
 const toLocalInput = (value: Date): string => {
@@ -360,43 +203,6 @@ const getRaceByName = async (raceName: string): Promise<RaceSeed> => {
   return data as RaceSeed;
 };
 
-const loadDriverBaseline = async (): Promise<DriverBaseline[]> => {
-  const { data, error } = await supabase
-    .from("drivers")
-    .select("id,championship_points,current_standing,group_number,is_active");
-
-  if (error) {
-    throw new Error(`Failed loading driver baseline: ${error.message}`);
-  }
-
-  return (data ?? []) as DriverBaseline[];
-};
-
-const restoreDriverBaseline = async (baseline: DriverBaseline[]) => {
-  if (baseline.length === 0) {
-    return;
-  }
-
-  const restoreResponses = await Promise.all(
-    baseline.map((row) =>
-      supabase
-        .from("drivers")
-        .update({
-          championship_points: row.championship_points,
-          current_standing: row.current_standing,
-          group_number: row.group_number,
-          is_active: row.is_active
-        })
-        .eq("id", row.id)
-    )
-  );
-
-  const failed = restoreResponses.find((response) => response.error);
-  if (failed?.error) {
-    throw new Error(`Failed restoring driver baseline: ${failed.error.message}`);
-  }
-};
-
 const submitPicks = async (
   page: Page,
   raceName: string,
@@ -437,12 +243,8 @@ const verifyUnsavedPickGuard = async (page: Page, raceName: string, groupOneDriv
 };
 
 test.describe.serial("Full App Flow", () => {
-  const createdUserIds: string[] = [];
-  const createdDriverIds: number[] = [];
-  const createdRaceIds: number[] = [];
   const clientIssues: string[] = [];
   const findings: string[] = [];
-  let baselineDrivers: DriverBaseline[] = [];
 
   let adminUser: SeedUser;
   let participant1: SeedUser;
@@ -450,33 +252,11 @@ test.describe.serial("Full App Flow", () => {
   let participant3: SeedUser;
 
   test.beforeAll(async () => {
-    await cleanupPlaywrightFlowArtifacts();
+    await cleanupPlaywrightArtifacts({ recomputeDriverPoints: true });
   });
 
   test.afterAll(async () => {
-    if (createdRaceIds.length > 0) {
-      await supabase.from("races").delete().in("id", createdRaceIds);
-    }
-
-    if (createdUserIds.length > 0) {
-      await supabase.from("feedback_items").delete().in("user_id", createdUserIds);
-      await supabase.from("picks").delete().in("user_id", createdUserIds);
-      await supabase.from("profiles").delete().in("id", createdUserIds);
-    }
-
-    if (createdDriverIds.length > 0) {
-      await supabase.from("drivers").delete().in("id", createdDriverIds);
-    }
-
-    if (baselineDrivers.length > 0) {
-      await restoreDriverBaseline(baselineDrivers);
-    }
-
-    for (const userId of createdUserIds) {
-      await supabase.auth.admin.deleteUser(userId);
-    }
-
-    await cleanupPlaywrightFlowArtifacts();
+    await cleanupPlaywrightArtifacts({ recomputeDriverPoints: true });
   });
 
   test("admin + participant E2E flow with race archive behavior", async ({ browser, browserName, isMobile }) => {
@@ -485,16 +265,12 @@ test.describe.serial("Full App Flow", () => {
       "Heavy mutation flow is limited to desktop Chromium. Cross-browser/mobile smoke is covered separately."
     );
 
-    baselineDrivers = await loadDriverBaseline();
-
     adminUser = await createSeedUser("Admin", "admin");
     participant1 = await createSeedUser("Participant1", "participant");
     participant2 = await createSeedUser("Participant2", "participant");
     participant3 = await createSeedUser("Participant3", "participant");
-    createdUserIds.push(adminUser.id, participant1.id, participant2.id, participant3.id);
 
     const driverCoverage = await ensureDriverCoverage();
-    createdDriverIds.push(...driverCoverage.createdDriverIds);
 
     const pickA: PickSelection = {
       1: driverCoverage.byGroup.get(1)![0].id,
@@ -556,10 +332,9 @@ test.describe.serial("Full App Flow", () => {
     await addRaceForm.locator('input[name="title_image_file"]').setInputFiles(fixtureImage);
     await addRaceForm.getByRole("button", { name: "Add race" }).click();
     await expect(adminPage.locator("main")).toContainText("Race added.");
-    await expect(adminPage.locator("table")).toContainText(raceAName);
+    await expect(adminPage.locator("main")).toContainText(raceAName);
 
     const raceA = await getRaceByName(raceAName);
-    createdRaceIds.push(raceA.id);
     expect(raceA.title_image_url, "Race title image URL should be saved after upload.").toBeTruthy();
 
     await adminPage.goto("/admin?tab=races");
@@ -577,10 +352,9 @@ test.describe.serial("Full App Flow", () => {
     await addRaceFormSecond.locator('input[name="title_image_file"]').setInputFiles([]);
     await addRaceFormSecond.getByRole("button", { name: "Add race" }).click();
     await expect(adminPage.locator("main")).toContainText("Race added.");
-    await expect(adminPage.locator("table")).toContainText(raceBName);
+    await expect(adminPage.locator("main")).toContainText(raceBName);
 
-    const raceB = await getRaceByName(raceBName);
-    createdRaceIds.push(raceB.id);
+    await getRaceByName(raceBName);
 
     const p1Context = await browser.newContext();
     const p1Page = await p1Context.newPage();
@@ -625,10 +399,9 @@ test.describe.serial("Full App Flow", () => {
     }
     expect(latestP1Pick.driver_group1_id).toBe(pickB[1]);
 
-    const raceAEditForm = adminPage
-      .locator("form")
-      .filter({ has: adminPage.locator(`input[name="race_name"][value="${raceAName}"]`) })
-      .first();
+    const raceAEditDetails = adminPage.locator("details").filter({ hasText: raceAName }).first();
+    await raceAEditDetails.locator("summary").click();
+    const raceAEditForm = adminPage.getByTestId(`admin-race-edit-form-${raceA.id}`);
     const lockQualifying = new Date(Date.now() - 3 * 60 * 60 * 1000);
     // Keep race A visible on Pick'em while inside the 24-hour post-start buffer.
     const lockRaceStart = new Date(Date.now() - 2 * 60 * 60 * 1000);
@@ -686,8 +459,9 @@ test.describe.serial("Full App Flow", () => {
     await expect(resultsImportForm).toContainText("Preview is clean. Ready to publish.");
     await expect(resultsImportForm.getByTestId("admin-results-import-submit")).toBeEnabled();
 
-    const manualResultsForm = adminPage.getByTestId("admin-results-manual-form");
     for (const [driverId, points] of pointsByPickB.entries()) {
+      await adminPage.getByText("Manual result entry").click();
+      const manualResultsForm = adminPage.getByTestId("admin-results-manual-form");
       await manualResultsForm.locator('select[name="race_id"]').selectOption(String(raceA.id));
       await manualResultsForm.locator('select[name="driver_id"]').selectOption(String(driverId));
       await manualResultsForm.locator('input[name="points"]').fill(String(points));
@@ -702,6 +476,7 @@ test.describe.serial("Full App Flow", () => {
     await expect(p1Page.locator("main")).toContainText(`Latest Race: ${raceAName}`);
 
     const standingsTable = p1Page.getByTestId("standings-table");
+    await p1Page.getByTestId("standings-filter-toggle").click();
     const standingsTeamFilter = p1Page.getByTestId("standings-filter-team");
     await standingsTeamFilter.fill(participant3.teamName);
     await expect(standingsTable.locator("tbody tr")).toHaveCount(1);
@@ -740,6 +515,7 @@ test.describe.serial("Full App Flow", () => {
     const p1Row = p1Page.locator("tbody tr").filter({ hasText: participant1.teamName }).first();
     await expect(p1Row).not.toContainText("-");
 
+    await p1Page.getByTestId("picks-filter-toggle").click();
     const teamFilter = p1Page.getByTestId("picks-filter-team");
     await teamFilter.fill(participant2.teamName);
     await expect(p1Page.locator("tbody tr")).toHaveCount(1);
@@ -769,15 +545,10 @@ test.describe.serial("Full App Flow", () => {
     await expect(adminPage.locator("main")).toContainText(participant2.teamName);
 
     await adminPage.goto("/admin?tab=races");
-    const raceAEditFormForArchive = adminPage
-      .locator("form")
-      .filter({ has: adminPage.locator(`input[name="race_name"][value="${raceAName}"]`) })
-      .first();
-    const raceACard = raceAEditFormForArchive.locator(
-      "xpath=ancestor::div[contains(@class,'rounded-md')][1]"
-    );
+    const raceADetailsForArchive = adminPage.locator("details").filter({ hasText: raceAName }).first();
+    await raceADetailsForArchive.locator("summary").click();
     adminPage.once("dialog", (dialog) => dialog.accept());
-    await raceACard.getByRole("button", { name: "Archive race" }).click();
+    await raceADetailsForArchive.getByRole("button", { name: "Archive race" }).click();
     await expect(adminPage.locator("main")).toContainText("Race archived.");
 
     await p1Page.goto("/picks");

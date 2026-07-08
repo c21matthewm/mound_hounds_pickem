@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import { createClient } from "@supabase/supabase-js";
+import { createClient, type SupabaseClient, type User } from "@supabase/supabase-js";
 
 const RACE_IMAGE_BUCKET = "race-title-images";
 
@@ -36,9 +36,48 @@ const PLAYWRIGHT_AUTH_EMAIL_PATTERNS = [
   new RegExp(`^pw-auth-${PLAYWRIGHT_RUN_ID}@example\\.com$`)
 ];
 
-const apply = process.argv.includes("--apply");
+type RaceCandidate = {
+  id: number;
+  race_name: string;
+  title_image_url: string | null;
+};
 
-const readEnvFromFile = (key) => {
+type DriverCandidate = {
+  driver_name: string;
+  id: number;
+};
+
+type ProfileCandidate = {
+  full_name: string | null;
+  id: string;
+  team_name: string | null;
+};
+
+type FeedbackCandidate = {
+  details: string | null;
+  id: number;
+  user_id: string | null;
+};
+
+type CleanupSummary = {
+  deletedAuthUsers: number;
+  deletedDrivers: number;
+  deletedFeedbackByDetails: number;
+  deletedFeedbackByUser: number;
+  deletedPickRemindersByUser: number;
+  deletedPicksByRace: number;
+  deletedPicksByUser: number;
+  deletedProfiles: number;
+  deletedRaceDriverGroupsByDriver: number;
+  deletedRaceDriverGroupsByRace: number;
+  deletedRaceImages: number;
+  deletedRaces: number;
+  deletedResultsByDriver: number;
+  deletedResultsByRace: number;
+  recomputedDriverPoints: boolean;
+};
+
+export const readEnvFromFile = (key: string): string | null => {
   const envPath = path.join(process.cwd(), ".env.local");
   if (!fs.existsSync(envPath)) {
     return null;
@@ -68,7 +107,7 @@ const readEnvFromFile = (key) => {
   return null;
 };
 
-const requiredEnv = (key) => {
+export const requiredEnv = (key: string): string => {
   const fromProcess = process.env[key];
   if (fromProcess && fromProcess.trim().length > 0) {
     return fromProcess.trim();
@@ -82,19 +121,35 @@ const requiredEnv = (key) => {
   throw new Error(`Missing required env var: ${key}`);
 };
 
-const supabase = createClient(
-  requiredEnv("NEXT_PUBLIC_SUPABASE_URL"),
-  requiredEnv("SUPABASE_SERVICE_ROLE_KEY"),
-  {
+export const requireSupabaseE2EOptIn = () => {
+  if (process.env.PW_ALLOW_SUPABASE_E2E === "1") {
+    return;
+  }
+
+  throw new Error(
+    [
+      "Refusing to run Supabase-mutating Playwright tests without PW_ALLOW_SUPABASE_E2E=1.",
+      "Use a dedicated/local Supabase test database whenever possible.",
+      "Do not point these tests at the live app database unless you intentionally accept that risk."
+    ].join(" ")
+  );
+};
+
+export const createE2ESupabaseClient = (): SupabaseClient => {
+  requireSupabaseE2EOptIn();
+
+  return createClient(requiredEnv("NEXT_PUBLIC_SUPABASE_URL"), requiredEnv("SUPABASE_SERVICE_ROLE_KEY"), {
     auth: {
       autoRefreshToken: false,
       persistSession: false
     }
-  }
-);
+  });
+};
 
-const uniqueBy = (rows, key) => {
-  const seen = new Set();
+export const supabase = createE2ESupabaseClient();
+
+const uniqueBy = <T, K extends keyof T>(rows: T[], key: K): T[] => {
+  const seen = new Set<T[K]>();
   return rows.filter((row) => {
     const value = row[key];
     if (seen.has(value)) {
@@ -105,26 +160,37 @@ const uniqueBy = (rows, key) => {
   });
 };
 
-const matchesAnyPattern = (value, patterns) =>
+const matchesAnyPattern = (value: string | null | undefined, patterns: RegExp[]) =>
   typeof value === "string" && patterns.some((pattern) => pattern.test(value));
 
-const isPlaywrightProfile = (profile) =>
+const isPlaywrightProfile = (profile: ProfileCandidate) =>
   matchesAnyPattern(profile.team_name, PLAYWRIGHT_PROFILE_PATTERNS) ||
   matchesAnyPattern(profile.full_name, PLAYWRIGHT_PROFILE_PATTERNS);
 
-const isPlaywrightRace = (race) => matchesAnyPattern(race.race_name, PLAYWRIGHT_RACE_PATTERNS);
+const isPlaywrightRace = (race: RaceCandidate) =>
+  matchesAnyPattern(race.race_name, PLAYWRIGHT_RACE_PATTERNS);
 
-const isPlaywrightDriver = (driver) =>
+const isPlaywrightDriver = (driver: DriverCandidate) =>
   matchesAnyPattern(driver.driver_name, PLAYWRIGHT_DRIVER_PATTERNS);
 
-const isPlaywrightFeedback = (feedback) =>
+const isPlaywrightFeedback = (feedback: FeedbackCandidate) =>
   matchesAnyPattern(feedback.details, PLAYWRIGHT_FEEDBACK_PATTERNS);
 
-const isPlaywrightAuthUser = (user) =>
+const isPlaywrightAuthUser = (user: User) =>
   matchesAnyPattern(user.email, PLAYWRIGHT_AUTH_EMAIL_PATTERNS);
 
-const selectByPrefixes = async ({ table, column, select, prefixes }) => {
-  const rows = [];
+const selectByPrefixes = async <T>({
+  column,
+  prefixes,
+  select,
+  table
+}: {
+  column: string;
+  prefixes: string[];
+  select: string;
+  table: string;
+}): Promise<T[]> => {
+  const rows: T[] = [];
   for (const prefix of prefixes) {
     const { data, error } = await supabase
       .from(table)
@@ -133,13 +199,13 @@ const selectByPrefixes = async ({ table, column, select, prefixes }) => {
     if (error) {
       throw new Error(`Failed selecting ${table}.${column} ${prefix}: ${error.message}`);
     }
-    rows.push(...(data ?? []));
+    rows.push(...((data ?? []) as T[]));
   }
   return rows;
 };
 
-const listAllTestAuthUsers = async () => {
-  const users = [];
+const listAllTestAuthUsers = async (): Promise<User[]> => {
+  const users: User[] = [];
   let page = 1;
   const perPage = 200;
 
@@ -150,9 +216,7 @@ const listAllTestAuthUsers = async () => {
     }
 
     const currentUsers = data?.users ?? [];
-    users.push(
-      ...currentUsers.filter(isPlaywrightAuthUser)
-    );
+    users.push(...currentUsers.filter(isPlaywrightAuthUser));
 
     if (currentUsers.length < perPage) {
       break;
@@ -163,7 +227,15 @@ const listAllTestAuthUsers = async () => {
   return users;
 };
 
-const deleteByIds = async ({ table, ids, label }) => {
+const deleteByIds = async ({
+  ids,
+  label,
+  table
+}: {
+  ids: Array<number | string>;
+  label: string;
+  table: string;
+}) => {
   if (ids.length === 0) {
     return 0;
   }
@@ -176,24 +248,17 @@ const deleteByIds = async ({ table, ids, label }) => {
   return (data ?? []).length;
 };
 
-const deleteByUserIds = async ({ table, userIds, label }) => {
-  if (userIds.length === 0) {
-    return 0;
-  }
-
-  const { data, error } = await supabase
-    .from(table)
-    .delete()
-    .in("user_id", userIds)
-    .select("id");
-  if (error) {
-    throw new Error(`Failed deleting ${label}: ${error.message}`);
-  }
-
-  return (data ?? []).length;
-};
-
-const deleteByColumnIds = async ({ table, column, ids, label }) => {
+const deleteByColumnIds = async ({
+  column,
+  ids,
+  label,
+  table
+}: {
+  column: string;
+  ids: Array<number | string>;
+  label: string;
+  table: string;
+}) => {
   if (ids.length === 0) {
     return 0;
   }
@@ -206,7 +271,7 @@ const deleteByColumnIds = async ({ table, column, ids, label }) => {
   return (data ?? []).length;
 };
 
-const maybeStorageErrorCode = (error) => {
+const maybeStorageErrorCode = (error: unknown): string => {
   if (!error || typeof error !== "object") {
     return "";
   }
@@ -217,9 +282,9 @@ const maybeStorageErrorCode = (error) => {
   return `${statusCode} ${status} ${message}`;
 };
 
-const isMissingStorageError = (error) => /(^|\s)404(\s|$)|not found/i.test(maybeStorageErrorCode(error));
+const isMissingStorageError = (error: unknown) => /(^|\s)404(\s|$)|not found/i.test(maybeStorageErrorCode(error));
 
-const raceImagePathFromPublicUrl = (value) => {
+const raceImagePathFromPublicUrl = (value: string | null): string | null => {
   if (!value) {
     return null;
   }
@@ -238,8 +303,8 @@ const raceImagePathFromPublicUrl = (value) => {
   }
 };
 
-const listRaceImagePaths = async (races) => {
-  const paths = new Set();
+const listRaceImagePaths = async (races: RaceCandidate[]): Promise<string[]> => {
+  const paths = new Set<string>();
 
   for (const race of races) {
     const pathFromUrl = raceImagePathFromPublicUrl(race.title_image_url);
@@ -268,7 +333,7 @@ const listRaceImagePaths = async (races) => {
   return Array.from(paths);
 };
 
-const deleteRaceImages = async (races) => {
+const deleteRaceImages = async (races: RaceCandidate[]) => {
   const imagePaths = await listRaceImagePaths(races);
   if (imagePaths.length === 0) {
     return 0;
@@ -282,7 +347,7 @@ const deleteRaceImages = async (races) => {
   return data?.length ?? imagePaths.length;
 };
 
-const driverGroupForIndex = (index) => {
+const driverGroupForIndex = (index: number): number => {
   if (index < 4) return 1;
   if (index < 8) return 2;
   if (index < 12) return 3;
@@ -317,6 +382,7 @@ const refreshDriverStandingsAndGroups = async () => {
 
   const rankedActiveDrivers = activeDrivers ?? [];
   const inactiveDriverRows = inactiveDrivers ?? [];
+
   const activeUpdateResponses = await Promise.all(
     rankedActiveDrivers.map((driver, index) =>
       supabase
@@ -328,6 +394,7 @@ const refreshDriverStandingsAndGroups = async () => {
         .eq("id", driver.id)
     )
   );
+
   const inactiveUpdateResponses = await Promise.all(
     inactiveDriverRows.map((driver, index) =>
       supabase
@@ -340,15 +407,13 @@ const refreshDriverStandingsAndGroups = async () => {
     )
   );
 
-  const failed = [...activeUpdateResponses, ...inactiveUpdateResponses].find(
-    (result) => result.error
-  );
+  const failed = [...activeUpdateResponses, ...inactiveUpdateResponses].find((result) => result.error);
   if (failed?.error) {
     throw new Error(`Failed refreshing driver standings/groups: ${failed.error.message}`);
   }
 };
 
-const refreshDriverChampionshipPointsFromResults = async () => {
+export const refreshDriverChampionshipPointsFromResults = async () => {
   const [driversResponse, resultsResponse] = await Promise.all([
     supabase.from("drivers").select("id"),
     supabase.from("results").select("driver_id,points")
@@ -361,7 +426,7 @@ const refreshDriverChampionshipPointsFromResults = async () => {
     throw new Error(`Failed loading results for point recompute: ${resultsResponse.error.message}`);
   }
 
-  const pointsByDriverId = new Map();
+  const pointsByDriverId = new Map<number, number>();
   (resultsResponse.data ?? []).forEach((result) => {
     const current = pointsByDriverId.get(result.driver_id) ?? 0;
     pointsByDriverId.set(result.driver_id, current + Number(result.points));
@@ -386,7 +451,11 @@ const refreshDriverChampionshipPointsFromResults = async () => {
   await refreshDriverStandingsAndGroups();
 };
 
-const main = async () => {
+export const cleanupPlaywrightArtifacts = async ({
+  recomputeDriverPoints = true
+}: {
+  recomputeDriverPoints?: boolean;
+} = {}): Promise<CleanupSummary> => {
   const [
     raceCandidates,
     driverCandidates,
@@ -394,43 +463,42 @@ const main = async () => {
     profileFullNameCandidates,
     feedbackCandidates,
     authUsers
-  ] =
-    await Promise.all([
-      selectByPrefixes({
-        table: "races",
-        column: "race_name",
-        select: "id,race_name,title_image_url",
-        prefixes: PLAYWRIGHT_RACE_PREFIXES
-      }),
-      selectByPrefixes({
-        table: "drivers",
-        column: "driver_name",
-        select: "id,driver_name",
-        prefixes: PLAYWRIGHT_DRIVER_PREFIXES
-      }),
-      selectByPrefixes({
-        table: "profiles",
-        column: "team_name",
-        select: "id,team_name,full_name",
-        prefixes: PLAYWRIGHT_NAME_PREFIXES
-      }),
-      selectByPrefixes({
-        table: "profiles",
-        column: "full_name",
-        select: "id,team_name,full_name",
-        prefixes: PLAYWRIGHT_NAME_PREFIXES
-      }),
-      selectByPrefixes({
-        table: "feedback_items",
-        column: "details",
-        select: "id,user_id,details",
-        prefixes: PLAYWRIGHT_NAME_PREFIXES
-      }),
-      listAllTestAuthUsers()
-    ]);
+  ] = await Promise.all([
+    selectByPrefixes<RaceCandidate>({
+      table: "races",
+      column: "race_name",
+      select: "id,race_name,title_image_url",
+      prefixes: PLAYWRIGHT_RACE_PREFIXES
+    }),
+    selectByPrefixes<DriverCandidate>({
+      table: "drivers",
+      column: "driver_name",
+      select: "id,driver_name",
+      prefixes: PLAYWRIGHT_DRIVER_PREFIXES
+    }),
+    selectByPrefixes<ProfileCandidate>({
+      table: "profiles",
+      column: "team_name",
+      select: "id,team_name,full_name",
+      prefixes: PLAYWRIGHT_NAME_PREFIXES
+    }),
+    selectByPrefixes<ProfileCandidate>({
+      table: "profiles",
+      column: "full_name",
+      select: "id,team_name,full_name",
+      prefixes: PLAYWRIGHT_NAME_PREFIXES
+    }),
+    selectByPrefixes<FeedbackCandidate>({
+      table: "feedback_items",
+      column: "details",
+      select: "id,user_id,details",
+      prefixes: PLAYWRIGHT_NAME_PREFIXES
+    }),
+    listAllTestAuthUsers()
+  ]);
 
   const races = uniqueBy(raceCandidates, "id").filter(isPlaywrightRace);
-  const driversByName = uniqueBy(driverCandidates, "id").filter(isPlaywrightDriver);
+  const drivers = uniqueBy(driverCandidates, "id").filter(isPlaywrightDriver);
   const profiles = uniqueBy([...profileTeamCandidates, ...profileFullNameCandidates], "id").filter(
     isPlaywrightProfile
   );
@@ -438,136 +506,117 @@ const main = async () => {
   const authUserIds = new Set(authUsers.map((user) => user.id));
   profiles.forEach((profile) => authUserIds.add(profile.id));
 
-  const raceIds = uniqueBy(races, "id").map((race) => race.id);
-  const driverIds = uniqueBy(driversByName, "id").map((driver) => driver.id);
+  const raceIds = races.map((race) => race.id);
+  const driverIds = drivers.map((driver) => driver.id);
   const profileIds = profiles.map((profile) => profile.id);
   const userIds = Array.from(authUserIds);
-  const feedbackIds = uniqueBy(feedbackByDetails, "id").map((feedback) => feedback.id);
+  const feedbackIds = feedbackByDetails.map((feedback) => feedback.id);
 
-  console.log(`Mode: ${apply ? "apply" : "dry-run"}`);
-  console.log("Safety: exact Playwright-generated names/emails only; no generic PW/Indy substring matching.");
-  console.log(`Test races: ${raceIds.length}`);
-  races.forEach((race) => console.log(`  race ${race.id}: ${race.race_name}`));
-  console.log(`Test drivers: ${driverIds.length}`);
-  driversByName.forEach((driver) => console.log(`  driver ${driver.id}: ${driver.driver_name}`));
-  console.log(`Test profiles: ${profileIds.length}`);
-  profiles.forEach((profile) => console.log(`  profile ${profile.id}: ${profile.team_name}`));
-  console.log(`Test auth users: ${userIds.length}`);
-  authUsers.forEach((user) => console.log(`  auth ${user.id}: ${user.email}`));
-  console.log(`Test feedback rows by details: ${feedbackIds.length}`);
-  const raceImagePaths = await listRaceImagePaths(races);
-  console.log(`Test race image files: ${raceImagePaths.length}`);
-  raceImagePaths.forEach((imagePath) => console.log(`  ${RACE_IMAGE_BUCKET}/${imagePath}`));
-
-  if (!apply) {
-    console.log("Dry run only. Re-run with --apply to delete these artifacts.");
-    return;
-  }
-
-  const deletedRaceImageCount = await deleteRaceImages(races);
-  const deletedResultsByRaceCount = await deleteByColumnIds({
+  const deletedRaceImages = await deleteRaceImages(races);
+  const deletedResultsByRace = await deleteByColumnIds({
     table: "results",
     column: "race_id",
     ids: raceIds,
     label: "test race results"
   });
-  const deletedRaceGroupsByRaceCount = await deleteByColumnIds({
+  const deletedRaceDriverGroupsByRace = await deleteByColumnIds({
     table: "race_driver_groups",
     column: "race_id",
     ids: raceIds,
     label: "test race driver groups"
   });
-  const deletedPicksByRaceCount = await deleteByColumnIds({
+  const deletedPicksByRace = await deleteByColumnIds({
     table: "picks",
     column: "race_id",
     ids: raceIds,
     label: "test race picks"
   });
-  const deletedRaceCount = await deleteByIds({
+  const deletedRaces = await deleteByIds({
     table: "races",
     ids: raceIds,
     label: "test races"
   });
-  const deletedFeedbackByDetailsCount = await deleteByIds({
+  const deletedFeedbackByDetails = await deleteByIds({
     table: "feedback_items",
     ids: feedbackIds,
     label: "test feedback rows by details"
   });
-  const deletedFeedbackByUserCount = await deleteByUserIds({
+  const deletedFeedbackByUser = await deleteByColumnIds({
     table: "feedback_items",
-    userIds,
+    column: "user_id",
+    ids: userIds,
     label: "test feedback rows by user"
   });
-  const deletedPicksByUserCount = await deleteByUserIds({
+  const deletedPicksByUser = await deleteByColumnIds({
     table: "picks",
-    userIds,
+    column: "user_id",
+    ids: userIds,
     label: "test picks by user"
   });
-  const deletedRemindersByUserCount = await deleteByUserIds({
+  const deletedPickRemindersByUser = await deleteByColumnIds({
     table: "pick_reminders",
-    userIds,
+    column: "user_id",
+    ids: userIds,
     label: "test reminders by user"
   });
-  const deletedResultsByDriverCount = await deleteByColumnIds({
+  const deletedResultsByDriver = await deleteByColumnIds({
     table: "results",
     column: "driver_id",
     ids: driverIds,
     label: "test driver results"
   });
-  const deletedRaceGroupsByDriverCount = await deleteByColumnIds({
+  const deletedRaceDriverGroupsByDriver = await deleteByColumnIds({
     table: "race_driver_groups",
     column: "driver_id",
     ids: driverIds,
     label: "test driver race groups"
   });
 
-  let deletedAuthUserCount = 0;
-  const failedAuthDeletes = [];
+  let deletedAuthUsers = 0;
+  const failedAuthDeletes: string[] = [];
   for (const userId of userIds) {
     const { error } = await supabase.auth.admin.deleteUser(userId);
     if (error) {
       failedAuthDeletes.push(`${userId}: ${error.message}`);
       continue;
     }
-    deletedAuthUserCount += 1;
+    deletedAuthUsers += 1;
   }
 
-  const deletedProfileCount = await deleteByIds({
+  const deletedProfiles = await deleteByIds({
     table: "profiles",
     ids: profileIds,
     label: "remaining test profiles"
   });
-  const deletedDriverCount = await deleteByIds({
+  const deletedDrivers = await deleteByIds({
     table: "drivers",
     ids: driverIds,
     label: "test drivers"
   });
 
-  await refreshDriverChampionshipPointsFromResults();
-
-  console.log("Deleted:");
-  console.log(`  race images: ${deletedRaceImageCount}`);
-  console.log(`  race results: ${deletedResultsByRaceCount}`);
-  console.log(`  race driver groups by race: ${deletedRaceGroupsByRaceCount}`);
-  console.log(`  race picks: ${deletedPicksByRaceCount}`);
-  console.log(`  races: ${deletedRaceCount}`);
-  console.log(`  feedback by details: ${deletedFeedbackByDetailsCount}`);
-  console.log(`  feedback by user: ${deletedFeedbackByUserCount}`);
-  console.log(`  picks by user: ${deletedPicksByUserCount}`);
-  console.log(`  reminders by user: ${deletedRemindersByUserCount}`);
-  console.log(`  driver results: ${deletedResultsByDriverCount}`);
-  console.log(`  race driver groups by driver: ${deletedRaceGroupsByDriverCount}`);
-  console.log(`  auth users: ${deletedAuthUserCount}`);
-  console.log(`  remaining profiles: ${deletedProfileCount}`);
-  console.log(`  drivers: ${deletedDriverCount}`);
-  console.log("  driver championship points: recomputed from remaining results");
-
   if (failedAuthDeletes.length > 0) {
     throw new Error(`Some auth users could not be deleted: ${failedAuthDeletes.join(" | ")}`);
   }
-};
 
-main().catch((error) => {
-  console.error(error);
-  process.exit(1);
-});
+  if (recomputeDriverPoints) {
+    await refreshDriverChampionshipPointsFromResults();
+  }
+
+  return {
+    deletedAuthUsers,
+    deletedDrivers,
+    deletedFeedbackByDetails,
+    deletedFeedbackByUser,
+    deletedPickRemindersByUser,
+    deletedPicksByRace,
+    deletedPicksByUser,
+    deletedProfiles,
+    deletedRaceDriverGroupsByDriver,
+    deletedRaceDriverGroupsByRace,
+    deletedRaceImages,
+    deletedRaces,
+    deletedResultsByDriver,
+    deletedResultsByRace,
+    recomputedDriverPoints: recomputeDriverPoints
+  };
+};

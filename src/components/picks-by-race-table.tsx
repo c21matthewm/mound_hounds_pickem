@@ -89,6 +89,7 @@ export function PicksByRaceTable({ officialWinningAverageSpeed, resultsPosted, r
     [groupCount]
   );
   const [filters, setFilters] = useState<ColumnFilters>(() => createDefaultFilters(groupCount));
+  const [showFilters, setShowFilters] = useState(false);
   const [sortKey, setSortKey] = useState<SortKey>(resultsPosted ? "rank" : "teamName");
   const [sortDirection, setSortDirection] = useState<SortDirection>(
     defaultSortDirection(resultsPosted ? "rank" : "teamName")
@@ -224,17 +225,76 @@ export function PicksByRaceTable({ officialWinningAverageSpeed, resultsPosted, r
               of {rows.length} teams. Pick and score columns are paired by group.
             </p>
           </div>
-          <button
-            className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-100"
-            data-testid="picks-table-reset"
-            onClick={resetView}
-            type="button"
-          >
-            Reset view
-          </button>
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-100"
+              data-testid="picks-filter-toggle"
+              onClick={() => setShowFilters((previous) => !previous)}
+              type="button"
+            >
+              {showFilters ? "Hide filters" : "Advanced filters"}
+            </button>
+            <button
+              className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-100"
+              data-testid="picks-table-reset"
+              onClick={resetView}
+              type="button"
+            >
+              Reset view
+            </button>
+          </div>
         </div>
 
-        <div className="overflow-x-auto">
+        <div className="divide-y divide-slate-200 md:hidden">
+          {filteredAndSortedRows.length === 0 ? (
+            <p className="px-4 py-4 text-sm text-slate-600">No rows match your current filters.</p>
+          ) : (
+            filteredAndSortedRows.map((row) => (
+              <article key={`mobile-picks-${row.userId}`} className="px-4 py-3">
+                <div className="flex items-start justify-between gap-3">
+                  <button
+                    className="min-w-0 text-left"
+                    onClick={() => setSelectedRow(row)}
+                    type="button"
+                  >
+                    <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                      {resultsPosted ? `Rank ${row.rank ?? "-"}` : "Submitted Pick"}
+                    </p>
+                    <h3 className="mt-0.5 truncate text-base font-semibold text-slate-900 underline decoration-slate-300 underline-offset-2">
+                      {row.teamName}
+                    </h3>
+                  </button>
+                  <div className="text-right">
+                    <p className="text-lg font-semibold text-slate-900">
+                      {resultsPosted ? (row.totalPoints ?? 0) : "-"}
+                    </p>
+                    <p className="text-xs text-slate-500">score</p>
+                  </div>
+                </div>
+                <div className="mt-3 flex flex-wrap gap-1.5">
+                  <span className="rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-xs font-medium text-slate-700">
+                    Avg {formatAverageSpeed(row.averageSpeed)}
+                  </span>
+                  {row.drivers.slice(0, 4).map((driver, index) => (
+                    <span
+                      key={`mobile-picks-${row.userId}-${index}`}
+                      className="rounded-full border border-slate-200 bg-white px-2 py-0.5 text-xs font-medium text-slate-700"
+                    >
+                      G{index + 1}: {driver.driverName ?? "No pick"}
+                    </span>
+                  ))}
+                  {row.drivers.length > 4 ? (
+                    <span className="rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-xs font-medium text-slate-600">
+                      +{row.drivers.length - 4} groups
+                    </span>
+                  ) : null}
+                </div>
+              </article>
+            ))
+          )}
+        </div>
+
+        <div className="hidden overflow-x-auto md:block">
         <table className="min-w-full text-left text-sm">
           <thead className="bg-slate-50 text-slate-700">
             <tr>
@@ -296,71 +356,73 @@ export function PicksByRaceTable({ officialWinningAverageSpeed, resultsPosted, r
                 </Fragment>
               ))}
             </tr>
-            <tr>
-              <th className="px-3 py-2">
-                <input
-                  className={filterInputClassName}
-                  onChange={(event) => updateFilter("rank", event.target.value)}
-                  placeholder="<=5"
-                  type="text"
-                  value={filters.rank}
-                />
-              </th>
-              <th className="px-3 py-2">
-                <input
-                  className={filterInputClassName}
-                  data-testid="picks-filter-team"
-                  onChange={(event) => updateFilter("teamName", event.target.value)}
-                  placeholder="Team contains..."
-                  type="text"
-                  value={filters.teamName}
-                />
-              </th>
-              <th className="px-3 py-2">
-                <input
-                  className={filterInputClassName}
-                  onChange={(event) => updateFilter("totalPoints", event.target.value)}
-                  placeholder=">=200"
-                  type="text"
-                  value={filters.totalPoints}
-                />
-              </th>
-              <th className="px-3 py-2">
-                <input
-                  className={filterInputClassName}
-                  onChange={(event) => updateFilter("averageSpeed", event.target.value)}
-                  placeholder="175-180"
-                  type="text"
-                  value={filters.averageSpeed}
-                />
-              </th>
-              {groupNumbers.map((groupNumber) => (
-                <Fragment key={`group-filters-${groupNumber}`}>
-                  <th className="px-3 py-2">
-                    <input
-                      className={filterInputClassName}
-                      onChange={(event) =>
-                        updateFilter(`driver${groupNumber}` as SortKey, event.target.value)
-                      }
-                      placeholder="Driver..."
-                      type="text"
-                      value={filters[`driver${groupNumber}`] ?? ""}
-                    />
-                  </th>
-                  <th className="px-3 py-2">
-                    <input
-                      className={filterInputClassName}
-                      onChange={(event) =>
-                        updateFilter(`score${groupNumber}` as SortKey, event.target.value)
-                      }
-                      placeholder=">=30"
-                      type="text"
-                      value={filters[`score${groupNumber}`] ?? ""}
-                    />
-                  </th>
-                </Fragment>
-              ))}
-            </tr>
+            {showFilters ? (
+              <tr>
+                <th className="px-3 py-2">
+                  <input
+                    className={filterInputClassName}
+                    onChange={(event) => updateFilter("rank", event.target.value)}
+                    placeholder="<=5"
+                    type="text"
+                    value={filters.rank}
+                  />
+                </th>
+                <th className="px-3 py-2">
+                  <input
+                    className={filterInputClassName}
+                    data-testid="picks-filter-team"
+                    onChange={(event) => updateFilter("teamName", event.target.value)}
+                    placeholder="Team contains..."
+                    type="text"
+                    value={filters.teamName}
+                  />
+                </th>
+                <th className="px-3 py-2">
+                  <input
+                    className={filterInputClassName}
+                    onChange={(event) => updateFilter("totalPoints", event.target.value)}
+                    placeholder=">=200"
+                    type="text"
+                    value={filters.totalPoints}
+                  />
+                </th>
+                <th className="px-3 py-2">
+                  <input
+                    className={filterInputClassName}
+                    onChange={(event) => updateFilter("averageSpeed", event.target.value)}
+                    placeholder="175-180"
+                    type="text"
+                    value={filters.averageSpeed}
+                  />
+                </th>
+                {groupNumbers.map((groupNumber) => (
+                  <Fragment key={`group-filters-${groupNumber}`}>
+                    <th className="px-3 py-2">
+                      <input
+                        className={filterInputClassName}
+                        onChange={(event) =>
+                          updateFilter(`driver${groupNumber}` as SortKey, event.target.value)
+                        }
+                        placeholder="Driver..."
+                        type="text"
+                        value={filters[`driver${groupNumber}`] ?? ""}
+                      />
+                    </th>
+                    <th className="px-3 py-2">
+                      <input
+                        className={filterInputClassName}
+                        onChange={(event) =>
+                          updateFilter(`score${groupNumber}` as SortKey, event.target.value)
+                        }
+                        placeholder=">=30"
+                        type="text"
+                        value={filters[`score${groupNumber}`] ?? ""}
+                      />
+                    </th>
+                  </Fragment>
+                ))}
+              </tr>
+            ) : null}
           </thead>
           <tbody>
             {filteredAndSortedRows.length === 0 ? (
