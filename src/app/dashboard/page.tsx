@@ -4,6 +4,7 @@ import { AuthenticatedPageShell } from "@/components/authenticated-page-shell";
 import { MobileBottomNav } from "@/components/mobile-bottom-nav";
 import { SignOutButton } from "@/components/sign-out-button";
 import { MOUND_HOUND_IMAGE_PATH } from "@/lib/branding";
+import { getPreviousRaceResultsGate } from "@/lib/pickem-results-gate";
 import { isProfileComplete, type ProfileRow } from "@/lib/profile";
 import { queryStringParam } from "@/lib/query";
 import { pickLockAtForRace, type RacePickFormat } from "@/lib/race-format";
@@ -22,7 +23,6 @@ type DashboardRaceRow = {
   race_name: string;
 };
 
-const DASHBOARD_RACE_BUFFER_MS = 24 * 60 * 60 * 1000;
 const DASHBOARD_RACE_SELECT_FIELDS = "id,race_name,pick_format,qualifying_start_at,race_date";
 
 export default async function DashboardPage({ searchParams }: PageProps) {
@@ -50,27 +50,10 @@ export default async function DashboardPage({ searchParams }: PageProps) {
 
   const now = new Date();
   const nowIso = now.toISOString();
-  const raceBufferStartIso = new Date(now.getTime() - DASHBOARD_RACE_BUFFER_MS).toISOString();
   const seasonRange = getLeagueSeasonDateRange();
   let currentRace: DashboardRaceRow | null = null;
 
   {
-    const { data } = await supabase
-      .from("races")
-      .select(DASHBOARD_RACE_SELECT_FIELDS)
-      .eq("is_archived", false)
-      .gte("race_date", seasonRange.seasonStartIso)
-      .lt("race_date", seasonRange.seasonEndExclusiveIso)
-      .lte("race_date", nowIso)
-      .gt("race_date", raceBufferStartIso)
-      .order("race_date", { ascending: false })
-      .limit(1)
-      .maybeSingle<DashboardRaceRow>();
-
-    currentRace = data ?? null;
-  }
-
-  if (!currentRace) {
     const { data } = await supabase
       .from("races")
       .select(DASHBOARD_RACE_SELECT_FIELDS)
@@ -108,6 +91,11 @@ export default async function DashboardPage({ searchParams }: PageProps) {
     : { data: null };
   const pickLockAt = currentRace ? pickLockAtForRace(currentRace) : null;
   const picksLocked = pickLockAt ? Date.parse(pickLockAt) <= now.getTime() : false;
+  const previousResultsGate = currentRace
+    ? await getPreviousRaceResultsGate(supabase, currentRace, seasonRange)
+    : null;
+  const blockedPreviousResultsGate =
+    previousResultsGate?.status === "blocked" ? previousResultsGate : null;
   const raceAction = !currentRace
     ? {
         body: `No active race is scheduled yet for the ${seasonRange.seasonYear} season.`,
@@ -116,6 +104,14 @@ export default async function DashboardPage({ searchParams }: PageProps) {
         status: "Waiting",
         title: "Race week will appear here"
       }
+    : blockedPreviousResultsGate
+      ? {
+          body: `${blockedPreviousResultsGate.previousRace.raceName} results need to be uploaded before ${currentRace.race_name} picks open. This keeps driver standings and groups current.`,
+          href: profile.role === "admin" ? "/admin?tab=results" : "/leaderboard",
+          label: profile.role === "admin" ? "Upload Results" : "View Leaderboard",
+          status: "Results Needed",
+          title: "Waiting on Results"
+        }
     : picksLocked
       ? {
           body: currentPick
@@ -128,12 +124,12 @@ export default async function DashboardPage({ searchParams }: PageProps) {
         }
       : {
           body: currentPick
-            ? `${currentRace.race_name} is open. You can review or adjust before lock.`
+            ? `No action needed. Your picks are already in for ${currentRace.race_name}.`
             : `${currentRace.race_name} is open. Submit your picks before lock.`,
           href: "/picks",
-          label: currentPick ? "Review picks" : "Make picks",
-          status: currentPick ? "Saved" : "Open",
-          title: currentPick ? "Your next action is review" : "Your next action is pick"
+          label: currentPick ? "Review Picks" : "Make Picks",
+          status: currentPick ? "Picks Saved" : "Form Open",
+          title: currentPick ? "Picks Are In" : "Make Your Picks"
         };
 
   return (
