@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
+import { getPreviousRaceResultsGate } from "@/lib/pickem-results-gate";
 import { isProfileComplete, type ProfileRow } from "@/lib/profile";
 import {
   groupNumbersForCount,
@@ -69,14 +70,14 @@ export async function saveWeeklyPickAction(formData: FormData) {
 
   let { data: race, error: raceError } = await supabase
     .from("races")
-    .select("id,race_date,qualifying_start_at,is_archived,pick_format")
+    .select("id,race_name,race_date,qualifying_start_at,is_archived,pick_format")
     .eq("id", raceIdValue)
     .maybeSingle();
 
   if (raceError && isMissingColumnError(raceError, "pick_format")) {
     const legacyRaceResponse = await supabase
       .from("races")
-      .select("id,race_date,qualifying_start_at,is_archived")
+      .select("id,race_name,race_date,qualifying_start_at,is_archived")
       .eq("id", raceIdValue)
       .maybeSingle();
 
@@ -95,6 +96,14 @@ export async function saveWeeklyPickAction(formData: FormData) {
   const raceIsArchived = (race as { is_archived: boolean }).is_archived;
   if (raceIsArchived) {
     picksErrorRedirect("This race has been archived and no longer accepts picks.");
+  }
+
+  const previousResultsGate = await getPreviousRaceResultsGate(
+    supabase,
+    race as { id: number; pick_format?: string | null; race_date: string; race_name: string }
+  );
+  if (previousResultsGate.status === "blocked") {
+    picksErrorRedirect(previousResultsGate.message);
   }
 
   const pickFormat = normalizeRacePickFormat((race as { pick_format?: string | null }).pick_format);

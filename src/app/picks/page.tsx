@@ -7,6 +7,7 @@ import { PickSubmissionSnapshot } from "@/components/pick-submission-snapshot";
 import { SignOutButton } from "@/components/sign-out-button";
 import { saveWeeklyPickAction } from "@/app/picks/actions";
 import { PickemForm } from "@/components/pickem-form";
+import { getPreviousRaceResultsGate } from "@/lib/pickem-results-gate";
 import { isProfileComplete, type ProfileRow } from "@/lib/profile";
 import { queryStringParam } from "@/lib/query";
 import {
@@ -68,7 +69,6 @@ type PageProps = {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 };
 
-const PICKEM_RACE_BUFFER_MS = 24 * 60 * 60 * 1000;
 const PICKEM_RACE_SELECT_FIELDS = "id,race_name,title_image_url,qualifying_start_at,race_date,payout";
 
 const formatRaceDate = (value: string): string =>
@@ -109,44 +109,10 @@ export default async function PicksPage({ searchParams }: PageProps) {
 
   const now = new Date();
   const nowIso = now.toISOString();
-  const raceBufferStartIso = new Date(now.getTime() - PICKEM_RACE_BUFFER_MS).toISOString();
   const seasonRange = getLeagueSeasonDateRange();
 
   let upcomingRace: RaceRow | null = null;
   {
-    // Pick'em race selection priority:
-    // 1) Most recently started race in the last 24h (buffer window).
-    // 2) Next upcoming race after that buffer expires.
-    const { data: seasonRecentRace } = await supabase
-      .from("races")
-      .select(PICKEM_RACE_SELECT_FIELDS)
-      .eq("is_archived", false)
-      .gte("race_date", seasonRange.seasonStartIso)
-      .lt("race_date", seasonRange.seasonEndExclusiveIso)
-      .lte("race_date", nowIso)
-      .gt("race_date", raceBufferStartIso)
-      .order("race_date", { ascending: false })
-      .limit(1)
-      .maybeSingle<RaceRow>();
-
-    upcomingRace = seasonRecentRace ?? null;
-  }
-
-  if (!upcomingRace) {
-    const { data: fallbackRecentRace } = await supabase
-      .from("races")
-      .select(PICKEM_RACE_SELECT_FIELDS)
-      .eq("is_archived", false)
-      .lte("race_date", nowIso)
-      .gt("race_date", raceBufferStartIso)
-      .order("race_date", { ascending: false })
-      .limit(1)
-      .maybeSingle<RaceRow>();
-
-    upcomingRace = fallbackRecentRace ?? null;
-  }
-
-  if (!upcomingRace) {
     const { data: seasonUpcomingRace } = await supabase
       .from("races")
       .select(PICKEM_RACE_SELECT_FIELDS)
@@ -211,28 +177,33 @@ export default async function PicksPage({ searchParams }: PageProps) {
   const pickLockAt = pickLockAtForRace(upcomingRace);
   const isIndy500Pickem = racePickFormat === "indy_500";
 
-  const [driversResponse, existingPickResponse, raceDriverGroupsResponse] = await Promise.all([
-    supabase
-      .from("drivers")
-      .select("id,driver_name,image_url,championship_points,current_standing,group_number,is_active")
-      .eq("is_active", true)
-      .order("group_number", { ascending: true })
-      .order("current_standing", { ascending: true }),
-    supabase
-      .from("picks")
-      .select(
-        "id,driver_group1_id,driver_group2_id,driver_group3_id,driver_group4_id,driver_group5_id,driver_group6_id,driver_group7_id,driver_group8_id,average_speed,updated_at"
-      )
-      .eq("race_id", upcomingRace.id)
-      .eq("user_id", user.id)
-      .maybeSingle<PickRow>(),
-    supabase
-      .from("race_driver_groups")
-      .select("race_id,driver_id,group_number,qualifying_position")
-      .eq("race_id", upcomingRace.id)
-      .order("group_number", { ascending: true })
-      .order("qualifying_position", { ascending: true })
-  ]);
+  const [previousResultsGate, driversResponse, existingPickResponse, raceDriverGroupsResponse] =
+    await Promise.all([
+      getPreviousRaceResultsGate(supabase, upcomingRace, seasonRange),
+      supabase
+        .from("drivers")
+        .select("id,driver_name,image_url,championship_points,current_standing,group_number,is_active")
+        .eq("is_active", true)
+        .order("group_number", { ascending: true })
+        .order("current_standing", { ascending: true }),
+      supabase
+        .from("picks")
+        .select(
+          "id,driver_group1_id,driver_group2_id,driver_group3_id,driver_group4_id,driver_group5_id,driver_group6_id,driver_group7_id,driver_group8_id,average_speed,updated_at"
+        )
+        .eq("race_id", upcomingRace.id)
+        .eq("user_id", user.id)
+        .maybeSingle<PickRow>(),
+      supabase
+        .from("race_driver_groups")
+        .select("race_id,driver_id,group_number,qualifying_position")
+        .eq("race_id", upcomingRace.id)
+        .order("group_number", { ascending: true })
+        .order("qualifying_position", { ascending: true })
+    ]);
+  const blockedPreviousResultsGate =
+    previousResultsGate.status === "blocked" ? previousResultsGate : null;
+  const previousResultsBlocked = Boolean(blockedPreviousResultsGate);
 
   let existingPick = existingPickResponse.data ?? null;
   if (
@@ -325,7 +296,7 @@ export default async function PicksPage({ searchParams }: PageProps) {
   const missingGroups = groupNumbers.filter(
     (groupNumber) => (driversByGroup.get(groupNumber) ?? []).length === 0
   );
-  const canSubmit = missingGroups.length === 0 && !picksLocked;
+  const canSubmit = missingGroups.length === 0 && !picksLocked && !previousResultsBlocked;
   const pickGroups = groupNumbers.map((groupNumber) => ({
     drivers: (driversByGroup.get(groupNumber) ?? []).map((driver) => ({
       championshipPoints: driver.championship_points,
@@ -347,6 +318,16 @@ export default async function PicksPage({ searchParams }: PageProps) {
         ? "Pick 1 of 4"
         : "Pick 1"
   }));
+  const raceStatusLabel = previousResultsBlocked
+    ? "Waiting on Results"
+    : picksLocked
+      ? "Locked"
+      : "Open";
+  const raceStatusClass = previousResultsBlocked
+    ? "border-cyan-300/60 bg-cyan-300/15 text-cyan-100"
+    : picksLocked
+      ? "border-amber-300/60 bg-amber-300/15 text-amber-100"
+      : "border-emerald-300/60 bg-emerald-300/15 text-emerald-100";
 
   return (
     <AuthenticatedPageShell
@@ -395,13 +376,9 @@ export default async function PicksPage({ searchParams }: PageProps) {
               <h2 className="mt-2 text-3xl font-semibold tracking-tight">{upcomingRace.race_name}</h2>
             </div>
             <span
-              className={`rounded-full border px-3 py-1 text-xs font-semibold uppercase tracking-wide ${
-                picksLocked
-                  ? "border-amber-300/60 bg-amber-300/15 text-amber-100"
-                  : "border-emerald-300/60 bg-emerald-300/15 text-emerald-100"
-              }`}
+              className={`rounded-full border px-3 py-1 text-xs font-semibold uppercase tracking-wide ${raceStatusClass}`}
             >
-              Status: {picksLocked ? "Locked" : "Open"}
+              Status: {raceStatusLabel}
             </span>
           </div>
           <div className="mt-5 grid gap-3 text-sm md:grid-cols-2 lg:grid-cols-4">
@@ -442,13 +419,41 @@ export default async function PicksPage({ searchParams }: PageProps) {
         </p>
       ) : null}
 
-      <PickSubmissionSnapshot
-        latestSavedAt={existingPick?.updated_at ?? null}
-        savedAverageSpeed={existingPick ? String(existingPick.average_speed) : null}
-        savedPicks={savedPickSummary}
-      />
+      {!previousResultsBlocked ? (
+        <PickSubmissionSnapshot
+          latestSavedAt={existingPick?.updated_at ?? null}
+          savedAverageSpeed={existingPick ? String(existingPick.average_speed) : null}
+          savedPicks={savedPickSummary}
+        />
+      ) : null}
 
-      {missingGroups.length > 0 ? (
+      {blockedPreviousResultsGate ? (
+        <section className="mt-6 rounded-2xl border border-cyan-200 bg-cyan-50 p-4 text-sm text-cyan-950">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h3 className="font-semibold text-cyan-950">Form paused until results are posted</h3>
+              <p className="mt-1 text-cyan-900">{blockedPreviousResultsGate.message}</p>
+            </div>
+            {profile.role === "admin" ? (
+              <Link
+                className="rounded-lg bg-slate-900 px-3 py-2 text-sm font-semibold text-white hover:bg-slate-700"
+                href="/admin?tab=results"
+              >
+                Upload Results
+              </Link>
+            ) : (
+              <Link
+                className="rounded-lg border border-cyan-300 bg-white px-3 py-2 text-sm font-semibold text-cyan-950 hover:bg-cyan-100"
+                href="/leaderboard"
+              >
+                View Leaderboard
+              </Link>
+            )}
+          </div>
+        </section>
+      ) : null}
+
+      {!previousResultsBlocked && missingGroups.length > 0 ? (
         <p className="mt-6 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
           {isIndy500Pickem
             ? "Picks are unavailable until admin imports the Indianapolis 500 qualifying order with all 33 drivers."
@@ -458,15 +463,17 @@ export default async function PicksPage({ searchParams }: PageProps) {
             : null}
         </p>
       ) : null}
-      <PickemForm
-        action={saveWeeklyPickAction}
-        canSubmit={canSubmit}
-        existingAverageSpeed={existingPick ? String(existingPick.average_speed) : ""}
-        groups={pickGroups}
-        picksLocked={picksLocked}
-        raceId={upcomingRace.id}
-        savedSelection={selectedMap}
-      />
+      {!previousResultsBlocked ? (
+        <PickemForm
+          action={saveWeeklyPickAction}
+          canSubmit={canSubmit}
+          existingAverageSpeed={existingPick ? String(existingPick.average_speed) : ""}
+          groups={pickGroups}
+          picksLocked={picksLocked}
+          raceId={upcomingRace.id}
+          savedSelection={selectedMap}
+        />
+      ) : null}
 
       <MobileBottomNav />
     </AuthenticatedPageShell>
