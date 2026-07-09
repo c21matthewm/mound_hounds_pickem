@@ -9,6 +9,7 @@ import {
   importChampionshipStandingsAction,
   importIndy500QualifyingOrderAction,
   importIndycarResultsAction,
+  publishSavedRaceResultsAction,
   setRaceArchivedAction,
   setRaceWinnerAction,
   updateRaceAction,
@@ -28,6 +29,7 @@ import {
   type RacePickFormat
 } from "@/lib/race-format";
 import { isMissingColumnError } from "@/lib/supabase/schema-compat";
+import { loadAllRows } from "@/lib/supabase/paginated-query";
 import {
   formatLeagueDateTime,
   formatLeagueDateTimeLocalInput,
@@ -55,6 +57,8 @@ type RaceRow = {
   qualifying_start_at: string;
   race_date: string;
   race_name: string;
+  results_published_at: string | null;
+  results_status: "draft" | "published";
   title_image_url: string | null;
   winner_auto_eligible_at: string | null;
   winner_is_manual_override: boolean;
@@ -140,6 +144,7 @@ type ScoringAudit = {
   raceId: number;
   raceName: string;
   resultCount: number;
+  resultsStatus: "draft" | "published";
   rows: ScoringAuditRow[];
   submittedPickCount: number;
   winnerTeamName: string | null;
@@ -179,9 +184,9 @@ const formatOptionalDecimal = (value: number | null, digits = 3): string =>
 
 const loadAdminRaces = async (supabase: SupabaseClient) => {
   const fields =
-    "id,race_name,pick_format,title_image_url,qualifying_start_at,race_date,payout,official_winning_average_speed,is_archived,archived_at,winner_profile_id,winner_source,winner_is_manual_override,winner_auto_eligible_at,winner_set_at";
+    "id,race_name,pick_format,title_image_url,qualifying_start_at,race_date,payout,official_winning_average_speed,results_status,results_published_at,is_archived,archived_at,winner_profile_id,winner_source,winner_is_manual_override,winner_auto_eligible_at,winner_set_at";
   const legacyFields =
-    "id,race_name,title_image_url,qualifying_start_at,race_date,payout,official_winning_average_speed,is_archived,archived_at,winner_profile_id,winner_source,winner_is_manual_override,winner_auto_eligible_at,winner_set_at";
+    "id,race_name,title_image_url,qualifying_start_at,race_date,payout,official_winning_average_speed,results_status,results_published_at,is_archived,archived_at,winner_profile_id,winner_source,winner_is_manual_override,winner_auto_eligible_at,winner_set_at";
 
   const response = await supabase.from("races").select(fields).order("race_date", { ascending: false });
   if (!response.error || !isMissingColumnError(response.error, "pick_format")) {
@@ -202,51 +207,41 @@ const loadAdminRaces = async (supabase: SupabaseClient) => {
   };
 };
 
-const loadRaceDriverGroups = async (supabase: SupabaseClient) => {
-  const response = await supabase
-    .from("race_driver_groups")
-    .select("race_id,driver_id,group_number,qualifying_position");
-  if (!response.error || !isMissingColumnError(response.error, "qualifying_position")) {
-    return response;
+const paginatedAdminLoad = async <T,>(
+  label: string,
+  loadPage: Parameters<typeof loadAllRows<T>>[1]
+): Promise<{ data: T[] | null; error: { message: string } | null }> => {
+  try {
+    return { data: await loadAllRows<T>(label, loadPage), error: null };
+  } catch (error) {
+    return {
+      data: null,
+      error: { message: error instanceof Error ? error.message : `Failed to load ${label}.` }
+    };
   }
-
-  const legacyResponse = await supabase.from("race_driver_groups").select("race_id,driver_id,group_number");
-
-  return {
-    ...legacyResponse,
-    data: (legacyResponse.data ?? []).map((row) => ({
-      ...row,
-      qualifying_position: null
-    }))
-  };
 };
 
-const loadAdminPicks = async (supabase: SupabaseClient) => {
-  const response = await supabase.from("picks").select(
-    "user_id,race_id,average_speed,driver_group1_id,driver_group2_id,driver_group3_id,driver_group4_id,driver_group5_id,driver_group6_id,driver_group7_id,driver_group8_id"
+const loadRaceDriverGroups = async (supabase: SupabaseClient) =>
+  paginatedAdminLoad<RaceDriverGroupRow>("race driver groups", (from, to) =>
+    supabase
+      .from("race_driver_groups")
+      .select("race_id,driver_id,group_number,qualifying_position")
+      .order("race_id", { ascending: true })
+      .order("driver_id", { ascending: true })
+      .range(from, to)
   );
 
-  if (
-    !response.error ||
-    (!isMissingColumnError(response.error, "driver_group7_id") &&
-      !isMissingColumnError(response.error, "driver_group8_id"))
-  ) {
-    return response;
-  }
-
-  const legacyResponse = await supabase.from("picks").select(
-    "user_id,race_id,average_speed,driver_group1_id,driver_group2_id,driver_group3_id,driver_group4_id,driver_group5_id,driver_group6_id"
+const loadAdminPicks = async (supabase: SupabaseClient) =>
+  paginatedAdminLoad<PickSummaryRow>("admin picks", (from, to) =>
+    supabase
+      .from("picks")
+      .select(
+        "user_id,race_id,average_speed,driver_group1_id,driver_group2_id,driver_group3_id,driver_group4_id,driver_group5_id,driver_group6_id,driver_group7_id,driver_group8_id"
+      )
+      .order("race_id", { ascending: true })
+      .order("user_id", { ascending: true })
+      .range(from, to)
   );
-
-  return {
-    ...legacyResponse,
-    data: (legacyResponse.data ?? []).map((pick) => ({
-      ...pick,
-      driver_group7_id: null,
-      driver_group8_id: null
-    }))
-  };
-};
 
 const keyForRaceDriver = (raceId: number, driverId: number): string => `${raceId}:${driverId}`;
 const keyForRaceUser = (raceId: number, userId: string): string => `${raceId}:${userId}`;
@@ -450,6 +445,7 @@ const buildScoringAudits = ({
           raceId: race.id,
           raceName: race.race_name,
           resultCount: raceResults.length,
+          resultsStatus: race.results_status,
           rows: rankedRows.map((row) => ({
             averageSpeed: row.averageSpeed,
             driverCells: row.driverCells,
@@ -490,20 +486,28 @@ export default async function AdminPage({ searchParams }: PageProps) {
       .select("id,driver_name,image_url,current_standing,group_number,is_active,championship_points")
       .order("current_standing", { ascending: true }),
     loadAdminRaces(supabase),
-    supabase
-      .from("results")
-      .select("id,race_id,driver_id,points")
-      .order("race_id", { ascending: false })
-      .order("points", { ascending: false }),
+    paginatedAdminLoad<ResultRow>("admin race results", (from, to) =>
+      supabase
+        .from("results")
+        .select("id,race_id,driver_id,points")
+        .order("race_id", { ascending: false })
+        .order("points", { ascending: false })
+        .order("id", { ascending: true })
+        .range(from, to)
+    ),
     supabase
       .from("profiles")
       .select("id,team_name,role")
       .in("role", ["participant", "admin"])
       .order("team_name", { ascending: true }),
-    supabase
-      .from("feedback_items")
-      .select("id,user_id,feedback_type,category,details,created_at")
-      .order("created_at", { ascending: false }),
+    paginatedAdminLoad<FeedbackItemRow>("participant feedback", (from, to) =>
+      supabase
+        .from("feedback_items")
+        .select("id,user_id,feedback_type,category,details,created_at")
+        .order("created_at", { ascending: false })
+        .order("id", { ascending: false })
+        .range(from, to)
+    ),
     loadAdminPicks(supabase),
     loadRaceDriverGroups(supabase)
   ]);
@@ -1057,6 +1061,15 @@ export default async function AdminPage({ searchParams }: PageProps) {
                           Active
                         </span>
                       )}
+                      <span
+                        className={`rounded-full border px-2 py-0.5 text-xs font-semibold ${
+                          race.results_status === "published"
+                            ? "border-emerald-300 bg-emerald-50 text-emerald-800"
+                            : "border-amber-300 bg-amber-50 text-amber-800"
+                        }`}
+                      >
+                        Results {race.results_status === "published" ? "Published" : "Draft"}
+                      </span>
                     </div>
                   </div>
                 </summary>
@@ -1318,7 +1331,8 @@ export default async function AdminPage({ searchParams }: PageProps) {
           drivers={drivers.map((driver) => ({
             driverName: driver.driver_name,
             groupNumber: driver.group_number,
-            id: driver.id
+            id: driver.id,
+            isActive: driver.is_active
           }))}
           participants={winnerProfiles.map((winnerProfile) => ({
             id: winnerProfile.id,
@@ -1363,9 +1377,18 @@ export default async function AdminPage({ searchParams }: PageProps) {
                         <span className="font-normal text-slate-500">
                           ({normalizeRacePickFormat(audit.pickFormat) === "indy_500" ? "Indy 500" : "Standard"})
                         </span>
+                        <span
+                          className={`ml-2 rounded-full border px-2 py-0.5 text-[11px] font-semibold uppercase ${
+                            audit.resultsStatus === "published"
+                              ? "border-emerald-300 bg-emerald-50 text-emerald-800"
+                              : "border-amber-300 bg-amber-50 text-amber-800"
+                          }`}
+                        >
+                          {audit.resultsStatus}
+                        </span>
                       </span>
                       <span className="text-xs font-medium text-slate-600">
-                        Winner: {audit.winnerTeamName ?? "-"}
+                        {audit.resultsStatus === "published" ? "Winner" : "Projected leader"}: {audit.winnerTeamName ?? "-"}
                       </span>
                     </span>
                   </summary>
@@ -1529,9 +1552,59 @@ export default async function AdminPage({ searchParams }: PageProps) {
                 data-testid="admin-results-manual-submit"
                 type="submit"
               >
-                Save result
+                Save draft result
               </button>
             </div>
+          </form>
+
+          <form
+            action={publishSavedRaceResultsAction}
+            className="grid gap-3 border-t border-slate-200 bg-emerald-50/50 p-4 md:grid-cols-3"
+          >
+            <input name="tab" type="hidden" value="results" />
+            <label className="block">
+              <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-600">
+                Complete draft race
+              </span>
+              <select
+                required
+                className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+                name="race_id"
+              >
+                <option value="">Select race</option>
+                {activeRaces.map((race) => (
+                  <option key={`publish-draft-${race.id}`} value={String(race.id)}>
+                    {race.race_name}
+                    {race.results_status === "published" ? " (published correction)" : " (draft)"}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="block">
+              <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-600">
+                Official winning average speed
+              </span>
+              <input
+                required
+                className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+                min={0.001}
+                name="official_winning_average_speed"
+                step={0.001}
+                type="number"
+              />
+            </label>
+            <div className="flex items-end">
+              <button
+                className="w-full rounded-md bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-700"
+                type="submit"
+              >
+                Publish complete draft
+              </button>
+            </div>
+            <p className="text-xs text-slate-600 md:col-span-3">
+              Manual publication requires one saved row per snapshotted driver; enter 0 for
+              nonstarters. Bulk import adds those zero rows automatically.
+            </p>
           </form>
         </details>
 

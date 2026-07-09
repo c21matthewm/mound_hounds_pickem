@@ -1,8 +1,20 @@
 import "server-only";
 
+import { timingSafeEqual } from "node:crypto";
+
 export type CronAuthCheckResult =
   | { ok: true }
   | { ok: false; reason: "invalid_auth" | "missing_auth" | "missing_cron_secret" };
+
+const secretsMatch = (candidate: string, expected: string): boolean => {
+  const candidateBuffer = Buffer.from(candidate);
+  const expectedBuffer = Buffer.from(expected);
+
+  return (
+    candidateBuffer.length === expectedBuffer.length &&
+    timingSafeEqual(candidateBuffer, expectedBuffer)
+  );
+};
 
 export const checkCronAuthorization = (request: Request): CronAuthCheckResult => {
   const expectedSecret = process.env.CRON_SECRET;
@@ -24,11 +36,14 @@ export const checkCronAuthorization = (request: Request): CronAuthCheckResult =>
     return { ok: false, reason: "missing_auth" };
   }
 
-  if (directSecretHeader && directSecretHeader === expected) {
+  if (directSecretHeader && secretsMatch(directSecretHeader, expected)) {
     return { ok: true };
   }
 
-  if (bearerAuthHeader === `Bearer ${expected}`) {
+  if (
+    bearerAuthHeader?.startsWith("Bearer ") &&
+    secretsMatch(bearerAuthHeader.slice("Bearer ".length), expected)
+  ) {
     return { ok: true };
   }
 

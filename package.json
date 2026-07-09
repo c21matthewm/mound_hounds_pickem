@@ -2,35 +2,45 @@
   "name": "mound_hounds_pickem",
   "version": "0.1.0",
   "private": true,
+  "engines": {
+    "node": ">=22.0.0"
+  },
   "scripts": {
+    "audit:prod": "npm audit --omit=dev --audit-level=moderate",
     "build": "next build",
     "cleanup:playwright-artifacts": "node scripts/cleanup-playwright-artifacts.mjs",
     "dev": "next dev",
     "e2e": "playwright test",
-    "e2e:smoke": "playwright test tests/e2e/public-auth.spec.ts",
+    "e2e:smoke": "PW_READ_ONLY=1 playwright test tests/e2e/production-readonly.spec.ts",
     "lint": "eslint .",
     "start": "next start",
     "typecheck": "tsc --noEmit",
     "verify": "npm run lint && npm run typecheck && npm run build"
   },
   "dependencies": {
-    "@supabase/ssr": "latest",
-    "@supabase/supabase-js": "latest",
-    "next": "latest",
-    "react": "latest",
-    "react-dom": "latest"
+    "@supabase/ssr": "0.12.0",
+    "@supabase/supabase-js": "2.110.2",
+    "next": "16.2.10",
+    "react": "19.2.7",
+    "react-dom": "19.2.7"
   },
   "devDependencies": {
-    "@playwright/test": "^1.58.2",
-    "@tailwindcss/postcss": "latest",
-    "@types/node": "latest",
-    "@types/react": "latest",
-    "@types/react-dom": "latest",
-    "eslint": "latest",
-    "eslint-config-next": "latest",
-    "playwright": "^1.58.2",
-    "postcss": "latest",
-    "tailwindcss": "latest",
-    "typescript": "latest"
+    "@playwright/test": "1.58.2",
+    "@tailwindcss/postcss": "4.3.2",
+    "@types/node": "22.20.1",
+    "@types/react": "19.2.14",
+    "@types/react-dom": "19.2.3",
+    "eslint": "9.39.3",
+    "eslint-config-next": "16.2.10",
+    "playwright": "1.58.2",
+    "postcss": "8.5.16",
+    "tailwindcss": "4.3.2",
+    "typescript": "5.9.3"
+  },
+  "overrides": {
+    "minimatch@3.1.5": {
+      "brace-expansion": "1.1.13"
+    },
+    "postcss": "8.5.16"
   }
 }

@@ -2,6 +2,7 @@ import "server-only";
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { pickLockAtForRace } from "@/lib/race-format";
+import { getPreviousRaceResultsGate } from "@/lib/pickem-results-gate";
 import { createServiceRoleSupabaseClient } from "@/lib/supabase/service-role";
 import { isMissingColumnError } from "@/lib/supabase/schema-compat";
 import { formatLeagueDateTime, LEAGUE_TIME_ZONE } from "@/lib/timezone";
@@ -53,6 +54,7 @@ type PickReminderSummary = {
   raceName: string | null;
   reason:
     | "no_upcoming_race"
+    | "waiting_previous_results"
     | "no_window_due"
     | "no_missing_participants"
     | "reminders_sent";
@@ -377,6 +379,23 @@ export async function sendDuePickReminders(): Promise<PickReminderSummary> {
       raceId: null,
       raceName: null,
       reason: "no_upcoming_race",
+      reminderType: null,
+      smsSent: 0,
+      smsSkippedAlreadySent: 0,
+      smsSkippedNoGatewayAddress: 0
+    };
+  }
+
+  const previousResultsGate = await getPreviousRaceResultsGate(supabase, upcomingRace);
+  if (previousResultsGate.status === "blocked") {
+    return {
+      emailSent: 0,
+      emailSkippedAlreadySent: 0,
+      emailSkippedNoAddress: 0,
+      pendingParticipants: 0,
+      raceId: upcomingRace.id,
+      raceName: upcomingRace.race_name,
+      reason: "waiting_previous_results",
       reminderType: null,
       smsSent: 0,
       smsSkippedAlreadySent: 0,

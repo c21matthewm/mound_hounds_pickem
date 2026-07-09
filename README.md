@@ -32,8 +32,9 @@ season standings, league rules, feedback, and admin operations.
 Use Node from `.nvmrc`:
 
 ```bash
+nvm install 22
 nvm use
-npm install
+npm ci
 cp .env.local.example .env.local
 ```
 
@@ -83,20 +84,20 @@ Run Playwright smoke tests:
 npm run e2e:smoke
 ```
 
-Run the full Playwright suite:
+The smoke suite is read-only and is safe to point at a deployed app.
+
+Run the mutating suite only against a dedicated/local Supabase project:
 
 ```bash
-npm run e2e
+export E2E_SUPABASE_URL=YOUR_TEST_PROJECT_URL
+export E2E_SUPABASE_ANON_KEY=YOUR_TEST_PROJECT_ANON_KEY
+export E2E_SUPABASE_SERVICE_ROLE_KEY=YOUR_TEST_PROJECT_SERVICE_ROLE_KEY
+PW_ALLOW_SUPABASE_E2E=1 npm run e2e
 ```
 
-If you already have a local dev server running on `localhost:3000`, point Playwright at it:
-
-```bash
-PW_USE_EXISTING_SERVER=1 PW_BASE_URL=http://127.0.0.1:3000 npm run e2e
-```
-
-The full e2e flow creates temporary Supabase data and cleans it up after the run. It also restores
-driver standings/points that it changes during the test.
+Mutating tests refuse the normal `.env.local` database credentials and refuse an E2E URL matching
+the normal app URL. The full flow creates users, drivers, races, picks, and results in the isolated
+project, then cleans them up and recomputes published driver standings.
 
 ## Supabase Setup
 
@@ -120,6 +121,15 @@ The latest Indy 500 pick-format migration is:
 supabase/migrations/20260528_add_indy_500_pick_format.sql
 ```
 
+The production hardening and atomic result-publication migration is:
+
+```text
+supabase/migrations/20260709_harden_roles_and_result_publication.sql
+```
+
+Apply that migration before deploying code that uses draft/published results. See
+`HARDENING_DEPLOY.md` for the rollout checklist.
+
 After creating your first user account, promote it to admin in Supabase SQL Editor:
 
 ```sql
@@ -137,9 +147,11 @@ where p.id = u.id
 3. For the Indianapolis 500, mark the race with Indy 500 pick rules and import its 33-car
    qualifying order.
 4. Participants submit picks before the race-specific pick deadline.
-5. After a race, import INDYCAR results or enter driver points manually.
-6. Results save official points, snapshot race groups if needed, refresh driver championship
-   standings, refresh driver groups for the next race, and schedule fantasy winner calculation.
+5. After a race, use bulk import to preview and atomically publish the official finishing order, or
+   save individual manual rows as drafts. Pickable standard drivers omitted from the official order
+   are saved automatically as zero-point nonstarters.
+6. Draft rows stay hidden and do not affect standings. Publish a complete draft with the official
+   winning average speed to refresh championship standings/groups and schedule winner calculation.
 7. Use the leaderboard tabs to review standings, locked picks by race, and participant analytics.
 
 Example paste formats live in:

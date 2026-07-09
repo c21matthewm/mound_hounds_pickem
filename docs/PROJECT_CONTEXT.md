@@ -38,16 +38,16 @@ Mound Hounds Pick'em is a private INDYCAR fantasy league app. Participants submi
 - Authenticated users visiting `/login` or `/signup` are redirected to `/onboarding`.
 - `src/lib/profile.ts` defines a complete profile as having full name, team name, phone number, and phone carrier.
 - `src/lib/admin.ts` provides `requireAdmin()`, which redirects non-admins to the dashboard with an admin-required message.
-- Supabase RLS is enabled in `supabase/schema.sql`. Participants can read/update their own profile and picks; admins can write drivers, races, results, and feedback. `race_driver_groups` and `pick_reminders` are admin-readable.
+- Supabase RLS is enabled in `supabase/schema.sql`. Participants can update their own profile details but a database trigger prevents role changes. Draft results are admin-only; participants can read published results. Admins can write drivers, races, results, and feedback.
 
 ## Data Model
 
 The consolidated database definition is `supabase/schema.sql`; migrations for existing projects are in `supabase/migrations/`.
-`src/lib/supabase/schema-compat.ts` contains temporary missing-column fallbacks so an unmigrated Supabase database still loads standard race/admin/pick screens. Indy 500 features require `supabase/migrations/20260528_add_indy_500_pick_format.sql` to be applied.
+Indy 500 features require `supabase/migrations/20260528_add_indy_500_pick_format.sql`. Role protection and atomic draft/published results require `supabase/migrations/20260709_harden_roles_and_result_publication.sql`.
 
 - `profiles`: extends Supabase auth users with full name, unique team name, phone/carrier, and `admin` or `participant` role.
 - `drivers`: active/inactive INDYCAR drivers with image URL, championship points, current standing, and current group number.
-- `races`: race metadata, `pick_format` (`standard` or `indy_500`), qualifying start, race start, payout, optional title image, official winning average speed, fantasy winner fields, and archive status.
+- `races`: race metadata, `results_status` (`draft` or `published`), publication time, `pick_format` (`standard` or `indy_500`), qualifying/race start, payout, official speed, winner fields, and archive status.
 - `picks`: one row per user/race with average speed, six required standard driver IDs, and two nullable Indy-only driver IDs.
 - `results`: official driver points per race.
 - `race_driver_groups`: race-specific group snapshot used to keep scoring stable after standings/groups refresh; for Indy 500 it stores qualifying position and groups 1-8.
@@ -56,7 +56,8 @@ The consolidated database definition is `supabase/schema.sql`; migrations for ex
 
 Key database triggers:
 
-- `enforce_pick_deadline()` blocks insert/update after the race-specific pick deadline and blocks archived races. Standard lock is qualifying start; Indy 500 lock is race start.
+- `enforce_pick_deadline()` blocks insert/update after the race-specific deadline, for archived races, and while the previous race results remain unpublished.
+- `protect_profile_role()` prevents a participant from assigning or changing profile roles.
 - `validate_pick_groups()` ensures each selected driver is active, in the matching group, and distinct. Standard validates current driver groups 1-6; Indy validates race-specific qualifying groups 1-8.
 - `handle_new_user()` auto-creates a profile when a Supabase auth user is created.
 - `ensure_race_driver_groups_snapshot_from_results()` snapshots active standard driver groups before result rows are inserted or moved to a race. Indy 500 results require qualifying order to already exist.
@@ -72,7 +73,7 @@ Key database triggers:
 - Participants without picks for a completed race receive the lowest possible score for that race, calculated as the lowest scoring driver from each race-specific group.
 - Highest and lowest possible race benchmarks are shown for the latest completed race.
 - Weekly ordering is handled by `src/lib/weekly-ranking.ts`: highest points first; average-speed tiebreak applies only among first-place weekly ties; other ties fall back to team name and competition ranks where appropriate.
-- Season standings are cumulative across non-archived races that have results. Current rank changes compare latest and previous completed race standings.
+- Season standings are cumulative across non-archived races with published results. Draft rows never affect participant scoring or driver groups.
 
 ## Admin Workflow
 
@@ -80,9 +81,9 @@ Key database triggers:
 - Importing standings uses `src/lib/championship-standings.ts`, updates/creates drivers by normalized name, then refreshes standings/groups.
 - Races can be created/updated/deleted/archived with standard or Indy 500 pick rules, qualifying start, race start, payout, and optional title image upload.
 - The Race Results tab has an Indianapolis 500 qualifying-order importer that expects positions 1-33, maps drivers by normalized name, and writes `race_driver_groups.qualifying_position` plus derived groups.
-- Manual result entry and bulk INDYCAR result import both call `ensureRaceDriverGroupSnapshot()` before saving results.
-- Result import uses `src/lib/indycar-results.ts`, requires clean driver-name mapping, and stores official winning average speed for the weekly tiebreak. The client preview shows matched/unmatched drivers, winner average speed, highest/lowest possible scores, duplicate/ignored rows, and no-pick users affected.
-- After results save, admin actions refresh driver championship points from all results, refresh current standings/groups, revalidate app paths, and schedule race winner auto-calculation about 15 minutes later.
+- Manual entries save draft rows and temporarily remove a corrected race from published scoring. Draft publication requires every snapshotted driver plus official winning average speed.
+- Bulk import uses `publish_race_results()` to publish a unique, contiguous official finishing order atomically. Standard-race drivers in the pickable snapshot but absent from that order are stored as zero-point nonstarters; Indianapolis still requires all 33 drivers. The server validates field membership even if client preview is bypassed.
+- Publication refreshes championship points from published races only, updates groups, revalidates app paths, and schedules winner calculation about 15 minutes later.
 - Race winner can be manually overridden or auto-calculated with `src/lib/fantasy-winner.ts`.
 - Auto-calculation ranks the full participant/admin field using the same weekly scoring model shown on the leaderboard, including lowest-possible-score fallback rows for teams without submitted picks.
 - Admin feedback tab lists participant feedback and includes cleanup tooling for automated test artifacts.
@@ -107,16 +108,17 @@ Key database triggers:
 - League timezone is `America/Indiana/Indianapolis` in `src/lib/timezone.ts`.
 - Admin datetime-local inputs are interpreted in league time and stored as ISO timestamps.
 - Season filtering uses the league-local calendar year.
-- Pick page race selection prefers a recently started race within the last 24 hours, then the next upcoming race, first within the current league season and then as fallback across all races.
+- Pick page race selection uses the next upcoming race, first within the current league season and then as fallback across all races.
 
 ## Testing
 
 - Playwright config starts `npm run dev -- --port 3007` unless `PW_USE_EXISTING_SERVER=1` is set.
-- Smoke test: `tests/e2e/public-auth.spec.ts` covers public signup validation and account creation cleanup.
+- Read-only production smoke: `tests/e2e/production-readonly.spec.ts` checks public pages and protected redirects without creating data.
+- Mutating auth test: `tests/e2e/public-auth.spec.ts` covers signup validation and account creation cleanup on isolated Supabase only.
 - Full mutation flow: `tests/e2e/full-flow.spec.ts` seeds Supabase users/drivers/races, uploads a race banner, submits picks, verifies unsaved-change guard, locks picks, enters results, checks leaderboard filters/sorts/analytics, submits feedback, archives a race, and cleans up.
 - Indy 500 mutation flow: `tests/e2e/indy-500-flow.spec.ts` seeds a 33-driver qualifying field, creates an Indy 500 race, verifies picks are unavailable before qualifying import, imports qualifying order, submits 8 picks, checks race-start lock behavior, verifies the results publish preview, inserts race results, checks G7/G8 leaderboard display/scoring, and cleans up.
-- E2E tests require `NEXT_PUBLIC_SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY`, read from process env or `.env.local`.
-- The full flow intentionally restores driver standings/points it changes.
+- Mutating E2E requires `PW_ALLOW_SUPABASE_E2E=1` plus `E2E_SUPABASE_URL`, `E2E_SUPABASE_ANON_KEY`, and `E2E_SUPABASE_SERVICE_ROLE_KEY` from the process environment. It refuses normal `.env.local` database credentials and must use a dedicated/local Supabase project.
+- Global setup/teardown removes exact-pattern Playwright artifacts and recomputes published driver standings.
 
 ## Files To Check First For Future Changes
 
@@ -132,6 +134,8 @@ Key database triggers:
 
 - Do not score races from mutable current groups when a race-specific snapshot exists.
 - Do not allow pick submissions after the race-specific pick deadline or for archived races.
+- Do not expose draft results or use them for standings, reminders, next-race groups, or winners.
+- Do not run mutating Playwright tests against live/shared Supabase.
 - Keep the Indianapolis 500 exception explicit through `pick_format`; do not infer it from race name.
 - Keep admin result import and manual result entry behavior aligned.
 - Revalidate `/admin`, `/picks`, and `/leaderboard` after changes that affect drivers, races, picks, results, winners, or feedback.

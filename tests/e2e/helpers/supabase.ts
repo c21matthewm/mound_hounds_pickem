@@ -107,43 +107,56 @@ export const readEnvFromFile = (key: string): string | null => {
   return null;
 };
 
-export const requiredEnv = (key: string): string => {
-  const fromProcess = process.env[key];
-  if (fromProcess && fromProcess.trim().length > 0) {
-    return fromProcess.trim();
-  }
-
-  const fromFile = readEnvFromFile(key);
-  if (fromFile && fromFile.trim().length > 0) {
-    return fromFile.trim();
-  }
-
-  throw new Error(`Missing required env var: ${key}`);
-};
-
-export const requireSupabaseE2EOptIn = () => {
-  if (process.env.PW_ALLOW_SUPABASE_E2E === "1") {
-    return;
+export const requiredE2EEnv = (key: string): string => {
+  const value = process.env[key]?.trim();
+  if (value) {
+    return value;
   }
 
   throw new Error(
-    [
-      "Refusing to run Supabase-mutating Playwright tests without PW_ALLOW_SUPABASE_E2E=1.",
-      "Use a dedicated/local Supabase test database whenever possible.",
-      "Do not point these tests at the live app database unless you intentionally accept that risk."
-    ].join(" ")
+    `Missing required E2E env var: ${key}. Mutating tests do not read database credentials from .env.local.`
   );
+};
+
+const normalizeProjectUrl = (value: string): string => value.replace(/\/+$/, "");
+
+export const requireSupabaseE2EOptIn = () => {
+  if (process.env.PW_ALLOW_SUPABASE_E2E !== "1") {
+    throw new Error(
+      [
+        "Refusing to run Supabase-mutating Playwright tests without PW_ALLOW_SUPABASE_E2E=1.",
+        "Use a dedicated/local Supabase test database.",
+        "The normal app database credentials are never accepted for this suite."
+      ].join(" ")
+    );
+  }
+
+  const e2eUrl = requiredE2EEnv("E2E_SUPABASE_URL");
+  requiredE2EEnv("E2E_SUPABASE_ANON_KEY");
+  requiredE2EEnv("E2E_SUPABASE_SERVICE_ROLE_KEY");
+
+  const normalAppUrl =
+    process.env.NEXT_PUBLIC_SUPABASE_URL?.trim() ?? readEnvFromFile("NEXT_PUBLIC_SUPABASE_URL");
+  if (normalAppUrl && normalizeProjectUrl(normalAppUrl) === normalizeProjectUrl(e2eUrl)) {
+    throw new Error(
+      "Refusing mutating E2E because E2E_SUPABASE_URL matches the app's normal Supabase URL. Configure a separate test project."
+    );
+  }
 };
 
 export const createE2ESupabaseClient = (): SupabaseClient => {
   requireSupabaseE2EOptIn();
 
-  return createClient(requiredEnv("NEXT_PUBLIC_SUPABASE_URL"), requiredEnv("SUPABASE_SERVICE_ROLE_KEY"), {
-    auth: {
-      autoRefreshToken: false,
-      persistSession: false
+  return createClient(
+    requiredE2EEnv("E2E_SUPABASE_URL"),
+    requiredE2EEnv("E2E_SUPABASE_SERVICE_ROLE_KEY"),
+    {
+      auth: {
+        autoRefreshToken: false,
+        persistSession: false
+      }
     }
-  });
+  );
 };
 
 export const supabase = createE2ESupabaseClient();
@@ -347,108 +360,11 @@ const deleteRaceImages = async (races: RaceCandidate[]) => {
   return data?.length ?? imagePaths.length;
 };
 
-const driverGroupForIndex = (index: number): number => {
-  if (index < 4) return 1;
-  if (index < 8) return 2;
-  if (index < 12) return 3;
-  if (index < 16) return 4;
-  if (index < 20) return 5;
-  return 6;
-};
-
-const refreshDriverStandingsAndGroups = async () => {
-  const { data: activeDrivers, error: activeDriversError } = await supabase
-    .from("drivers")
-    .select("id,championship_points,current_standing,driver_name")
-    .eq("is_active", true)
-    .order("championship_points", { ascending: false })
-    .order("current_standing", { ascending: true })
-    .order("driver_name", { ascending: true });
-
-  if (activeDriversError) {
-    throw new Error(`Failed loading active drivers: ${activeDriversError.message}`);
-  }
-
-  const { data: inactiveDrivers, error: inactiveDriversError } = await supabase
-    .from("drivers")
-    .select("id,current_standing,driver_name")
-    .eq("is_active", false)
-    .order("current_standing", { ascending: true })
-    .order("driver_name", { ascending: true });
-
-  if (inactiveDriversError) {
-    throw new Error(`Failed loading inactive drivers: ${inactiveDriversError.message}`);
-  }
-
-  const rankedActiveDrivers = activeDrivers ?? [];
-  const inactiveDriverRows = inactiveDrivers ?? [];
-
-  const activeUpdateResponses = await Promise.all(
-    rankedActiveDrivers.map((driver, index) =>
-      supabase
-        .from("drivers")
-        .update({
-          current_standing: index + 1,
-          group_number: driverGroupForIndex(index)
-        })
-        .eq("id", driver.id)
-    )
-  );
-
-  const inactiveUpdateResponses = await Promise.all(
-    inactiveDriverRows.map((driver, index) =>
-      supabase
-        .from("drivers")
-        .update({
-          current_standing: rankedActiveDrivers.length + index + 1,
-          group_number: 6
-        })
-        .eq("id", driver.id)
-    )
-  );
-
-  const failed = [...activeUpdateResponses, ...inactiveUpdateResponses].find((result) => result.error);
-  if (failed?.error) {
-    throw new Error(`Failed refreshing driver standings/groups: ${failed.error.message}`);
-  }
-};
-
 export const refreshDriverChampionshipPointsFromResults = async () => {
-  const [driversResponse, resultsResponse] = await Promise.all([
-    supabase.from("drivers").select("id"),
-    supabase.from("results").select("driver_id,points")
-  ]);
-
-  if (driversResponse.error) {
-    throw new Error(`Failed loading drivers for point recompute: ${driversResponse.error.message}`);
+  const { error } = await supabase.rpc("refresh_driver_standings_from_published_results");
+  if (error) {
+    throw new Error(`Failed recomputing published driver points: ${error.message}`);
   }
-  if (resultsResponse.error) {
-    throw new Error(`Failed loading results for point recompute: ${resultsResponse.error.message}`);
-  }
-
-  const pointsByDriverId = new Map<number, number>();
-  (resultsResponse.data ?? []).forEach((result) => {
-    const current = pointsByDriverId.get(result.driver_id) ?? 0;
-    pointsByDriverId.set(result.driver_id, current + Number(result.points));
-  });
-
-  const updateResponses = await Promise.all(
-    (driversResponse.data ?? []).map((driver) =>
-      supabase
-        .from("drivers")
-        .update({
-          championship_points: pointsByDriverId.get(driver.id) ?? 0
-        })
-        .eq("id", driver.id)
-    )
-  );
-
-  const failedUpdate = updateResponses.find((result) => result.error);
-  if (failedUpdate?.error) {
-    throw new Error(`Failed recomputing driver points: ${failedUpdate.error.message}`);
-  }
-
-  await refreshDriverStandingsAndGroups();
 };
 
 export const cleanupPlaywrightArtifacts = async ({

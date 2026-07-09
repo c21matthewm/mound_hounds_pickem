@@ -1,0 +1,55 @@
+name: Isolated Supabase E2E
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: isolated-supabase-e2e
+  cancel-in-progress: false
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    env:
+      CRON_SECRET: isolated-e2e-only
+      E2E_SUPABASE_ANON_KEY: ${{ secrets.E2E_SUPABASE_ANON_KEY }}
+      E2E_SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.E2E_SUPABASE_SERVICE_ROLE_KEY }}
+      E2E_SUPABASE_URL: ${{ secrets.E2E_SUPABASE_URL }}
+      NEXT_PUBLIC_SITE_URL: http://127.0.0.1:3007
+      PW_ALLOW_SUPABASE_E2E: "1"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: ".nvmrc"
+          cache: npm
+
+      - name: Validate isolated database secrets
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "${E2E_SUPABASE_URL}"
+          test -n "${E2E_SUPABASE_ANON_KEY}"
+          test -n "${E2E_SUPABASE_SERVICE_ROLE_KEY}"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium firefox
+
+      - name: Run mutating E2E against isolated Supabase
+        run: npm run e2e
+
+      - name: Upload Playwright artifacts on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: isolated-e2e-artifacts
+          path: |
+            test-results/
+            playwright-report/
+          if-no-files-found: ignore

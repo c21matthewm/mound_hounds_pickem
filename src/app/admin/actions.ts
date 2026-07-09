@@ -5,10 +5,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { parseChampionshipStandingsPaste } from "@/lib/championship-standings";
 import { getFormFile, uploadDriverHeadshot } from "@/lib/driver-images";
-import {
-  finalizeRaceWinnerNow,
-  scheduleRaceWinnerAutoCalculation
-} from "@/lib/fantasy-winner";
+import { finalizeRaceWinnerNow } from "@/lib/fantasy-winner";
 import { uploadRaceTitleImage } from "@/lib/race-images";
 import { requireAdmin } from "@/lib/admin";
 import { normalizeDriverName, parseIndycarResultsPaste } from "@/lib/indycar-results";
@@ -37,11 +34,6 @@ type RaceStatusRow = {
   pick_format: RacePickFormat;
 };
 
-type RacePickFormatRow = {
-  id: number;
-  pick_format: RacePickFormat;
-};
-
 const parseAdminTab = (value: string): AdminTab | null => {
   if (value === "drivers" || value === "races" || value === "results" || value === "feedback") {
     return value;
@@ -54,6 +46,13 @@ const parseRacePickFormat = (value: string): RacePickFormat =>
   isRacePickFormat(value) ? value : "standard";
 
 const INDY_500_MIGRATION_FILE = "supabase/migrations/20260528_add_indy_500_pick_format.sql";
+const RESULT_PUBLICATION_MIGRATION_FILE =
+  "supabase/migrations/20260709_harden_roles_and_result_publication.sql";
+
+const withResultPublicationMigrationHint = (message: string): string =>
+  /function .* does not exist|schema cache/i.test(message)
+    ? withMigrationHint(message, RESULT_PUBLICATION_MIGRATION_FILE)
+    : message;
 
 const adminRedirect = (key: "error" | "message", value: string, tab?: AdminTab): never => {
   const params = new URLSearchParams({ [key]: value });
@@ -76,7 +75,7 @@ const parsePositiveInteger = (value: string): number | null => {
 const parseNonNegativeNumber = (value: string): number | null => {
   const parsed = Number(value);
 
-  if (Number.isNaN(parsed) || parsed < 0) {
+  if (!Number.isFinite(parsed) || parsed < 0) {
     return null;
   }
 
@@ -156,44 +155,6 @@ async function refreshDriverStandingsAndGroups(supabase: SupabaseClient) {
   }
 }
 
-async function refreshDriverChampionshipPointsFromResults(supabase: SupabaseClient) {
-  const [driversResponse, resultsResponse] = await Promise.all([
-    supabase.from("drivers").select("id"),
-    supabase.from("results").select("driver_id,points")
-  ]);
-
-  if (driversResponse.error) {
-    throw new Error(driversResponse.error.message);
-  }
-  if (resultsResponse.error) {
-    throw new Error(resultsResponse.error.message);
-  }
-
-  const pointsByDriverId = new Map<number, number>();
-  (resultsResponse.data ?? []).forEach((result) => {
-    const current = pointsByDriverId.get(result.driver_id) ?? 0;
-    pointsByDriverId.set(result.driver_id, current + Number(result.points));
-  });
-
-  const updateResponses = await Promise.all(
-    (driversResponse.data ?? []).map((driver) =>
-      supabase
-        .from("drivers")
-        .update({
-          championship_points: pointsByDriverId.get(driver.id) ?? 0
-        })
-        .eq("id", driver.id)
-    )
-  );
-
-  const failedUpdate = updateResponses.find((result) => result.error);
-  if (failedUpdate?.error) {
-    throw new Error(failedUpdate.error.message);
-  }
-
-  await refreshDriverStandingsAndGroups(supabase);
-}
-
 async function ensureRaceIsActive(supabase: SupabaseClient, raceId: number) {
   let { data: race, error } = await supabase
     .from("races")
@@ -227,85 +188,6 @@ async function ensureRaceIsActive(supabase: SupabaseClient, raceId: number) {
 
   if (race.is_archived) {
     throw new Error("Selected race is archived. Unarchive it before updating winners or results.");
-  }
-}
-
-async function ensureRaceDriverGroupSnapshot(supabase: SupabaseClient, raceId: number) {
-  let { data: race, error: raceError } = await supabase
-    .from("races")
-    .select("id,pick_format")
-    .eq("id", raceId)
-    .maybeSingle<RacePickFormatRow>();
-
-  if (raceError && isMissingColumnError(raceError, "pick_format")) {
-    const legacyResponse = await supabase
-      .from("races")
-      .select("id")
-      .eq("id", raceId)
-      .maybeSingle<{ id: number }>();
-
-    raceError = legacyResponse.error;
-    race = legacyResponse.data
-      ? {
-          ...legacyResponse.data,
-          pick_format: "standard"
-        }
-      : null;
-  }
-
-  if (raceError) {
-    throw new Error(raceError.message);
-  }
-
-  if (!race) {
-    throw new Error("Selected race was not found.");
-  }
-
-  const { data: existingRows, error: existingRowsError } = await supabase
-    .from("race_driver_groups")
-    .select("race_id")
-    .eq("race_id", raceId)
-    .limit(1);
-
-  if (existingRowsError) {
-    throw new Error(existingRowsError.message);
-  }
-
-  if ((existingRows ?? []).length > 0) {
-    return;
-  }
-
-  if (normalizeRacePickFormat(race.pick_format) === "indy_500") {
-    throw new Error("Upload Indianapolis 500 qualifying order before saving results.");
-  }
-
-  const { data: activeDrivers, error: activeDriversError } = await supabase
-    .from("drivers")
-    .select("id,group_number")
-    .eq("is_active", true);
-
-  if (activeDriversError) {
-    throw new Error(activeDriversError.message);
-  }
-
-  const rowsToInsert = (activeDrivers ?? [])
-    .filter((driver) => driver.group_number >= 1 && driver.group_number <= 6)
-    .map((driver) => ({
-      driver_id: driver.id,
-      group_number: driver.group_number,
-      race_id: raceId
-    }));
-
-  if (rowsToInsert.length === 0) {
-    throw new Error("Unable to snapshot race groups because no active grouped drivers were found.");
-  }
-
-  const { error: upsertError } = await supabase
-    .from("race_driver_groups")
-    .upsert(rowsToInsert, { ignoreDuplicates: true, onConflict: "race_id,driver_id" });
-
-  if (upsertError) {
-    throw new Error(upsertError.message);
   }
 }
 
@@ -467,7 +349,7 @@ export async function deleteDriverAction(formData: FormData) {
   }
   const driverIdValue = driverId as number;
 
-  const [initialPickUsageResponse, resultUsageResponse] = await Promise.all([
+  const [initialPickUsageResponse, resultUsageResponse, raceFieldUsageResponse] = await Promise.all([
     supabase
       .from("picks")
       .select("id")
@@ -475,7 +357,12 @@ export async function deleteDriverAction(formData: FormData) {
         `driver_group1_id.eq.${driverIdValue},driver_group2_id.eq.${driverIdValue},driver_group3_id.eq.${driverIdValue},driver_group4_id.eq.${driverIdValue},driver_group5_id.eq.${driverIdValue},driver_group6_id.eq.${driverIdValue},driver_group7_id.eq.${driverIdValue},driver_group8_id.eq.${driverIdValue}`
       )
       .limit(1),
-    supabase.from("results").select("id").eq("driver_id", driverIdValue).limit(1)
+    supabase.from("results").select("id").eq("driver_id", driverIdValue).limit(1),
+    supabase
+      .from("race_driver_groups")
+      .select("race_id")
+      .eq("driver_id", driverIdValue)
+      .limit(1)
   ]);
   let pickUsageResponse = initialPickUsageResponse;
 
@@ -499,13 +386,17 @@ export async function deleteDriverAction(formData: FormData) {
   if (resultUsageResponse.error) {
     redirectWithTab("error", resultUsageResponse.error.message);
   }
+  if (raceFieldUsageResponse.error) {
+    redirectWithTab("error", raceFieldUsageResponse.error.message);
+  }
 
   const hasPicks = (pickUsageResponse.data ?? []).length > 0;
   const hasResults = (resultUsageResponse.data ?? []).length > 0;
-  if (hasPicks || hasResults) {
+  const hasRaceFieldSnapshot = (raceFieldUsageResponse.data ?? []).length > 0;
+  if (hasPicks || hasResults || hasRaceFieldSnapshot) {
     redirectWithTab(
       "error",
-      "Cannot delete a driver that appears in picks or race results. Mark the driver inactive instead."
+      "Cannot delete a driver that appears in picks, race results, or a race field snapshot. Mark the driver inactive instead."
     );
   }
 
@@ -868,6 +759,16 @@ export async function deleteRaceAction(formData: FormData) {
     redirectWithTab("error", error.message);
   }
 
+  const { error: refreshError } = await supabase.rpc(
+    "refresh_driver_standings_from_published_results"
+  );
+  if (refreshError) {
+    redirectWithTab(
+      "error",
+      `Race deleted, but driver standings could not be refreshed: ${withResultPublicationMigrationHint(refreshError.message)}`
+    );
+  }
+
   revalidatePath("/admin");
   revalidatePath("/picks");
   revalidatePath("/leaderboard");
@@ -942,6 +843,21 @@ export async function setRaceWinnerAction(formData: FormData) {
     const message =
       ensureError instanceof Error ? ensureError.message : "Selected race is not editable.";
     redirectWithTab("error", message);
+  }
+
+  const { data: winnerRaceStatus, error: winnerRaceStatusError } = await supabase
+    .from("races")
+    .select("results_status")
+    .eq("id", selectedRaceId)
+    .maybeSingle<{ results_status: "draft" | "published" }>();
+  if (winnerRaceStatusError) {
+    redirectWithTab(
+      "error",
+      withResultPublicationMigrationHint(winnerRaceStatusError.message)
+    );
+  }
+  if (winnerRaceStatus?.results_status !== "published") {
+    redirectWithTab("error", "Publish the complete race results before setting a fantasy winner.");
   }
 
   if (winnerProfileId && !isUuid(winnerProfileId)) {
@@ -1200,47 +1116,17 @@ export async function upsertResultAction(formData: FormData) {
     redirectWithTab("error", message);
   }
 
-  try {
-    await ensureRaceDriverGroupSnapshot(supabase, selectedRaceId);
-  } catch (snapshotError) {
-    const message =
-      snapshotError instanceof Error
-        ? snapshotError.message
-        : "Failed to snapshot race driver groups before saving results.";
-    redirectWithTab("error", message);
-  }
-
-  const { error } = await supabase.from("results").upsert(
-    {
-      driver_id: selectedDriverId,
-      points,
-      race_id: selectedRaceId
-    },
-    { onConflict: "race_id,driver_id" }
-  );
+  const { error } = await supabase.rpc("save_race_result_draft", {
+    p_driver_id: selectedDriverId,
+    p_points: points,
+    p_race_id: selectedRaceId
+  });
 
   if (error) {
-    redirectWithTab("error", error.message);
-  }
-
-  try {
-    await refreshDriverChampionshipPointsFromResults(supabase);
-  } catch (refreshError) {
-    const message =
-      refreshError instanceof Error
-        ? refreshError.message
-        : "Race result saved, but failed to refresh driver standings/groups.";
-    redirectWithTab("error", message);
-  }
-
-  try {
-    await scheduleRaceWinnerAutoCalculation(supabase, selectedRaceId);
-  } catch (scheduleError) {
-    const message =
-      scheduleError instanceof Error
-        ? scheduleError.message
-        : "Race result saved, but failed to schedule fantasy winner auto-calculation.";
-    redirectWithTab("error", message);
+    redirectWithTab(
+      "error",
+      withResultPublicationMigrationHint(error.message)
+    );
   }
 
   revalidatePath("/admin");
@@ -1271,7 +1157,44 @@ export async function upsertResultAction(formData: FormData) {
 
   redirectWithTab(
     "message",
-    `Saved ${points} point(s) for ${driverName} in ${raceName}. ${raceResultCountText} Driver standings/groups were refreshed, and fantasy winner auto-calculation is scheduled for about 15 minutes from now.`
+    `Saved ${points} draft point(s) for ${driverName} in ${raceName}. ${raceResultCountText} Draft results do not affect participant standings until the complete race is published.`
+  );
+}
+
+export async function publishSavedRaceResultsAction(formData: FormData) {
+  const { supabase } = await requireAdmin();
+  const tab = parseAdminTab(asText(formData.get("tab"))) ?? "results";
+  const redirectWithTab = (key: "error" | "message", value: string): never =>
+    adminRedirect(key, value, tab);
+
+  const raceId = parsePositiveInteger(asText(formData.get("race_id")));
+  const officialWinningAverageSpeed = parseNonNegativeNumber(
+    asText(formData.get("official_winning_average_speed"))
+  );
+
+  if (!raceId || officialWinningAverageSpeed === null || officialWinningAverageSpeed <= 0) {
+    redirectWithTab("error", "Race and a positive official winning average speed are required.");
+  }
+
+  const { data: publishedCount, error } = await supabase.rpc("publish_saved_race_results", {
+    p_official_winning_average_speed: officialWinningAverageSpeed,
+    p_race_id: raceId
+  });
+
+  if (error) {
+    redirectWithTab(
+      "error",
+      withResultPublicationMigrationHint(error.message)
+    );
+  }
+
+  revalidatePath("/admin");
+  revalidatePath("/dashboard");
+  revalidatePath("/leaderboard");
+  revalidatePath("/picks");
+  redirectWithTab(
+    "message",
+    `Published ${Number(publishedCount ?? 0)} saved result row(s). Driver standings and groups were refreshed, and fantasy winner calculation is scheduled for about 15 minutes from now.`
   );
 }
 
@@ -1294,16 +1217,6 @@ export async function importIndycarResultsAction(formData: FormData) {
   } catch (ensureError) {
     const message =
       ensureError instanceof Error ? ensureError.message : "Selected race is not editable.";
-    redirectWithTab("error", message);
-  }
-
-  try {
-    await ensureRaceDriverGroupSnapshot(supabase, raceId);
-  } catch (snapshotError) {
-    const message =
-      snapshotError instanceof Error
-        ? snapshotError.message
-        : "Failed to snapshot race driver groups before importing results.";
     redirectWithTab("error", message);
   }
 
@@ -1338,7 +1251,13 @@ export async function importIndycarResultsAction(formData: FormData) {
   });
 
   const unmatchedNames = new Set<string>();
-  const payload: Array<{ driver_id: number; points: number; race_id: number }> = [];
+  const duplicateNames = new Set<string>();
+  const payload: Array<{
+    driver_id: number;
+    points: number;
+    position: number | null;
+    race_id: number;
+  }> = [];
   const seenDriverIds = new Set<number>();
 
   parsed.rows.forEach((row) => {
@@ -1351,6 +1270,7 @@ export async function importIndycarResultsAction(formData: FormData) {
     }
 
     if (seenDriverIds.has(match.id)) {
+      duplicateNames.add(match.name);
       return;
     }
 
@@ -1358,6 +1278,7 @@ export async function importIndycarResultsAction(formData: FormData) {
     payload.push({
       driver_id: match.id,
       points: row.points,
+      position: row.position,
       race_id: raceId
     });
   });
@@ -1369,8 +1290,29 @@ export async function importIndycarResultsAction(formData: FormData) {
     );
   }
 
+  if (duplicateNames.size > 0) {
+    redirectWithTab(
+      "error",
+      `Duplicate result rows were found for: ${Array.from(duplicateNames).join(", ")}`
+    );
+  }
+
   if (payload.length === 0) {
     redirectWithTab("error", "No valid rows were mapped to drivers.");
+  }
+
+  const positions = payload.map((row) => row.position);
+  const validPositions = positions.filter((position): position is number => position !== null);
+  const sortedPositions = [...validPositions].sort((a, b) => a - b);
+  const positionsAreComplete =
+    validPositions.length === payload.length &&
+    new Set(validPositions).size === payload.length &&
+    sortedPositions.every((position, index) => position === index + 1);
+  if (!positionsAreComplete) {
+    redirectWithTab(
+      "error",
+      `Official finishing positions must be unique and contiguous from 1 through ${payload.length}.`
+    );
   }
 
   if (parsed.winningAverageSpeed === null) {
@@ -1380,50 +1322,28 @@ export async function importIndycarResultsAction(formData: FormData) {
     );
   }
 
-  const { error: upsertError } = await supabase
-    .from("results")
-    .upsert(payload, { onConflict: "race_id,driver_id" });
-
-  if (upsertError) {
-    redirectWithTab("error", upsertError.message);
-  }
-
-  const { error: raceUpdateError } = await supabase
-    .from("races")
-    .update({ official_winning_average_speed: parsed.winningAverageSpeed })
-    .eq("id", raceId);
-
-  if (raceUpdateError) {
-    if (raceUpdateError.message.includes("official_winning_average_speed")) {
-      redirectWithTab(
-        "error",
-        "Database migration missing for official race average speed. Run the latest Supabase migration, then retry import."
-      );
+  const { data: publishedCount, error: publishError } = await supabase.rpc(
+    "publish_race_results",
+    {
+      p_official_winning_average_speed: parsed.winningAverageSpeed,
+      p_race_id: raceId,
+      p_results: payload.map(({ driver_id, points, position }) => ({
+        driver_id,
+        points,
+        position
+      }))
     }
-    redirectWithTab("error", raceUpdateError.message);
-  }
+  );
 
-  try {
-    await refreshDriverChampionshipPointsFromResults(supabase);
-  } catch (refreshError) {
-    const message =
-      refreshError instanceof Error
-        ? refreshError.message
-        : "Results imported, but failed to refresh driver standings/groups.";
-    redirectWithTab("error", message);
-  }
-
-  try {
-    await scheduleRaceWinnerAutoCalculation(supabase, raceId);
-  } catch (scheduleError) {
-    const message =
-      scheduleError instanceof Error
-        ? scheduleError.message
-        : "Results imported, but failed to schedule fantasy winner auto-calculation.";
-    redirectWithTab("error", message);
+  if (publishError) {
+    redirectWithTab(
+      "error",
+      withResultPublicationMigrationHint(publishError.message)
+    );
   }
 
   revalidatePath("/admin");
+  revalidatePath("/dashboard");
   revalidatePath("/leaderboard");
   revalidatePath("/picks");
 
@@ -1447,7 +1367,7 @@ export async function importIndycarResultsAction(formData: FormData) {
 
   redirectWithTab(
     "message",
-    `Imported ${payload.length} result row(s) into ${raceName}. ${raceResultCountText} Driver standings/groups were refreshed, and fantasy winner auto-calculation is scheduled for about 15 minutes from now.${ignoredSummary}`
+    `Published ${Number(publishedCount ?? payload.length)} complete result row(s) for ${raceName}. ${raceResultCountText} Driver standings/groups were refreshed, and fantasy winner auto-calculation is scheduled for about 15 minutes from now.${ignoredSummary}`
   );
 }
 
@@ -1521,6 +1441,18 @@ export async function cleanupTestFlowDataAction(formData: FormData) {
     }
 
     deletedAuthUserCount += 1;
+  }
+
+  const { error: refreshDriverError } = await serviceRoleSupabase.rpc(
+    "refresh_driver_standings_from_published_results"
+  );
+  if (refreshDriverError) {
+    redirectWithTab(
+      "error",
+      `Test artifacts were deleted, but driver standings could not be refreshed: ${withResultPublicationMigrationHint(
+        refreshDriverError.message
+      )}`
+    );
   }
 
   revalidatePath("/admin");

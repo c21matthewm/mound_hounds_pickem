@@ -1,8 +1,9 @@
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { expect, test, type Dialog, type Page } from "@playwright/test";
+import { createClient } from "@supabase/supabase-js";
 import { trackClientIssues } from "./helpers/monitoring";
-import { cleanupPlaywrightArtifacts, supabase } from "./helpers/supabase";
+import { cleanupPlaywrightArtifacts, requiredE2EEnv, supabase } from "./helpers/supabase";
 
 const LEAGUE_TIME_ZONE = "America/Indiana/Indianapolis";
 const TEST_PASSWORD = "Pw-E2E-Flow-2026!";
@@ -126,65 +127,35 @@ const ensureDriverCoverage = async (): Promise<{
   byGroup: Map<number, DriverSeed[]>;
   createdDriverIds: number[];
 }> => {
-  const createdDriverIds: number[] = [];
+  const payload = Array.from({ length: 6 }, (_, groupIndex) =>
+    Array.from({ length: 2 }, (_, driverIndex) => ({
+      championship_points: 0,
+      current_standing: 9000 + groupIndex * 2 + driverIndex,
+      driver_name: `${TEST_PREFIX} Driver G${groupIndex + 1} #${driverIndex + 1}`,
+      group_number: groupIndex + 1,
+      image_url: null,
+      is_active: true
+    }))
+  ).flat();
 
-  const loadDrivers = async (): Promise<DriverSeed[]> => {
-    const { data, error } = await supabase
-      .from("drivers")
-      .select("id,driver_name,group_number")
-      .eq("is_active", true)
-      .order("group_number", { ascending: true })
-      .order("current_standing", { ascending: true });
-
-    if (error) {
-      throw new Error(`Failed loading drivers: ${error.message}`);
-    }
-
-    return (data ?? []) as DriverSeed[];
-  };
-
-  const mapByGroup = (drivers: DriverSeed[]): Map<number, DriverSeed[]> => {
-    const byGroup = new Map<number, DriverSeed[]>();
-    for (let group = 1; group <= 6; group += 1) {
-      byGroup.set(group, []);
-    }
-    drivers.forEach((driver) => {
-      byGroup.get(driver.group_number)?.push(driver);
-    });
-    return byGroup;
-  };
-
-  let allDrivers = await loadDrivers();
-  let byGroup = mapByGroup(allDrivers);
-
-  for (let group = 1; group <= 6; group += 1) {
-    const minimumCount = group === 1 ? 2 : 1;
-    while ((byGroup.get(group)?.length ?? 0) < minimumCount) {
-      const seedName = `${TEST_PREFIX} Driver G${group} #${createdDriverIds.length + 1}`;
-      const { data: inserted, error: insertError } = await supabase
-        .from("drivers")
-        .insert({
-          championship_points: 0,
-          current_standing: 9000 + createdDriverIds.length,
-          driver_name: seedName,
-          group_number: group,
-          image_url: null,
-          is_active: true
-        })
-        .select("id")
-        .single();
-
-      if (insertError || !inserted) {
-        throw new Error(`Failed seeding group ${group} driver: ${insertError?.message ?? "unknown"}`);
-      }
-
-      createdDriverIds.push(inserted.id as number);
-      allDrivers = await loadDrivers();
-      byGroup = mapByGroup(allDrivers);
-    }
+  const { data, error } = await supabase
+    .from("drivers")
+    .insert(payload)
+    .select("id,driver_name,group_number");
+  if (error || !data || data.length !== payload.length) {
+    throw new Error(`Failed seeding isolated test drivers: ${error?.message ?? "unexpected row count"}`);
   }
 
-  return { byGroup, createdDriverIds };
+  const drivers = data as DriverSeed[];
+  const byGroup = new Map<number, DriverSeed[]>();
+  for (let group = 1; group <= 6; group += 1) {
+    byGroup.set(
+      group,
+      drivers.filter((driver) => driver.group_number === group)
+    );
+  }
+
+  return { byGroup, createdDriverIds: drivers.map((driver) => driver.id) };
 };
 
 const getRaceByName = async (raceName: string): Promise<RaceSeed> => {
@@ -270,6 +241,24 @@ test.describe.serial("Full App Flow", () => {
     participant2 = await createSeedUser("Participant2", "participant");
     participant3 = await createSeedUser("Participant3", "participant");
 
+    const participantDatabaseClient = createClient(
+      requiredE2EEnv("E2E_SUPABASE_URL"),
+      requiredE2EEnv("E2E_SUPABASE_ANON_KEY")
+    );
+    const { error: participantSignInError } = await participantDatabaseClient.auth.signInWithPassword({
+      email: participant1.email,
+      password: TEST_PASSWORD
+    });
+    if (participantSignInError) {
+      throw new Error(`Failed signing in participant database client: ${participantSignInError.message}`);
+    }
+    const { error: roleEscalationError } = await participantDatabaseClient
+      .from("profiles")
+      .update({ role: "admin" })
+      .eq("id", participant1.id);
+    expect(roleEscalationError, "Participant role escalation must be blocked by PostgreSQL.").toBeTruthy();
+    await participantDatabaseClient.auth.signOut();
+
     const driverCoverage = await ensureDriverCoverage();
 
     const pickA: PickSelection = {
@@ -337,6 +326,21 @@ test.describe.serial("Full App Flow", () => {
     const raceA = await getRaceByName(raceAName);
     expect(raceA.title_image_url, "Race title image URL should be saved after upload.").toBeTruthy();
 
+    const raceASnapshot = Array.from(driverCoverage.byGroup.entries()).flatMap(
+      ([groupNumber, groupDrivers]) =>
+        groupDrivers.map((driver) => ({
+          driver_id: driver.id,
+          group_number: groupNumber,
+          race_id: raceA.id
+        }))
+    );
+    const { error: raceASnapshotError } = await supabase
+      .from("race_driver_groups")
+      .insert(raceASnapshot);
+    if (raceASnapshotError) {
+      throw new Error(`Failed seeding isolated race snapshot: ${raceASnapshotError.message}`);
+    }
+
     await adminPage.goto("/admin?tab=races");
     const addRaceFormSecond = adminPage
       .locator("form")
@@ -403,8 +407,8 @@ test.describe.serial("Full App Flow", () => {
     await raceAEditDetails.locator("summary").click();
     const raceAEditForm = adminPage.getByTestId(`admin-race-edit-form-${raceA.id}`);
     const lockQualifying = new Date(Date.now() - 3 * 60 * 60 * 1000);
-    // Keep race A visible on Pick'em while inside the 24-hour post-start buffer.
-    const lockRaceStart = new Date(Date.now() - 2 * 60 * 60 * 1000);
+    // Standard picks lock at qualifying while the race itself remains upcoming.
+    const lockRaceStart = new Date(Date.now() + 60 * 60 * 1000);
     await raceAEditForm.locator('input[name="qualifying_start_at"]').fill(toLocalInput(lockQualifying));
     await raceAEditForm.locator('input[name="race_date"]').fill(toLocalInput(lockRaceStart));
     await raceAEditForm.getByRole("button", { name: "Save" }).click();
@@ -419,30 +423,46 @@ test.describe.serial("Full App Flow", () => {
     await expect(p1Page.locator("main")).toContainText(raceAName);
     await expect(p1Page.locator("tbody tr").filter({ hasText: participant1.teamName }).first()).toContainText("-");
 
-    const pointsByPickB = new Map<number, number>([
-      [pickB[1], 50],
-      [pickB[2], 44],
-      [pickB[3], 42],
-      [pickB[4], 40],
-      [pickB[5], 38],
-      [pickB[6], 36]
-    ]);
-    const driverNameById = new Map(
-      Array.from(driverCoverage.byGroup.values())
-        .flat()
-        .map((driver) => [driver.id, driver.driver_name])
+    const isolatedRaceDrivers = Array.from(driverCoverage.byGroup.values()).flat();
+    const zeroPointNonstarter = driverCoverage.byGroup.get(6)![1];
+    const officialRaceDrivers = isolatedRaceDrivers.filter(
+      (driver) => driver.id !== zeroPointNonstarter.id
+    );
+    const pointsByDriverId = new Map(
+      isolatedRaceDrivers.map((driver, index) => [driver.id, 60 - index])
     );
     const standardPreviewPaste = [
       "Pos\tStart\tCar\tDriver\tTeam\tLaps\tLed\tStatusLaps\tTime\tAvg Speed\tStatus\tPoints",
-      ...Array.from(pointsByPickB.entries()).map(([driverId, points], index) => {
+      ...officialRaceDrivers.map((driver, index) => {
         const position = index + 1;
-        const driverName = driverNameById.get(driverId) ?? `Driver ${driverId}`;
         const averageSpeed = (179.5 - index / 10).toFixed(3);
-        return `${position}\t${position}\t${driverId}\t${driverName}\t${TEST_PREFIX} Team\t100\t0\t0\t01:00:00\t${averageSpeed}\tRunning\t${points}`;
+        return `${position}\t${position}\t${driver.id}\t${driver.driver_name}\t${TEST_PREFIX} Team\t100\t0\t0\t01:00:00\t${averageSpeed}\tRunning\t${pointsByDriverId.get(driver.id)}`;
       })
     ].join("\n");
 
     await adminPage.goto("/admin?tab=results");
+    await adminPage.getByText("Manual result entry").click();
+    const manualResultsForm = adminPage.getByTestId("admin-results-manual-form");
+    const firstDraftDriver = isolatedRaceDrivers[0];
+    const firstDraftPoints = pointsByDriverId.get(firstDraftDriver.id)!;
+    await manualResultsForm.locator('select[name="race_id"]').selectOption(String(raceA.id));
+    await manualResultsForm.locator('select[name="driver_id"]').selectOption(String(firstDraftDriver.id));
+    await manualResultsForm.locator('input[name="points"]').fill(String(firstDraftPoints));
+    await manualResultsForm.getByRole("button", { name: "Save draft result" }).click();
+    await expect(adminPage.getByTestId("admin-results-save-alert")).toContainText(
+      `Saved ${firstDraftPoints} draft point(s)`
+    );
+
+    const { data: draftRace, error: draftRaceError } = await supabase
+      .from("races")
+      .select("results_status")
+      .eq("id", raceA.id)
+      .maybeSingle();
+    if (draftRaceError || !draftRace) {
+      throw new Error(`Failed loading draft race status: ${draftRaceError?.message ?? "missing"}`);
+    }
+    expect(draftRace.results_status).toBe("draft");
+
     const resultsImportForm = adminPage.getByTestId("admin-results-import-form");
     await resultsImportForm.getByTestId("admin-results-import-race-select").selectOption(String(raceA.id));
     await resultsImportForm.getByTestId("admin-results-import-paste").fill(standardPreviewPaste);
@@ -456,21 +476,14 @@ test.describe.serial("Full App Flow", () => {
     await expect(resultsImportForm).toContainText("Highest Possible");
     await expect(resultsImportForm).toContainText("Lowest Possible");
     await expect(resultsImportForm).toContainText("No-Pick Users");
+    await expect(resultsImportForm).toContainText("Zero-Point Nonstarters");
+    await expect(resultsImportForm).toContainText(zeroPointNonstarter.driver_name);
     await expect(resultsImportForm).toContainText("Preview is clean. Ready to publish.");
     await expect(resultsImportForm.getByTestId("admin-results-import-submit")).toBeEnabled();
-
-    for (const [driverId, points] of pointsByPickB.entries()) {
-      await adminPage.getByText("Manual result entry").click();
-      const manualResultsForm = adminPage.getByTestId("admin-results-manual-form");
-      await manualResultsForm.locator('select[name="race_id"]').selectOption(String(raceA.id));
-      await manualResultsForm.locator('select[name="driver_id"]').selectOption(String(driverId));
-      await manualResultsForm.locator('input[name="points"]').fill(String(points));
-      await manualResultsForm.getByRole("button", { name: "Save result" }).click();
-      await expect(adminPage.getByTestId("admin-results-save-alert")).toContainText(
-        `Saved ${points} point(s)`
-      );
-      await expect(adminPage.getByTestId("admin-results-save-alert")).toContainText(raceAName);
-    }
+    await resultsImportForm.getByTestId("admin-results-import-submit").click();
+    await expect(adminPage.getByTestId("admin-results-save-alert")).toContainText(
+      `Published ${isolatedRaceDrivers.length} complete result row(s)`
+    );
 
     await p1Page.goto("/leaderboard");
     await expect(p1Page.locator("main")).toContainText(`Latest Race: ${raceAName}`);
@@ -505,11 +518,24 @@ test.describe.serial("Full App Flow", () => {
     if (raceResultCountError) {
       throw new Error(`Failed counting race results: ${raceResultCountError.message}`);
     }
-    if ((raceResultCount ?? 0) < 6) {
+    if ((raceResultCount ?? 0) !== isolatedRaceDrivers.length) {
       findings.push(
-        `Results entry count was ${raceResultCount ?? 0} for race "${raceAName}" after six manual submissions (expected at least 6).`
+        `Results entry count was ${raceResultCount ?? 0} for race "${raceAName}" after publication (expected ${isolatedRaceDrivers.length}).`
       );
     }
+
+    const { data: nonstarterResult, error: nonstarterResultError } = await supabase
+      .from("results")
+      .select("points")
+      .eq("race_id", raceA.id)
+      .eq("driver_id", zeroPointNonstarter.id)
+      .maybeSingle();
+    if (nonstarterResultError || !nonstarterResult) {
+      throw new Error(
+        `Failed loading zero-point nonstarter result: ${nonstarterResultError?.message ?? "missing row"}`
+      );
+    }
+    expect(nonstarterResult.points).toBe(0);
 
     await p1Page.goto(`/leaderboard?tab=picks&race_id=${raceA.id}`);
     const p1Row = p1Page.locator("tbody tr").filter({ hasText: participant1.teamName }).first();

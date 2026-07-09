@@ -343,19 +343,12 @@ test.describe.serial("Indianapolis 500 Pick'em Flow", () => {
     }
 
     await participantPage.goto("/picks");
-    await expect(participantPage.locator("main")).toContainText(raceName);
-    await expect(participantPage.locator("main")).toContainText("Status: Locked");
-    await expect(participantPage.getByRole("button", { name: "Picks are locked" })).toBeDisabled();
+    await expect(participantPage.locator("main")).not.toContainText(raceName);
 
-    const resultPayload = drivers.map((driver, index) => ({
-      driver_id: driver.id,
-      points: 100 - index,
-      race_id: race.id
-    }));
-    const { error: resultsError } = await supabase.from("results").insert(resultPayload);
-    if (resultsError) {
-      throw new Error(`Failed seeding Indy results: ${resultsError.message}`);
-    }
+    await resultsImportForm.getByTestId("admin-results-import-submit").click();
+    await expect(adminPage.getByTestId("admin-results-save-alert")).toContainText(
+      "Published 33 complete result row(s)"
+    );
 
     const expectedTotal = Array.from({ length: 8 }, (_, index) => {
       const groupNumber = index + 1;
