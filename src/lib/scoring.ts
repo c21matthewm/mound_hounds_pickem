@@ -11,7 +11,6 @@ import { loadAllRows } from "@/lib/supabase/paginated-query";
 import { getLeagueSeasonDateRange } from "@/lib/timezone";
 import {
   assignWeeklyRanks,
-  buildOrderedWeeklyRows,
   calculateOfficialSpeedDelta
 } from "@/lib/weekly-ranking";
 
@@ -89,23 +88,8 @@ export type RaceBreakdownColumn = {
   raceName: string;
 };
 
-export type RaceScoreboardRow = {
-  averageSpeed: number | null;
-  points: number;
-  rowType: "benchmark_high" | "benchmark_low" | "participant";
-  teamName: string;
-};
-
-export type RaceScoreboard = {
-  raceDate: string;
-  raceId: number;
-  raceName: string;
-  rows: RaceScoreboardRow[];
-};
-
 export type LeagueScoringSnapshot = {
   leaderboardRows: LeaderboardRow[];
-  latestRaceScoreboard: RaceScoreboard | null;
   raceColumns: RaceBreakdownColumn[];
 };
 
@@ -502,7 +486,6 @@ export async function buildLeagueScoringSnapshot(): Promise<LeagueScoringSnapsho
   if (completedRaces.length === 0) {
     return {
       leaderboardRows: [],
-      latestRaceScoreboard: null,
       raceColumns
     };
   }
@@ -538,52 +521,6 @@ export async function buildLeagueScoringSnapshot(): Promise<LeagueScoringSnapsho
   );
 
   const latestRace = completedRaces[completedRaces.length - 1];
-  const latestRaceMissingPickFallback = lowestFallbackByRaceId.get(latestRace.id) ?? 0;
-  const latestRaceRows: RaceScoreboardRow[] = buildOrderedWeeklyRows(
-    participants.map((participant) => {
-      const weekly = pickScoreByRaceUser.get(keyForRaceUser(latestRace.id, participant.id));
-      return {
-        averageSpeed: weekly?.averageSpeed ?? null,
-        points: weekly?.racePoints ?? latestRaceMissingPickFallback,
-        rowType: "participant" as const,
-        teamName: participant.teamName
-      };
-    }),
-    latestRace.official_winning_average_speed === null
-      ? null
-      : asNumber(latestRace.official_winning_average_speed)
-  );
-
-  const latestRaceExtremes = computeRaceExtremes(
-    latestRace.id,
-    groupCountByRaceId.get(latestRace.id) ?? 6,
-    resultsByRace.get(latestRace.id) ?? [],
-    raceDriverGroupByRaceDriver,
-    pickedDriverGroupByRaceDriver,
-    currentDriverGroupById
-  );
-
-  const latestRaceScoreboard: RaceScoreboard = {
-    raceDate: latestRace.race_date,
-    raceId: latestRace.id,
-    raceName: latestRace.race_name,
-    rows: [
-      ...latestRaceRows,
-      {
-        averageSpeed: null,
-        points: latestRaceExtremes.highest,
-        rowType: "benchmark_high",
-        teamName: "Highest Possible Score"
-      },
-      {
-        averageSpeed: null,
-        points: latestRaceExtremes.lowest,
-        rowType: "benchmark_low",
-        teamName: "Lowest Possible Score"
-      }
-    ]
-  };
-
   const cumulativeByUser = new Map<string, number>();
   const standingByRaceUser = new Map<string, number>();
   const raceBreakdownByUser = new Map<string, Map<number, number>>();
@@ -651,7 +588,6 @@ export async function buildLeagueScoringSnapshot(): Promise<LeagueScoringSnapsho
 
   return {
     leaderboardRows,
-    latestRaceScoreboard,
     raceColumns
   };
 }
