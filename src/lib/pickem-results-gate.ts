@@ -17,6 +17,7 @@ export type PickemRaceForResultsGate = {
   pick_format?: RacePickFormat | string | null;
   race_date: string;
   race_name: string;
+  results_status?: "draft" | "published" | null;
 };
 
 type PreviousRaceRow = PickemRaceForResultsGate;
@@ -85,14 +86,19 @@ const loadPreviousRace = async (
       .maybeSingle<PreviousRaceRow>();
   };
 
-  let { data, error } = await load("id,race_name,race_date,pick_format");
+  let { data, error } = await load("id,race_name,race_date,pick_format,results_status");
 
-  if (error && isMissingColumnError(error, "pick_format")) {
+  if (
+    error &&
+    (isMissingColumnError(error, "pick_format") ||
+      isMissingColumnError(error, "results_status"))
+  ) {
     const legacyResponse = await load("id,race_name,race_date");
     data = legacyResponse.data
       ? {
           ...legacyResponse.data,
-          pick_format: "standard"
+          pick_format: "standard",
+          results_status: null
         }
       : null;
     error = legacyResponse.error;
@@ -156,7 +162,11 @@ export const getPreviousRaceResultsGate = async (
     pickFormat === "indy_500" ? INDY_500_QUALIFYING_FIELD_SIZE : activeDriverCount;
   const expectedResultCount = Math.max(snapshotCount || fallbackExpectedCount, 1);
 
-  if (resultCount >= expectedResultCount) {
+  const publicationReady =
+    previousRace.results_status === "published" ||
+    (previousRace.results_status == null && resultCount >= expectedResultCount);
+
+  if (publicationReady) {
     return {
       expectedResultCount,
       previousRace: {

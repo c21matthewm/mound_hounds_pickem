@@ -14,6 +14,9 @@ Replace that with a future custom domain if you add one later.
 
 Vercel should be connected to this GitHub repo and production should deploy from `main`.
 
+Set the Vercel project Node.js version to 22.x. The pinned Supabase client requires Node 22 or
+newer, matching `.nvmrc`.
+
 Daily development flow:
 
 ```bash
@@ -129,6 +132,15 @@ Latest Indy 500 pick-format migration:
 ```text
 supabase/migrations/20260528_add_indy_500_pick_format.sql
 ```
+
+Latest production hardening migration:
+
+```text
+supabase/migrations/20260709_harden_roles_and_result_publication.sql
+```
+
+Apply the hardening migration before deploying the application commit that uses it. Follow
+`HARDENING_DEPLOY.md` for backup, verification, and isolated-E2E setup steps.
 
 ## 5. Promote Admin
 

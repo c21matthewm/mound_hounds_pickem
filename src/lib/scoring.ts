@@ -7,11 +7,10 @@ import {
   pickLockAtForRace,
   type RacePickFormat
 } from "@/lib/race-format";
-import { isMissingColumnError } from "@/lib/supabase/schema-compat";
+import { loadAllRows } from "@/lib/supabase/paginated-query";
 import { getLeagueSeasonDateRange } from "@/lib/timezone";
 import {
   assignWeeklyRanks,
-  buildOrderedWeeklyRows,
   calculateOfficialSpeedDelta
 } from "@/lib/weekly-ranking";
 
@@ -53,6 +52,7 @@ type RaceRow = {
   pick_format: RacePickFormat;
   race_date: string;
   race_name: string;
+  results_status: "draft" | "published";
 };
 
 type ResultRow = {
@@ -88,23 +88,8 @@ export type RaceBreakdownColumn = {
   raceName: string;
 };
 
-export type RaceScoreboardRow = {
-  averageSpeed: number | null;
-  points: number;
-  rowType: "benchmark_high" | "benchmark_low" | "participant";
-  teamName: string;
-};
-
-export type RaceScoreboard = {
-  raceDate: string;
-  raceId: number;
-  raceName: string;
-  rows: RaceScoreboardRow[];
-};
-
 export type LeagueScoringSnapshot = {
   leaderboardRows: LeaderboardRow[];
-  latestRaceScoreboard: RaceScoreboard | null;
   raceColumns: RaceBreakdownColumn[];
 };
 
@@ -115,6 +100,7 @@ export type PicksByRaceOption = {
   raceDate: string;
   raceId: number;
   raceName: string;
+  resultsStatus: "draft" | "published";
   qualifyingStartAt: string;
 };
 
@@ -194,20 +180,6 @@ const asNumber = (value: number | string | null | undefined): number => {
 
   return 0;
 };
-
-const withOfficialSpeedMigrationHint = (message: string): string =>
-  message.includes("official_winning_average_speed")
-    ? `${message}. Run the latest Supabase migration to add official race average speed support.`
-    : message;
-
-const withRacePickFormatFallback = <T extends { id: number }>(rows: T[] | null): Array<T & {
-  pick_format: RacePickFormat;
-}> => (rows ?? []).map((row) => ({ ...row, pick_format: "standard" as const }));
-
-const withIndyPickFallback = <T extends object>(rows: T[] | null): Array<T & {
-  driver_group7_id: null;
-  driver_group8_id: null;
-}> => (rows ?? []).map((row) => ({ ...row, driver_group7_id: null, driver_group8_id: null }));
 
 const compareLeaderboardRows = (
   a: { racePoints: number; teamName: string; totalPoints: number },
@@ -421,84 +393,77 @@ const computeLowestFallbackByRace = (
 export async function buildLeagueScoringSnapshot(): Promise<LeagueScoringSnapshot> {
   const supabase = createServiceRoleSupabaseClient();
 
-  const [profilesRes, racesRes, picksRes, resultsRes, driversRes, raceDriverGroupsRes] =
+  const [profiles, races, allPicks, allResults, drivers, allRaceDriverGroups] =
     await Promise.all([
-    supabase
-      .from("profiles")
-      .select("id,team_name,role,full_name")
-      .in("role", ["participant", "admin"])
-      .order("team_name", { ascending: true }),
-    supabase
-      .from("races")
-      .select("id,race_name,pick_format,race_date,official_winning_average_speed")
-      .eq("is_archived", false)
-      .order("race_date", { ascending: true }),
-    supabase.from("picks").select(
-      "user_id,race_id,average_speed,driver_group1_id,driver_group2_id,driver_group3_id,driver_group4_id,driver_group5_id,driver_group6_id,driver_group7_id,driver_group8_id"
-    ),
-    supabase.from("results").select("race_id,driver_id,points"),
-    supabase.from("drivers").select("id,group_number"),
-    supabase.from("race_driver_groups").select("race_id,driver_id,group_number")
-  ]);
+      loadAllRows<ProfileRow>("profiles", (from, to) =>
+        supabase
+          .from("profiles")
+          .select("id,team_name,role,full_name")
+          .in("role", ["participant", "admin"])
+          .order("team_name", { ascending: true })
+          .order("id", { ascending: true })
+          .range(from, to)
+      ),
+      loadAllRows<RaceRow>("published races", (from, to) =>
+        supabase
+          .from("races")
+          .select(
+            "id,race_name,pick_format,race_date,official_winning_average_speed,results_status"
+          )
+          .eq("is_archived", false)
+          .eq("results_status", "published")
+          .order("race_date", { ascending: true })
+          .order("id", { ascending: true })
+          .range(from, to)
+      ),
+      loadAllRows<PickRow>("picks", (from, to) =>
+        supabase
+          .from("picks")
+          .select(
+            "user_id,race_id,average_speed,driver_group1_id,driver_group2_id,driver_group3_id,driver_group4_id,driver_group5_id,driver_group6_id,driver_group7_id,driver_group8_id"
+          )
+          .order("race_id", { ascending: true })
+          .order("user_id", { ascending: true })
+          .range(from, to)
+      ),
+      loadAllRows<ResultRow>("race results", (from, to) =>
+        supabase
+          .from("results")
+          .select("race_id,driver_id,points")
+          .order("race_id", { ascending: true })
+          .order("driver_id", { ascending: true })
+          .range(from, to)
+      ),
+      loadAllRows<DriverRow>("drivers", (from, to) =>
+        supabase
+          .from("drivers")
+          .select("id,group_number")
+          .order("id", { ascending: true })
+          .range(from, to)
+      ),
+      loadAllRows<RaceDriverGroupRow>("race driver groups", (from, to) =>
+        supabase
+          .from("race_driver_groups")
+          .select("race_id,driver_id,group_number")
+          .order("race_id", { ascending: true })
+          .order("driver_id", { ascending: true })
+          .range(from, to)
+      )
+    ]);
 
-  if (profilesRes.error) {
-    throw new Error(`Failed to load profiles: ${profilesRes.error.message}`);
-  }
-  let racesData = (racesRes.data ?? null) as RaceRow[] | null;
-  let racesError = racesRes.error;
-  let picksData = (picksRes.data ?? null) as PickRow[] | null;
-  let picksError = picksRes.error;
-
-  if (racesError && isMissingColumnError(racesError, "pick_format")) {
-    const legacyRacesRes = await supabase
-      .from("races")
-      .select("id,race_name,race_date,official_winning_average_speed")
-      .eq("is_archived", false)
-      .order("race_date", { ascending: true });
-
-    racesData = withRacePickFormatFallback(legacyRacesRes.data) as RaceRow[];
-    racesError = legacyRacesRes.error;
-  }
-  if (
-    picksError &&
-    (isMissingColumnError(picksError, "driver_group7_id") ||
-      isMissingColumnError(picksError, "driver_group8_id"))
-  ) {
-    const legacyPicksRes = await supabase.from("picks").select(
-      "user_id,race_id,average_speed,driver_group1_id,driver_group2_id,driver_group3_id,driver_group4_id,driver_group5_id,driver_group6_id"
-    );
-
-    picksData = withIndyPickFallback(legacyPicksRes.data) as PickRow[];
-    picksError = legacyPicksRes.error;
-  }
-  if (racesError) {
-    throw new Error(`Failed to load races: ${withOfficialSpeedMigrationHint(racesError.message)}`);
-  }
-  if (picksError) {
-    throw new Error(`Failed to load picks: ${picksError.message}`);
-  }
-  if (resultsRes.error) {
-    throw new Error(`Failed to load race results: ${resultsRes.error.message}`);
-  }
-  if (driversRes.error) {
-    throw new Error(`Failed to load drivers: ${driversRes.error.message}`);
-  }
-  if (raceDriverGroupsRes.error) {
-    throw new Error(`Failed to load race driver groups: ${raceDriverGroupsRes.error.message}`);
-  }
-
-  const participants: Participant[] = ((profilesRes.data ?? []) as ProfileRow[])
+  const participants: Participant[] = profiles
     .filter((profile) => typeof profile.team_name === "string" && profile.team_name.trim().length > 0)
     .map((profile) => ({
       id: profile.id,
       teamName: profile.team_name.trim()
     }));
 
-  const races = racesData ?? [];
-  const picks = picksData ?? [];
-  const results = (resultsRes.data ?? []) as ResultRow[];
-  const drivers = (driversRes.data ?? []) as DriverRow[];
-  const raceDriverGroups = (raceDriverGroupsRes.data ?? []) as RaceDriverGroupRow[];
+  const publishedRaceIds = new Set(races.map((race) => race.id));
+  const picks = allPicks.filter((pick) => publishedRaceIds.has(pick.race_id));
+  const results = allResults.filter((result) => publishedRaceIds.has(result.race_id));
+  const raceDriverGroups = allRaceDriverGroups.filter((row) =>
+    publishedRaceIds.has(row.race_id)
+  );
 
   const resultPointsByRaceDriver = new Map<string, number>();
   const resultsByRace = new Map<number, ResultRow[]>();
@@ -521,7 +486,6 @@ export async function buildLeagueScoringSnapshot(): Promise<LeagueScoringSnapsho
   if (completedRaces.length === 0) {
     return {
       leaderboardRows: [],
-      latestRaceScoreboard: null,
       raceColumns
     };
   }
@@ -557,52 +521,6 @@ export async function buildLeagueScoringSnapshot(): Promise<LeagueScoringSnapsho
   );
 
   const latestRace = completedRaces[completedRaces.length - 1];
-  const latestRaceMissingPickFallback = lowestFallbackByRaceId.get(latestRace.id) ?? 0;
-  const latestRaceRows: RaceScoreboardRow[] = buildOrderedWeeklyRows(
-    participants.map((participant) => {
-      const weekly = pickScoreByRaceUser.get(keyForRaceUser(latestRace.id, participant.id));
-      return {
-        averageSpeed: weekly?.averageSpeed ?? null,
-        points: weekly?.racePoints ?? latestRaceMissingPickFallback,
-        rowType: "participant" as const,
-        teamName: participant.teamName
-      };
-    }),
-    latestRace.official_winning_average_speed === null
-      ? null
-      : asNumber(latestRace.official_winning_average_speed)
-  );
-
-  const latestRaceExtremes = computeRaceExtremes(
-    latestRace.id,
-    groupCountByRaceId.get(latestRace.id) ?? 6,
-    resultsByRace.get(latestRace.id) ?? [],
-    raceDriverGroupByRaceDriver,
-    pickedDriverGroupByRaceDriver,
-    currentDriverGroupById
-  );
-
-  const latestRaceScoreboard: RaceScoreboard = {
-    raceDate: latestRace.race_date,
-    raceId: latestRace.id,
-    raceName: latestRace.race_name,
-    rows: [
-      ...latestRaceRows,
-      {
-        averageSpeed: null,
-        points: latestRaceExtremes.highest,
-        rowType: "benchmark_high",
-        teamName: "Highest Possible Score"
-      },
-      {
-        averageSpeed: null,
-        points: latestRaceExtremes.lowest,
-        rowType: "benchmark_low",
-        teamName: "Lowest Possible Score"
-      }
-    ]
-  };
-
   const cumulativeByUser = new Map<string, number>();
   const standingByRaceUser = new Map<string, number>();
   const raceBreakdownByUser = new Map<string, Map<number, number>>();
@@ -670,7 +588,6 @@ export async function buildLeagueScoringSnapshot(): Promise<LeagueScoringSnapsho
 
   return {
     leaderboardRows,
-    latestRaceScoreboard,
     raceColumns
   };
 }
@@ -682,84 +599,58 @@ export async function buildPicksByRaceSnapshot(
   const nowIso = new Date().toISOString();
   const seasonRange = getLeagueSeasonDateRange();
 
-  const [profilesRes, seasonRacesRes, driversRes] = await Promise.all([
-    supabase
-      .from("profiles")
-      .select("id,team_name,role,full_name")
-      .in("role", ["participant", "admin"])
-      .order("team_name", { ascending: true }),
-    supabase
-      .from("races")
-      .select("id,race_name,pick_format,race_date,qualifying_start_at,official_winning_average_speed")
-      .eq("is_archived", false)
-      .gte("race_date", seasonRange.seasonStartIso)
-      .lt("race_date", seasonRange.seasonEndExclusiveIso)
-      .lte("qualifying_start_at", nowIso)
-      .order("qualifying_start_at", { ascending: false }),
-    supabase.from("drivers").select("id,driver_name,group_number")
+  const [profiles, seasonRaceRows, drivers] = await Promise.all([
+    loadAllRows<ProfileRow>("profiles", (from, to) =>
+      supabase
+        .from("profiles")
+        .select("id,team_name,role,full_name")
+        .in("role", ["participant", "admin"])
+        .order("team_name", { ascending: true })
+        .order("id", { ascending: true })
+        .range(from, to)
+    ),
+    loadAllRows<RaceRow & { qualifying_start_at: string }>("locked season races", (from, to) =>
+      supabase
+        .from("races")
+        .select(
+          "id,race_name,pick_format,race_date,qualifying_start_at,official_winning_average_speed,results_status"
+        )
+        .eq("is_archived", false)
+        .gte("race_date", seasonRange.seasonStartIso)
+        .lt("race_date", seasonRange.seasonEndExclusiveIso)
+        .lte("qualifying_start_at", nowIso)
+        .order("qualifying_start_at", { ascending: false })
+        .order("id", { ascending: false })
+        .range(from, to)
+    ),
+    loadAllRows<DriverNameRow>("drivers", (from, to) =>
+      supabase
+        .from("drivers")
+        .select("id,driver_name,group_number")
+        .order("id", { ascending: true })
+        .range(from, to)
+    )
   ]);
 
-  if (profilesRes.error) {
-    throw new Error(`Failed to load profiles: ${profilesRes.error.message}`);
-  }
-  let seasonRacesData = (seasonRacesRes.data ?? null) as Array<
-    RaceRow & { qualifying_start_at: string }
-  > | null;
-  let seasonRacesError = seasonRacesRes.error;
-
-  if (seasonRacesError && isMissingColumnError(seasonRacesError, "pick_format")) {
-    const legacySeasonRacesRes = await supabase
-      .from("races")
-      .select("id,race_name,race_date,qualifying_start_at,official_winning_average_speed")
-      .eq("is_archived", false)
-      .gte("race_date", seasonRange.seasonStartIso)
-      .lt("race_date", seasonRange.seasonEndExclusiveIso)
-      .lte("qualifying_start_at", nowIso)
-      .order("qualifying_start_at", { ascending: false });
-
-    seasonRacesData = withRacePickFormatFallback(legacySeasonRacesRes.data) as Array<
-      RaceRow & { qualifying_start_at: string }
-    >;
-    seasonRacesError = legacySeasonRacesRes.error;
-  }
-  if (seasonRacesError) {
-    throw new Error(`Failed to load races: ${withOfficialSpeedMigrationHint(seasonRacesError.message)}`);
-  }
-  if (driversRes.error) {
-    throw new Error(`Failed to load drivers: ${driversRes.error.message}`);
-  }
-
-  let raceRows = seasonRacesData ?? [];
+  let raceRows = seasonRaceRows;
   if (raceRows.length === 0) {
-    let { data: fallbackRaces, error: fallbackRacesError } = await supabase
-      .from("races")
-      .select("id,race_name,pick_format,race_date,qualifying_start_at,official_winning_average_speed")
-      .eq("is_archived", false)
-      .lte("qualifying_start_at", nowIso)
-      .order("qualifying_start_at", { ascending: false });
-
-    if (fallbackRacesError && isMissingColumnError(fallbackRacesError, "pick_format")) {
-      const legacyFallbackRacesRes = await supabase
+    raceRows = await loadAllRows<RaceRow & { qualifying_start_at: string }>(
+      "locked fallback races",
+      (from, to) =>
+        supabase
         .from("races")
-        .select("id,race_name,race_date,qualifying_start_at,official_winning_average_speed")
+        .select(
+          "id,race_name,pick_format,race_date,qualifying_start_at,official_winning_average_speed,results_status"
+        )
         .eq("is_archived", false)
         .lte("qualifying_start_at", nowIso)
-        .order("qualifying_start_at", { ascending: false });
-
-      fallbackRaces = withRacePickFormatFallback(legacyFallbackRacesRes.data);
-      fallbackRacesError = legacyFallbackRacesRes.error;
-    }
-
-    if (fallbackRacesError) {
-      throw new Error(
-        `Failed to load fallback races: ${withOfficialSpeedMigrationHint(fallbackRacesError.message)}`
-      );
-    }
-
-    raceRows = (fallbackRaces ?? []) as Array<RaceRow & { qualifying_start_at: string }>;
+        .order("qualifying_start_at", { ascending: false })
+        .order("id", { ascending: false })
+        .range(from, to)
+    );
   }
 
-  const participants: Participant[] = ((profilesRes.data ?? []) as ProfileRow[])
+  const participants: Participant[] = profiles
     .filter((profile) => typeof profile.team_name === "string" && profile.team_name.trim().length > 0)
     .map((profile) => ({
       id: profile.id,
@@ -779,6 +670,7 @@ export async function buildPicksByRaceSnapshot(
       raceDate: race.race_date,
       raceId: race.id,
       raceName: race.race_name,
+      resultsStatus: race.results_status,
       qualifyingStartAt: pickLockAtForRace(race)
     };
   });
@@ -795,44 +687,34 @@ export async function buildPicksByRaceSnapshot(
   const selectedRace =
     availableRaces.find((race) => race.raceId === selectedRaceIdInput) ?? availableRaces[0];
 
-  const [picksRes, resultsRes, raceDriverGroupsRes] = await Promise.all([
-    supabase.from("picks").select(
-      "user_id,race_id,average_speed,driver_group1_id,driver_group2_id,driver_group3_id,driver_group4_id,driver_group5_id,driver_group6_id,driver_group7_id,driver_group8_id"
-    ).eq("race_id", selectedRace.raceId),
-    supabase.from("results").select("race_id,driver_id,points").eq("race_id", selectedRace.raceId),
-    supabase
-      .from("race_driver_groups")
-      .select("race_id,driver_id,group_number")
-      .eq("race_id", selectedRace.raceId)
+  const [selectedRacePicks, loadedResultRows, raceDriverGroups] = await Promise.all([
+    loadAllRows<PickRow>("selected race picks", (from, to) =>
+      supabase
+        .from("picks")
+        .select(
+          "user_id,race_id,average_speed,driver_group1_id,driver_group2_id,driver_group3_id,driver_group4_id,driver_group5_id,driver_group6_id,driver_group7_id,driver_group8_id"
+        )
+        .eq("race_id", selectedRace.raceId)
+        .order("user_id", { ascending: true })
+        .range(from, to)
+    ),
+    loadAllRows<ResultRow>("selected race results", (from, to) =>
+      supabase
+        .from("results")
+        .select("race_id,driver_id,points")
+        .eq("race_id", selectedRace.raceId)
+        .order("driver_id", { ascending: true })
+        .range(from, to)
+    ),
+    loadAllRows<RaceDriverGroupRow>("selected race driver groups", (from, to) =>
+      supabase
+        .from("race_driver_groups")
+        .select("race_id,driver_id,group_number")
+        .eq("race_id", selectedRace.raceId)
+        .order("driver_id", { ascending: true })
+        .range(from, to)
+    )
   ]);
-
-  let selectedRacePicksData = (picksRes.data ?? null) as PickRow[] | null;
-  let picksError = picksRes.error;
-
-  if (picksError) {
-    if (
-      isMissingColumnError(picksError, "driver_group7_id") ||
-      isMissingColumnError(picksError, "driver_group8_id")
-    ) {
-      const legacyPicksRes = await supabase.from("picks").select(
-        "user_id,race_id,average_speed,driver_group1_id,driver_group2_id,driver_group3_id,driver_group4_id,driver_group5_id,driver_group6_id"
-      ).eq("race_id", selectedRace.raceId);
-
-      selectedRacePicksData = withIndyPickFallback(legacyPicksRes.data) as PickRow[];
-      picksError = legacyPicksRes.error;
-    }
-  }
-  if (picksError) {
-    throw new Error(`Failed to load picks: ${picksError.message}`);
-  }
-  if (resultsRes.error) {
-    throw new Error(`Failed to load race results: ${resultsRes.error.message}`);
-  }
-  if (raceDriverGroupsRes.error) {
-    throw new Error(`Failed to load race driver groups: ${raceDriverGroupsRes.error.message}`);
-  }
-
-  const selectedRacePicks = selectedRacePicksData ?? [];
   const picksByUser = new Map<string, PickRow>();
   selectedRacePicks.forEach((pick) => {
     picksByUser.set(pick.user_id, pick);
@@ -841,18 +723,18 @@ export async function buildPicksByRaceSnapshot(
 
   const driverNameById = new Map<number, string>();
   const currentDriverGroupById = new Map<number, number>();
-  ((driversRes.data ?? []) as DriverNameRow[]).forEach((driver) => {
+  drivers.forEach((driver) => {
     driverNameById.set(driver.id, driver.driver_name);
     currentDriverGroupById.set(driver.id, driver.group_number);
   });
   const raceDriverGroupByRaceDriver = new Map<string, number>();
-  ((raceDriverGroupsRes.data ?? []) as RaceDriverGroupRow[]).forEach((row) => {
+  raceDriverGroups.forEach((row) => {
     raceDriverGroupByRaceDriver.set(keyForRaceDriver(row.race_id, row.driver_id), row.group_number);
   });
 
   const resultPointsByDriverId = new Map<number, number>();
   const minimumPointsByGroup = new Map<number, number>();
-  const resultRows = (resultsRes.data ?? []) as ResultRow[];
+  const resultRows = selectedRace.resultsStatus === "published" ? loadedResultRows : [];
   resultRows.forEach((result) => {
     const points = asNumber(result.points);
     resultPointsByDriverId.set(result.driver_id, points);
@@ -871,7 +753,7 @@ export async function buildPicksByRaceSnapshot(
       minimumPointsByGroup.set(group, points);
     }
   });
-  const resultsPosted = resultRows.length > 0;
+  const resultsPosted = selectedRace.resultsStatus === "published" && resultRows.length > 0;
 
   const baseRows = participants.map((participant) => {
     const pick = picksByUser.get(participant.id) ?? null;
@@ -979,73 +861,65 @@ export async function buildParticipantAnalyticsSnapshot(
 ): Promise<ParticipantAnalyticsSnapshot> {
   const supabase = createServiceRoleSupabaseClient();
 
-  const [profilesRes, racesRes, picksRes, resultsRes, driversRes, raceDriverGroupsRes] =
+  const [profiles, races, allPicks, allResults, drivers, allRaceDriverGroups] =
     await Promise.all([
-    supabase
-      .from("profiles")
-      .select("id,team_name,role,full_name")
-      .in("role", ["participant", "admin"])
-      .order("team_name", { ascending: true }),
-    supabase
-      .from("races")
-      .select("id,race_name,pick_format,race_date,official_winning_average_speed")
-      .eq("is_archived", false)
-      .order("race_date", { ascending: true }),
-    supabase.from("picks").select(
-      "user_id,race_id,average_speed,driver_group1_id,driver_group2_id,driver_group3_id,driver_group4_id,driver_group5_id,driver_group6_id,driver_group7_id,driver_group8_id"
-    ),
-    supabase.from("results").select("race_id,driver_id,points"),
-    supabase.from("drivers").select("id,group_number"),
-    supabase.from("race_driver_groups").select("race_id,driver_id,group_number")
-  ]);
+      loadAllRows<ProfileRow>("profiles", (from, to) =>
+        supabase
+          .from("profiles")
+          .select("id,team_name,role,full_name")
+          .in("role", ["participant", "admin"])
+          .order("team_name", { ascending: true })
+          .order("id", { ascending: true })
+          .range(from, to)
+      ),
+      loadAllRows<RaceRow>("published races", (from, to) =>
+        supabase
+          .from("races")
+          .select(
+            "id,race_name,pick_format,race_date,official_winning_average_speed,results_status"
+          )
+          .eq("is_archived", false)
+          .eq("results_status", "published")
+          .order("race_date", { ascending: true })
+          .order("id", { ascending: true })
+          .range(from, to)
+      ),
+      loadAllRows<PickRow>("picks", (from, to) =>
+        supabase
+          .from("picks")
+          .select(
+            "user_id,race_id,average_speed,driver_group1_id,driver_group2_id,driver_group3_id,driver_group4_id,driver_group5_id,driver_group6_id,driver_group7_id,driver_group8_id"
+          )
+          .order("race_id", { ascending: true })
+          .order("user_id", { ascending: true })
+          .range(from, to)
+      ),
+      loadAllRows<ResultRow>("race results", (from, to) =>
+        supabase
+          .from("results")
+          .select("race_id,driver_id,points")
+          .order("race_id", { ascending: true })
+          .order("driver_id", { ascending: true })
+          .range(from, to)
+      ),
+      loadAllRows<DriverRow>("drivers", (from, to) =>
+        supabase
+          .from("drivers")
+          .select("id,group_number")
+          .order("id", { ascending: true })
+          .range(from, to)
+      ),
+      loadAllRows<RaceDriverGroupRow>("race driver groups", (from, to) =>
+        supabase
+          .from("race_driver_groups")
+          .select("race_id,driver_id,group_number")
+          .order("race_id", { ascending: true })
+          .order("driver_id", { ascending: true })
+          .range(from, to)
+      )
+    ]);
 
-  if (profilesRes.error) {
-    throw new Error(`Failed to load profiles: ${profilesRes.error.message}`);
-  }
-  let racesData = (racesRes.data ?? null) as RaceRow[] | null;
-  let racesError = racesRes.error;
-  let picksData = (picksRes.data ?? null) as PickRow[] | null;
-  let picksError = picksRes.error;
-
-  if (racesError && isMissingColumnError(racesError, "pick_format")) {
-    const legacyRacesRes = await supabase
-      .from("races")
-      .select("id,race_name,race_date,official_winning_average_speed")
-      .eq("is_archived", false)
-      .order("race_date", { ascending: true });
-
-    racesData = withRacePickFormatFallback(legacyRacesRes.data) as RaceRow[];
-    racesError = legacyRacesRes.error;
-  }
-  if (
-    picksError &&
-    (isMissingColumnError(picksError, "driver_group7_id") ||
-      isMissingColumnError(picksError, "driver_group8_id"))
-  ) {
-    const legacyPicksRes = await supabase.from("picks").select(
-      "user_id,race_id,average_speed,driver_group1_id,driver_group2_id,driver_group3_id,driver_group4_id,driver_group5_id,driver_group6_id"
-    );
-
-    picksData = withIndyPickFallback(legacyPicksRes.data) as PickRow[];
-    picksError = legacyPicksRes.error;
-  }
-  if (racesError) {
-    throw new Error(`Failed to load races: ${withOfficialSpeedMigrationHint(racesError.message)}`);
-  }
-  if (picksError) {
-    throw new Error(`Failed to load picks: ${picksError.message}`);
-  }
-  if (resultsRes.error) {
-    throw new Error(`Failed to load race results: ${resultsRes.error.message}`);
-  }
-  if (driversRes.error) {
-    throw new Error(`Failed to load drivers: ${driversRes.error.message}`);
-  }
-  if (raceDriverGroupsRes.error) {
-    throw new Error(`Failed to load race driver groups: ${raceDriverGroupsRes.error.message}`);
-  }
-
-  const participants: Participant[] = ((profilesRes.data ?? []) as ProfileRow[])
+  const participants: Participant[] = profiles
     .filter((profile) => typeof profile.team_name === "string" && profile.team_name.trim().length > 0)
     .map((profile) => ({
       id: profile.id,
@@ -1056,11 +930,12 @@ export async function buildParticipantAnalyticsSnapshot(
     throw new Error("Participant profile not found for analytics.");
   }
 
-  const races = racesData ?? [];
-  const picks = picksData ?? [];
-  const results = (resultsRes.data ?? []) as ResultRow[];
-  const drivers = (driversRes.data ?? []) as DriverRow[];
-  const raceDriverGroups = (raceDriverGroupsRes.data ?? []) as RaceDriverGroupRow[];
+  const publishedRaceIds = new Set(races.map((race) => race.id));
+  const picks = allPicks.filter((pick) => publishedRaceIds.has(pick.race_id));
+  const results = allResults.filter((result) => publishedRaceIds.has(result.race_id));
+  const raceDriverGroups = allRaceDriverGroups.filter((row) =>
+    publishedRaceIds.has(row.race_id)
+  );
   const fieldSize = participants.length;
 
   const resultPointsByRaceDriver = new Map<string, number>();

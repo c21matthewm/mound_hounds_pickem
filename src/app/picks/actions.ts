@@ -27,7 +27,7 @@ const parsePositiveInt = (value: string): number | null => {
 
 const parsePositiveDecimal = (value: string): number | null => {
   const parsed = Number(value);
-  if (Number.isNaN(parsed) || parsed <= 0) {
+  if (!Number.isFinite(parsed) || parsed <= 0) {
     return null;
   }
 

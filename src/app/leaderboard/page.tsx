@@ -262,44 +262,7 @@ export default async function LeaderboardPage({ searchParams }: PageProps) {
             No completed races with results yet. Add race results in admin to populate standings.
           </p>
         ) : (
-          <>
-            <StandingsTable raceColumns={standingsRaceColumns} rows={standingsTableRows} />
-
-            {standingsSnapshot.latestRaceScoreboard ? (
-              <section className="mt-8 rounded-lg border border-slate-200 bg-white p-6">
-                <h2 className="text-xl font-semibold text-slate-900">
-                  Latest Race: {standingsSnapshot.latestRaceScoreboard.raceName}
-                </h2>
-                <p className="mt-1 text-sm text-slate-600">
-                  {formatRaceDate(standingsSnapshot.latestRaceScoreboard.raceDate)}
-                </p>
-                <p className="mt-1 text-xs text-slate-500">Times shown in {LEAGUE_TIME_ZONE}.</p>
-
-                <div className="mt-4 overflow-x-auto rounded-md border border-slate-200">
-                  <table className="min-w-full text-left text-sm">
-                    <thead className="bg-slate-50 text-slate-700">
-                      <tr>
-                        <th className="px-3 py-2 font-semibold">Row</th>
-                        <th className="px-3 py-2 font-semibold">Race Points</th>
-                        <th className="px-3 py-2 font-semibold">Average Speed</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {standingsSnapshot.latestRaceScoreboard.rows.map((row, index) => (
-                        <tr key={`${row.rowType}-${row.teamName}-${index}`} className="border-t border-slate-200">
-                          <td className="px-3 py-2">{row.teamName}</td>
-                          <td className="px-3 py-2 font-semibold">{row.points}</td>
-                          <td className="px-3 py-2">
-                            {row.averageSpeed !== null ? row.averageSpeed.toFixed(3) : "-"}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </section>
-            ) : null}
-          </>
+          <StandingsTable raceColumns={standingsRaceColumns} rows={standingsTableRows} />
         )
       ) : null}
 
@@ -334,40 +297,13 @@ export default async function LeaderboardPage({ searchParams }: PageProps) {
               </div>
 
               {picksSnapshot.selectedRace ? (
-                <div className="mt-5 grid gap-3 text-sm text-slate-700 md:grid-cols-3">
-                  <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 md:col-span-3">
-                    <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                      Selected Race
-                    </p>
-                    <p className="mt-1 text-lg font-semibold text-slate-900">
-                      {picksSnapshot.selectedRace.raceName}
-                    </p>
-                    <p className="mt-1 text-xs text-slate-500">Times shown in {LEAGUE_TIME_ZONE}.</p>
-                  </div>
-                  <div className="rounded-xl border border-slate-200 bg-white p-3">
-                    <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                      Pick Lock
-                    </p>
-                    <p className="mt-1 font-medium text-slate-900">
-                      {formatRaceDate(picksSnapshot.selectedRace.qualifyingStartAt)}
-                    </p>
-                  </div>
-                  <div className="rounded-xl border border-slate-200 bg-white p-3">
-                    <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                      Race Start
-                    </p>
-                    <p className="mt-1 font-medium text-slate-900">
-                      {formatRaceDate(picksSnapshot.selectedRace.raceDate)}
-                    </p>
-                  </div>
-                  <div className="rounded-xl border border-slate-200 bg-white p-3">
-                    <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                      Results
-                    </p>
-                    <p className="mt-1 font-medium text-slate-900">
-                      {picksSnapshot.resultsPosted ? "Posted" : "Pending"}
-                    </p>
-                  </div>
+                <div className="mt-4 border-t border-slate-200 pt-4">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                    Selected Race
+                  </p>
+                  <p className="mt-1 text-lg font-semibold text-slate-900">
+                    {picksSnapshot.selectedRace.raceName}
+                  </p>
                 </div>
               ) : null}
             </section>

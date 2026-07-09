@@ -282,108 +282,11 @@ const deleteRaceImages = async (races) => {
   return data?.length ?? imagePaths.length;
 };
 
-const driverGroupForIndex = (index) => {
-  if (index < 4) return 1;
-  if (index < 8) return 2;
-  if (index < 12) return 3;
-  if (index < 16) return 4;
-  if (index < 20) return 5;
-  return 6;
-};
-
-const refreshDriverStandingsAndGroups = async () => {
-  const { data: activeDrivers, error: activeDriversError } = await supabase
-    .from("drivers")
-    .select("id,championship_points,current_standing,driver_name")
-    .eq("is_active", true)
-    .order("championship_points", { ascending: false })
-    .order("current_standing", { ascending: true })
-    .order("driver_name", { ascending: true });
-
-  if (activeDriversError) {
-    throw new Error(`Failed loading active drivers: ${activeDriversError.message}`);
-  }
-
-  const { data: inactiveDrivers, error: inactiveDriversError } = await supabase
-    .from("drivers")
-    .select("id,current_standing,driver_name")
-    .eq("is_active", false)
-    .order("current_standing", { ascending: true })
-    .order("driver_name", { ascending: true });
-
-  if (inactiveDriversError) {
-    throw new Error(`Failed loading inactive drivers: ${inactiveDriversError.message}`);
-  }
-
-  const rankedActiveDrivers = activeDrivers ?? [];
-  const inactiveDriverRows = inactiveDrivers ?? [];
-  const activeUpdateResponses = await Promise.all(
-    rankedActiveDrivers.map((driver, index) =>
-      supabase
-        .from("drivers")
-        .update({
-          current_standing: index + 1,
-          group_number: driverGroupForIndex(index)
-        })
-        .eq("id", driver.id)
-    )
-  );
-  const inactiveUpdateResponses = await Promise.all(
-    inactiveDriverRows.map((driver, index) =>
-      supabase
-        .from("drivers")
-        .update({
-          current_standing: rankedActiveDrivers.length + index + 1,
-          group_number: 6
-        })
-        .eq("id", driver.id)
-    )
-  );
-
-  const failed = [...activeUpdateResponses, ...inactiveUpdateResponses].find(
-    (result) => result.error
-  );
-  if (failed?.error) {
-    throw new Error(`Failed refreshing driver standings/groups: ${failed.error.message}`);
-  }
-};
-
 const refreshDriverChampionshipPointsFromResults = async () => {
-  const [driversResponse, resultsResponse] = await Promise.all([
-    supabase.from("drivers").select("id"),
-    supabase.from("results").select("driver_id,points")
-  ]);
-
-  if (driversResponse.error) {
-    throw new Error(`Failed loading drivers for point recompute: ${driversResponse.error.message}`);
+  const { error } = await supabase.rpc("refresh_driver_standings_from_published_results");
+  if (error) {
+    throw new Error(`Failed recomputing published driver points: ${error.message}`);
   }
-  if (resultsResponse.error) {
-    throw new Error(`Failed loading results for point recompute: ${resultsResponse.error.message}`);
-  }
-
-  const pointsByDriverId = new Map();
-  (resultsResponse.data ?? []).forEach((result) => {
-    const current = pointsByDriverId.get(result.driver_id) ?? 0;
-    pointsByDriverId.set(result.driver_id, current + Number(result.points));
-  });
-
-  const updateResponses = await Promise.all(
-    (driversResponse.data ?? []).map((driver) =>
-      supabase
-        .from("drivers")
-        .update({
-          championship_points: pointsByDriverId.get(driver.id) ?? 0
-        })
-        .eq("id", driver.id)
-    )
-  );
-
-  const failedUpdate = updateResponses.find((result) => result.error);
-  if (failedUpdate?.error) {
-    throw new Error(`Failed recomputing driver points: ${failedUpdate.error.message}`);
-  }
-
-  await refreshDriverStandingsAndGroups();
 };
 
 const main = async () => {

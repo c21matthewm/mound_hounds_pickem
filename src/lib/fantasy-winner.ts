@@ -44,6 +44,7 @@ type RaceWinnerSpeedRow = {
   id: number;
   official_winning_average_speed: number | string | null;
   pick_format: RacePickFormat;
+  results_status: "draft" | "published";
 };
 
 type RaceDriverGroupRow = {
@@ -190,7 +191,11 @@ export async function calculateRaceWinnerProfileId(
       )
       .eq("race_id", raceId),
     supabase.from("results").select("driver_id,points").eq("race_id", raceId),
-    supabase.from("races").select("id,pick_format,official_winning_average_speed").eq("id", raceId).maybeSingle(),
+    supabase
+      .from("races")
+      .select("id,pick_format,official_winning_average_speed,results_status")
+      .eq("id", raceId)
+      .maybeSingle(),
     supabase
       .from("profiles")
       .select("id,team_name")
@@ -238,7 +243,8 @@ export async function calculateRaceWinnerProfileId(
     raceData = legacyRaceRes.data
       ? ({
           ...legacyRaceRes.data,
-          pick_format: "standard" as const
+          pick_format: "standard" as const,
+          results_status: "published" as const
         } as RaceWinnerSpeedRow)
       : null;
     raceError = legacyRaceRes.error;
@@ -267,6 +273,9 @@ export async function calculateRaceWinnerProfileId(
   const race = raceData;
   if (!race) {
     throw new Error("Selected race was not found.");
+  }
+  if (race.results_status !== "published") {
+    throw new Error("Publish the complete race results before calculating a fantasy winner.");
   }
   if (results.length === 0) {
     return null;
@@ -347,6 +356,7 @@ export async function finalizeRaceWinnerNow(
     })
     .eq("id", raceId)
     .eq("is_archived", false)
+    .eq("results_status", "published")
     .select("id")
     .maybeSingle();
 

@@ -19,6 +19,7 @@ type DriverOption = {
   driverName: string;
   groupNumber: number;
   id: number;
+  isActive: boolean;
 };
 
 type ParticipantOption = {
@@ -44,20 +45,24 @@ type PreviewRow = {
   mappedDriverId: number | null;
   mappedDriverName: string | null;
   points: number;
+  position: number | null;
   sourceDriverName: string;
   status: "duplicate" | "ready" | "unmatched";
 };
 
 type PreviewState = {
   duplicateCount: number;
+  expectedResultCount: number;
   groupCount: number;
   highestPossibleScore: number | null;
   ignoredLineCount: number;
   inputKey: string;
   lowestPossibleScore: number | null;
+  missingOfficialGroups: number[];
   missingScoreGroups: number[];
   noPickTeamNames: string[];
   parsedRowCount: number;
+  positionsValid: boolean;
   readyCount: number;
   rows: PreviewRow[];
   selectedRaceName: string;
@@ -65,7 +70,10 @@ type PreviewState = {
   unmatchedDriverNames: string[];
   unmatchedLineCount: number;
   winningAverageSpeed: number | null;
+  zeroPointDriverNames: string[];
 };
+
+const MAX_STANDARD_NONSTARTERS = 5;
 
 type Props = {
   action: (formData: FormData) => void | Promise<void>;
@@ -119,7 +127,14 @@ export function AdminResultsImportForm({
     previewState !== null &&
     !previewIsStale &&
     previewState.readyCount > 0 &&
+    previewState.readyCount <= previewState.expectedResultCount &&
+    (previewState.selectedRacePickFormat === "standard" ||
+      previewState.readyCount === previewState.expectedResultCount) &&
+    previewState.duplicateCount === 0 &&
     previewState.unmatchedLineCount === 0 &&
+    previewState.positionsValid &&
+    previewState.missingOfficialGroups.length === 0 &&
+    previewState.zeroPointDriverNames.length <= MAX_STANDARD_NONSTARTERS &&
     previewState.winningAverageSpeed !== null &&
     previewState.missingScoreGroups.length === 0;
 
@@ -162,6 +177,19 @@ export function AdminResultsImportForm({
       .forEach((group) => {
         raceGroupByDriverId.set(group.driver_id, group.group_number);
       });
+    const expectedDriverIds =
+      raceGroupByDriverId.size > 0
+        ? new Set(raceGroupByDriverId.keys())
+        : new Set(
+            racePickFormat === "standard"
+              ? drivers
+                  .filter(
+                    (driver) =>
+                      driver.isActive && driver.groupNumber >= 1 && driver.groupNumber <= groupCount
+                  )
+                  .map((driver) => driver.id)
+              : []
+          );
 
     const resolveGroupNumber = (driverId: number): number | null => {
       const raceGroup = raceGroupByDriverId.get(driverId);
@@ -190,6 +218,21 @@ export function AdminResultsImportForm({
           mappedDriverId: null,
           mappedDriverName: null,
           points: row.points,
+          position: row.position,
+          sourceDriverName: row.driverName,
+          status: "unmatched"
+        };
+      }
+
+      if (!expectedDriverIds.has(matched.id)) {
+        unmatchedNames.add(`${row.driverName} (outside race field)`);
+        return {
+          groupNumber: null,
+          lineNumber: row.lineNumber,
+          mappedDriverId: matched.id,
+          mappedDriverName: matched.name,
+          points: row.points,
+          position: row.position,
           sourceDriverName: row.driverName,
           status: "unmatched"
         };
@@ -202,6 +245,7 @@ export function AdminResultsImportForm({
           mappedDriverId: matched.id,
           mappedDriverName: matched.name,
           points: row.points,
+          position: row.position,
           sourceDriverName: row.driverName,
           status: "duplicate"
         };
@@ -214,6 +258,7 @@ export function AdminResultsImportForm({
         mappedDriverId: matched.id,
         mappedDriverName: matched.name,
         points: row.points,
+        position: row.position,
         sourceDriverName: row.driverName,
         status: "ready"
       };
@@ -222,6 +267,21 @@ export function AdminResultsImportForm({
     const readyCount = previewRows.filter((row) => row.status === "ready").length;
     const duplicateCount = previewRows.filter((row) => row.status === "duplicate").length;
     const unmatchedLineCount = previewRows.filter((row) => row.status === "unmatched").length;
+    const readyRows = previewRows.filter((row) => row.status === "ready");
+    const readyPositions = readyRows
+      .map((row) => row.position)
+      .filter((position): position is number => position !== null);
+    const sortedPositions = [...readyPositions].sort((a, b) => a - b);
+    const positionsValid =
+      readyPositions.length === readyRows.length &&
+      new Set(readyPositions).size === readyRows.length &&
+      sortedPositions.every((position, index) => position === index + 1);
+    const zeroPointDriverIds = Array.from(expectedDriverIds).filter(
+      (driverId) => !seenDriverIds.has(driverId)
+    );
+    const zeroPointDriverNames = zeroPointDriverIds
+      .map((driverId) => driverById.get(driverId)?.driverName ?? `Driver #${driverId}`)
+      .sort((a, b) => a.localeCompare(b));
     const pointsByGroup = new Map<number, number[]>();
     for (const groupNumber of groupNumbers) {
       pointsByGroup.set(groupNumber, []);
@@ -235,6 +295,21 @@ export function AdminResultsImportForm({
       const points = pointsByGroup.get(row.groupNumber) ?? [];
       points.push(row.points);
       pointsByGroup.set(row.groupNumber, points);
+    });
+
+    const missingOfficialGroups = groupNumbers.filter(
+      (groupNumber) => (pointsByGroup.get(groupNumber) ?? []).length === 0
+    );
+
+    zeroPointDriverIds.forEach((driverId) => {
+      const groupNumber = resolveGroupNumber(driverId);
+      if (!groupNumber) {
+        return;
+      }
+
+      const points = pointsByGroup.get(groupNumber) ?? [];
+      points.push(0);
+      pointsByGroup.set(groupNumber, points);
     });
 
     const missingScoreGroups: number[] = [];
@@ -262,21 +337,25 @@ export function AdminResultsImportForm({
     setPreviewError(null);
     setPreviewState({
       duplicateCount,
+      expectedResultCount: expectedDriverIds.size,
       groupCount,
       highestPossibleScore: missingScoreGroups.length > 0 ? null : highestPossibleScore,
       ignoredLineCount: parsed.ignoredLineCount,
       inputKey: currentInputKey,
       lowestPossibleScore: missingScoreGroups.length > 0 ? null : lowestPossibleScore,
+      missingOfficialGroups,
       missingScoreGroups,
       noPickTeamNames,
       parsedRowCount: parsed.rows.length,
+      positionsValid,
       readyCount,
       rows: previewRows,
       selectedRaceName: selectedRace.raceName,
       selectedRacePickFormat: racePickFormat,
       unmatchedDriverNames: Array.from(unmatchedNames),
       unmatchedLineCount,
-      winningAverageSpeed: parsed.winningAverageSpeed
+      winningAverageSpeed: parsed.winningAverageSpeed,
+      zeroPointDriverNames
     });
   };
 
@@ -388,9 +467,19 @@ export function AdminResultsImportForm({
           <dl className="mt-4 grid gap-3 text-sm sm:grid-cols-2 lg:grid-cols-4">
             <div className={summaryCardClassName}>
               <dt className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
-                Matched Drivers
+                Official / Pickable
               </dt>
-              <dd className="mt-1 text-2xl font-semibold text-emerald-700">{previewState.readyCount}</dd>
+              <dd className="mt-1 text-2xl font-semibold text-emerald-700">
+                {previewState.readyCount}/{previewState.expectedResultCount}
+              </dd>
+            </div>
+            <div className={summaryCardClassName}>
+              <dt className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                Zero-Point Nonstarters
+              </dt>
+              <dd className="mt-1 text-2xl font-semibold text-amber-700">
+                {previewState.zeroPointDriverNames.length}
+              </dd>
             </div>
             <div className={summaryCardClassName}>
               <dt className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
@@ -451,6 +540,33 @@ export function AdminResultsImportForm({
             </p>
           ) : null}
 
+          {!previewState.positionsValid ? (
+            <p className="mt-3 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
+              Finishing positions must be unique and contiguous from 1 through the final official row.
+            </p>
+          ) : null}
+
+          {previewState.missingOfficialGroups.length > 0 ? (
+            <p className="mt-3 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
+              The official order has no participating driver from group(s): {previewState.missingOfficialGroups.join(", ")}.
+            </p>
+          ) : null}
+
+          {previewState.zeroPointDriverNames.length > MAX_STANDARD_NONSTARTERS ? (
+            <p className="mt-3 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
+              More than {MAX_STANDARD_NONSTARTERS} snapshotted drivers are missing. Review the pasted table before publishing.
+            </p>
+          ) : null}
+
+          {previewState.zeroPointDriverNames.length > 0 ? (
+            <div className="mt-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+              <p className="font-semibold">
+                These pickable drivers are absent from the official finishing order and will receive 0 points.
+              </p>
+              <p className="mt-1">{previewState.zeroPointDriverNames.join(", ")}</p>
+            </div>
+          ) : null}
+
           {previewState.unmatchedDriverNames.length > 0 ? (
             <p className="mt-3 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
               Unmatched drivers: {previewState.unmatchedDriverNames.join(", ")}
@@ -474,6 +590,7 @@ export function AdminResultsImportForm({
               <thead className="bg-slate-50 text-slate-700">
                 <tr>
                   <th className="px-2 py-1.5 font-semibold">Line</th>
+                  <th className="px-2 py-1.5 font-semibold">Position</th>
                   <th className="px-2 py-1.5 font-semibold">Pasted Driver</th>
                   <th className="px-2 py-1.5 font-semibold">Mapped Driver</th>
                   <th className="px-2 py-1.5 font-semibold">Group</th>
@@ -488,6 +605,7 @@ export function AdminResultsImportForm({
                     className="border-t border-slate-200"
                   >
                     <td className="px-2 py-1.5">{row.lineNumber}</td>
+                    <td className="px-2 py-1.5">{row.position ?? "-"}</td>
                     <td className="px-2 py-1.5">{row.sourceDriverName}</td>
                     <td className="px-2 py-1.5">{row.mappedDriverName ?? "-"}</td>
                     <td className="px-2 py-1.5">{row.groupNumber ? `G${row.groupNumber}` : "-"}</td>
@@ -496,7 +614,7 @@ export function AdminResultsImportForm({
                       {row.status === "ready" ? (
                         <span className="font-semibold text-emerald-700">Ready</span>
                       ) : row.status === "duplicate" ? (
-                        <span className="font-semibold text-amber-700">Duplicate (ignored)</span>
+                        <span className="font-semibold text-amber-700">Duplicate</span>
                       ) : (
                         <span className="font-semibold text-red-700">Unmatched</span>
                       )}
