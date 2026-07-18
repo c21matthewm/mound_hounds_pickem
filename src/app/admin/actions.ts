@@ -4,9 +4,13 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { parseChampionshipStandingsPaste } from "@/lib/championship-standings";
-import { getFormFile, uploadDriverHeadshot } from "@/lib/driver-images";
+import {
+  deleteManagedDriverHeadshot,
+  getFormFile,
+  uploadDriverHeadshot
+} from "@/lib/driver-images";
 import { finalizeRaceWinnerNow } from "@/lib/fantasy-winner";
-import { uploadRaceTitleImage } from "@/lib/race-images";
+import { deleteManagedRaceTitleImage, uploadRaceTitleImage } from "@/lib/race-images";
 import { requireAdmin } from "@/lib/admin";
 import { normalizeDriverName, parseIndycarResultsPaste } from "@/lib/indycar-results";
 import { parseQualifyingOrderPaste } from "@/lib/qualifying-order";
@@ -19,7 +23,13 @@ import {
 } from "@/lib/race-format";
 import { createServiceRoleSupabaseClient } from "@/lib/supabase/service-role";
 import { isMissingColumnError, withMigrationHint } from "@/lib/supabase/schema-compat";
-import { parseLeagueDateTimeLocalInput } from "@/lib/timezone";
+import { invalidateScoringCache } from "@/lib/scoring-cache";
+import { buildLeagueScoringSnapshotUncached } from "@/lib/scoring";
+import {
+  getLeagueSeasonDateRange,
+  getLeagueYear,
+  parseLeagueDateTimeLocalInput
+} from "@/lib/timezone";
 
 const asText = (value: FormDataEntryValue | null): string =>
   typeof value === "string" ? value.trim() : "";
@@ -48,6 +58,8 @@ const parseRacePickFormat = (value: string): RacePickFormat =>
 const INDY_500_MIGRATION_FILE = "supabase/migrations/20260528_add_indy_500_pick_format.sql";
 const RESULT_PUBLICATION_MIGRATION_FILE =
   "supabase/migrations/20260709_harden_roles_and_result_publication.sql";
+const HALL_OF_FAME_MIGRATION_FILE =
+  "supabase/migrations/20260717_add_hall_of_fame.sql";
 
 const withResultPublicationMigrationHint = (message: string): string =>
   /function .* does not exist|schema cache/i.test(message)
@@ -55,6 +67,7 @@ const withResultPublicationMigrationHint = (message: string): string =>
     : message;
 
 const adminRedirect = (key: "error" | "message", value: string, tab?: AdminTab): never => {
+  invalidateScoringCache();
   const params = new URLSearchParams({ [key]: value });
   if (tab) {
     params.set("tab", tab);
@@ -246,6 +259,9 @@ export async function createDriverAction(formData: FormData) {
         .eq("id", insertedDriverId);
 
       if (updateImageError) {
+        await deleteManagedDriverHeadshot(uploadedUrl).catch((cleanupError) => {
+          console.error("[storage] Failed rolling back driver image upload:", cleanupError);
+        });
         redirectWithTab(
           "error",
           `Driver created, but image update failed: ${updateImageError.message}`
@@ -289,6 +305,19 @@ export async function updateDriverAction(formData: FormData) {
     redirectWithTab("error", "Driver update requires id and name.");
   }
   const driverIdValue = driverId as number;
+  const { data: existingDriver, error: existingDriverError } = await supabase
+    .from("drivers")
+    .select("image_url")
+    .eq("id", driverIdValue)
+    .maybeSingle<{ image_url: string | null }>();
+
+  if (existingDriverError) {
+    redirectWithTab("error", existingDriverError.message);
+  }
+  if (!existingDriver) {
+    redirectWithTab("error", "Driver not found.");
+  }
+  const existingDriverImageUrl = existingDriver?.image_url ?? null;
 
   let imageUrl = imageUrlInput || null;
   if (imageFile) {
@@ -315,11 +344,26 @@ export async function updateDriverAction(formData: FormData) {
     .eq("id", driverIdValue);
 
   if (error) {
+    if (imageFile && imageUrl !== existingDriverImageUrl) {
+      await deleteManagedDriverHeadshot(imageUrl).catch((cleanupError) => {
+        console.error("[storage] Failed rolling back driver image upload:", cleanupError);
+      });
+    }
     if (error.code === "23505") {
       redirectWithTab("error", "Driver name already exists.");
     }
 
     redirectWithTab("error", error.message);
+  }
+
+  let imageCleanupWarning = "";
+  if (existingDriverImageUrl && existingDriverImageUrl !== imageUrl) {
+    try {
+      await deleteManagedDriverHeadshot(existingDriverImageUrl);
+    } catch (cleanupError) {
+      const message = cleanupError instanceof Error ? cleanupError.message : "Unknown cleanup error.";
+      imageCleanupWarning = ` Replaced image cleanup needs attention: ${message}`;
+    }
   }
 
   try {
@@ -334,7 +378,10 @@ export async function updateDriverAction(formData: FormData) {
 
   revalidatePath("/admin");
   revalidatePath("/picks");
-  redirectWithTab("message", "Driver updated. Standings and groups were refreshed.");
+  redirectWithTab(
+    "message",
+    `Driver updated. Standings and groups were refreshed.${imageCleanupWarning}`
+  );
 }
 
 export async function deleteDriverAction(formData: FormData) {
@@ -400,9 +447,22 @@ export async function deleteDriverAction(formData: FormData) {
     );
   }
 
-  const { error } = await supabase.from("drivers").delete().eq("id", driverIdValue);
+  const { data: deletedDriver, error } = await supabase
+    .from("drivers")
+    .delete()
+    .eq("id", driverIdValue)
+    .select("image_url")
+    .maybeSingle<{ image_url: string | null }>();
   if (error) {
     redirectWithTab("error", error.message);
+  }
+
+  let imageCleanupWarning = "";
+  try {
+    await deleteManagedDriverHeadshot(deletedDriver?.image_url ?? null);
+  } catch (cleanupError) {
+    const message = cleanupError instanceof Error ? cleanupError.message : "Unknown cleanup error.";
+    imageCleanupWarning = ` Stored image cleanup needs attention: ${message}`;
   }
 
   try {
@@ -418,7 +478,7 @@ export async function deleteDriverAction(formData: FormData) {
   revalidatePath("/admin");
   revalidatePath("/picks");
   revalidatePath("/leaderboard");
-  redirectWithTab("message", "Driver deleted.");
+  redirectWithTab("message", `Driver deleted.${imageCleanupWarning}`);
 }
 
 export async function importChampionshipStandingsAction(formData: FormData) {
@@ -625,6 +685,9 @@ export async function createRaceAction(formData: FormData) {
         .eq("id", insertedRaceId);
 
       if (updateImageError) {
+        await deleteManagedRaceTitleImage(uploadedUrl).catch((cleanupError) => {
+          console.error("[storage] Failed rolling back race image upload:", cleanupError);
+        });
         redirectWithTab(
           "error",
           `Race created, but title image update failed: ${updateImageError.message}`
@@ -664,6 +727,19 @@ export async function updateRaceAction(formData: FormData) {
     );
   }
   const raceIdValue = raceId as number;
+  const { data: existingRace, error: existingRaceError } = await supabase
+    .from("races")
+    .select("title_image_url")
+    .eq("id", raceIdValue)
+    .maybeSingle<{ title_image_url: string | null }>();
+
+  if (existingRaceError) {
+    redirectWithTab("error", existingRaceError.message);
+  }
+  if (!existingRace) {
+    redirectWithTab("error", "Race not found.");
+  }
+  const existingRaceImageUrl = existingRace?.title_image_url ?? null;
 
   const raceDate = parseLeagueDateTimeLocalInput(raceDateInput);
   const qualifyingStartAt = parseLeagueDateTimeLocalInput(qualifyingStartInput);
@@ -733,13 +809,28 @@ export async function updateRaceAction(formData: FormData) {
   }
 
   if (error) {
+    if (titleImageFile && titleImageUrl !== existingRaceImageUrl) {
+      await deleteManagedRaceTitleImage(titleImageUrl).catch((cleanupError) => {
+        console.error("[storage] Failed rolling back race image upload:", cleanupError);
+      });
+    }
     redirectWithTab("error", error.message);
+  }
+
+  let imageCleanupWarning = "";
+  if (existingRaceImageUrl && existingRaceImageUrl !== titleImageUrl) {
+    try {
+      await deleteManagedRaceTitleImage(existingRaceImageUrl);
+    } catch (cleanupError) {
+      const message = cleanupError instanceof Error ? cleanupError.message : "Unknown cleanup error.";
+      imageCleanupWarning = ` Replaced image cleanup needs attention: ${message}`;
+    }
   }
 
   revalidatePath("/admin");
   revalidatePath("/picks");
   revalidatePath("/leaderboard");
-  redirectWithTab("message", "Race updated.");
+  redirectWithTab("message", `Race updated.${imageCleanupWarning}`);
 }
 
 export async function deleteRaceAction(formData: FormData) {
@@ -754,9 +845,22 @@ export async function deleteRaceAction(formData: FormData) {
   }
   const raceIdValue = raceId as number;
 
-  const { error } = await supabase.from("races").delete().eq("id", raceIdValue);
+  const { data: deletedRace, error } = await supabase
+    .from("races")
+    .delete()
+    .eq("id", raceIdValue)
+    .select("title_image_url")
+    .maybeSingle<{ title_image_url: string | null }>();
   if (error) {
     redirectWithTab("error", error.message);
+  }
+
+  let imageCleanupWarning = "";
+  try {
+    await deleteManagedRaceTitleImage(deletedRace?.title_image_url ?? null);
+  } catch (cleanupError) {
+    const message = cleanupError instanceof Error ? cleanupError.message : "Unknown cleanup error.";
+    imageCleanupWarning = ` Stored image cleanup needs attention: ${message}`;
   }
 
   const { error: refreshError } = await supabase.rpc(
@@ -772,7 +876,7 @@ export async function deleteRaceAction(formData: FormData) {
   revalidatePath("/admin");
   revalidatePath("/picks");
   revalidatePath("/leaderboard");
-  redirectWithTab("message", "Race deleted.");
+  redirectWithTab("message", `Race deleted.${imageCleanupWarning}`);
 }
 
 export async function setRaceArchivedAction(formData: FormData) {
@@ -1368,6 +1472,107 @@ export async function importIndycarResultsAction(formData: FormData) {
   redirectWithTab(
     "message",
     `Published ${Number(publishedCount ?? payload.length)} complete result row(s) for ${raceName}. ${raceResultCountText} Driver standings/groups were refreshed, and fantasy winner auto-calculation is scheduled for about 15 minutes from now.${ignoredSummary}`
+  );
+}
+
+export async function finalizeHallOfFameSeasonAction(formData: FormData) {
+  const { supabase } = await requireAdmin();
+  const tab = parseAdminTab(asText(formData.get("tab"))) ?? "results";
+  const redirectWithTab = (key: "error" | "message", value: string): never =>
+    adminRedirect(key, value, tab);
+  const seasonYear = parsePositiveInteger(asText(formData.get("season_year"))) ?? getLeagueYear();
+  const seasonRange = getLeagueSeasonDateRange(seasonYear);
+
+  const { data: seasonRaces, error: racesError } = await supabase
+    .from("races")
+    .select("id,race_name,race_date,results_status")
+    .eq("is_archived", false)
+    .gte("race_date", seasonRange.seasonStartIso)
+    .lt("race_date", seasonRange.seasonEndExclusiveIso)
+    .order("race_date", { ascending: true });
+
+  if (racesError) {
+    redirectWithTab("error", racesError.message);
+  }
+
+  const races = seasonRaces ?? [];
+  if (races.length === 0) {
+    redirectWithTab("error", `No active races were found for the ${seasonYear} season.`);
+  }
+
+  const unpublishedRaces = races.filter((race) => race.results_status !== "published");
+  if (unpublishedRaces.length > 0) {
+    redirectWithTab(
+      "error",
+      `Publish every race before finalizing the season. Still waiting on: ${unpublishedRaces
+        .map((race) => race.race_name)
+        .join(", ")}.`
+    );
+  }
+
+  const finalRace = races[races.length - 1];
+  if (Date.parse(finalRace.race_date) > Date.now()) {
+    redirectWithTab("error", `The final scheduled race, ${finalRace.race_name}, has not started yet.`);
+  }
+
+  let snapshot: Awaited<ReturnType<typeof buildLeagueScoringSnapshotUncached>> | null = null;
+  try {
+    snapshot = await buildLeagueScoringSnapshotUncached(seasonYear);
+  } catch (snapshotError) {
+    redirectWithTab(
+      "error",
+      snapshotError instanceof Error
+        ? snapshotError.message
+        : "Failed to calculate final season standings."
+    );
+  }
+
+  if (!snapshot) {
+    redirectWithTab("error", "Failed to calculate final season standings.");
+  }
+  const finalSnapshot = snapshot as Awaited<
+    ReturnType<typeof buildLeagueScoringSnapshotUncached>
+  >;
+
+  if (finalSnapshot.raceColumns.length !== races.length || finalSnapshot.leaderboardRows.length === 0) {
+    redirectWithTab(
+      "error",
+      "Final standings are incomplete. Confirm every race has published result rows before trying again."
+    );
+  }
+
+  const entries = finalSnapshot.leaderboardRows.map((row) => ({
+    final_rank: row.currentStanding,
+    race_breakdown: finalSnapshot.raceColumns.map((race) => ({
+      points: row.raceBreakdown[race.raceId] ?? 0,
+      race_date: race.raceDate,
+      race_id: race.raceId,
+      race_name: race.raceName
+    })),
+    team_name: row.teamName,
+    total_points: row.totalPoints
+  }));
+
+  const { error } = await supabase.rpc("finalize_hall_of_fame_season", {
+    p_entries: entries,
+    p_race_count: finalSnapshot.raceColumns.length,
+    p_season_year: seasonYear
+  });
+
+  if (error) {
+    redirectWithTab(
+      "error",
+      /function .* does not exist|schema cache|hall_of_fame/i.test(error.message)
+        ? withMigrationHint(error.message, HALL_OF_FAME_MIGRATION_FILE)
+        : error.message
+    );
+  }
+
+  revalidatePath("/admin");
+  revalidatePath("/leaderboard");
+  redirectWithTab(
+    "message",
+    `${seasonYear} final standings saved to the Hall of Fame. This snapshot remains available after drivers are retired or replaced.`
   );
 }
 

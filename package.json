@@ -3,11 +3,12 @@
   "version": "0.1.0",
   "private": true,
   "engines": {
-    "node": ">=22.0.0"
+    "node": "22.x"
   },
   "scripts": {
     "audit:prod": "npm audit --omit=dev --audit-level=moderate",
     "build": "next build",
+    "cleanup:orphaned-images": "node scripts/cleanup-orphaned-images.mjs",
     "cleanup:playwright-artifacts": "node scripts/cleanup-playwright-artifacts.mjs",
     "dev": "next dev",
     "e2e": "playwright test",
@@ -22,7 +23,8 @@
     "@supabase/supabase-js": "2.110.2",
     "next": "16.2.10",
     "react": "19.2.7",
-    "react-dom": "19.2.7"
+    "react-dom": "19.2.7",
+    "sharp": "0.34.5"
   },
   "devDependencies": {
     "@playwright/test": "1.58.2",

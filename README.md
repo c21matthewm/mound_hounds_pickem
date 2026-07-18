@@ -54,7 +54,13 @@ Email reminder values are optional while reminders are on hold:
 RESEND_API_KEY=
 RESEND_FROM_EMAIL=
 RESEND_REPLY_TO=
+PICK_EMAILS_ENABLED=false
+REMINDER_SMS_ENABLED=false
 ```
+
+Set `PICK_EMAILS_ENABLED=true` only in the production environment after Resend is verified and the
+schedule migration is applied. Keep `REMINDER_SMS_ENABLED=false` for email-only reminders.
+Carrier-gateway delivery is opt-in because both channels can exceed the free daily quota.
 
 Run the app:
 

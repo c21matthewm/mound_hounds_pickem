@@ -1,8 +1,9 @@
 import "server-only";
 
 import { createServiceRoleSupabaseClient } from "@/lib/supabase/service-role";
+import { deleteManagedImage, optimizeUploadedImage } from "@/lib/supabase/managed-images";
 
-const RACE_IMAGE_BUCKET = "race-title-images";
+export const RACE_IMAGE_BUCKET = "race-title-images";
 const MAX_FILE_BYTES = 8 * 1024 * 1024;
 const ALLOWED_MIME_TYPES = new Set([
   "image/avif",
@@ -20,26 +21,6 @@ const slugify = (value: string): string =>
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "")
     .slice(0, 80);
-
-const extensionFromFile = (file: File): string => {
-  const filenamePart = file.name?.split(".").pop()?.toLowerCase();
-  if (filenamePart && filenamePart.length <= 5) {
-    return filenamePart;
-  }
-
-  switch (file.type) {
-    case "image/png":
-      return "png";
-    case "image/webp":
-      return "webp";
-    case "image/gif":
-      return "gif";
-    case "image/avif":
-      return "avif";
-    default:
-      return "jpg";
-  }
-};
 
 const isBucketMissingError = (error: { message?: string; status?: number | undefined }): boolean =>
   error.status === 404 || /not found/i.test(error.message ?? "");
@@ -101,13 +82,17 @@ export async function uploadRaceTitleImage(params: {
   await ensureRaceBucket();
   const service = createServiceRoleSupabaseClient();
 
-  const extension = extensionFromFile(file);
   const safeName = slugify(raceName) || `race-${raceId}`;
-  const path = `races/${raceId}/${safeName}-${Date.now()}.${extension}`;
+  const path = `races/${raceId}/${safeName}-${Date.now()}.webp`;
+  const optimizedImage = await optimizeUploadedImage(file, {
+    height: 900,
+    quality: 82,
+    width: 1600
+  });
 
-  const { error: uploadError } = await service.storage.from(RACE_IMAGE_BUCKET).upload(path, file, {
-    cacheControl: "3600",
-    contentType: file.type,
+  const { error: uploadError } = await service.storage.from(RACE_IMAGE_BUCKET).upload(path, optimizedImage, {
+    cacheControl: "31536000",
+    contentType: "image/webp",
     upsert: true
   });
 
@@ -118,3 +103,6 @@ export async function uploadRaceTitleImage(params: {
   const { data } = service.storage.from(RACE_IMAGE_BUCKET).getPublicUrl(path);
   return data.publicUrl;
 }
+
+export const deleteManagedRaceTitleImage = (publicUrl: string | null): Promise<void> =>
+  deleteManagedImage(RACE_IMAGE_BUCKET, publicUrl);

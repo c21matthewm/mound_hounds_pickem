@@ -93,12 +93,12 @@ Key database triggers:
 - Cron auth is checked in `src/lib/cron-auth.ts`. In production, `CRON_SECRET` is required and accepted via `Authorization: Bearer <secret>` or `x-cron-secret`.
 - Fantasy winner cron calls `finalizeDueRaceWinners()` and finalizes races whose `winner_auto_eligible_at` has passed and are not manual overrides.
 - Pick reminder cron calls `sendDuePickReminders()` in `src/lib/pick-reminders.ts`.
-- Reminder windows are 4 days, 2 days, and 2 hours before the race-specific pick deadline. Missing-pick participants can receive email plus SMS gateway email, deduped by `pick_reminders`.
-- Reminder delivery depends on Resend env vars: `RESEND_API_KEY`, `RESEND_FROM_EMAIL`, and optional `RESEND_REPLY_TO`.
+- Reminder windows are a form-open notice 5 days before the race-specific pick deadline, a reminder 2 days before, and a final reminder 4 hours before. The deadline is qualifying start for standard races and race start for the Indy 500. Only profiles without picks receive each deduplicated email. Carrier-gateway SMS remains disabled unless explicitly enabled.
+- Reminder delivery depends on `PICK_EMAILS_ENABLED=true`, plus Resend env vars `RESEND_API_KEY`, `RESEND_FROM_EMAIL`, and optional `RESEND_REPLY_TO`. Carrier-gateway SMS is disabled unless `REMINDER_SMS_ENABLED=true`.
 
 ## Storage And Assets
 
-- Branding image path is `public/images/branding/mound-hound.png`, referenced through `src/lib/branding.ts`.
+- Branding image path is `public/images/branding/mound-hound.webp`, referenced through `src/lib/branding.ts`.
 - Driver images upload to a public Supabase Storage bucket named `driver-headshots`.
 - Race title images upload to a public Supabase Storage bucket named `race-title-images`.
 - Server Action upload size is raised to `12mb` in `next.config.ts`; helper limits are 5MB for driver images and 8MB for race title images.

@@ -217,7 +217,7 @@ export function PickemForm({
         <section className="rounded-2xl border border-slate-200 bg-white p-5 md:p-6">
           <label className="block max-w-sm">
             <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">
-              Average Speed Tie-breaker
+              Average Speed Tie-breaker (MPH)
             </span>
             <span className="mb-3 block text-sm text-slate-600">
               Used only if multiple teams tie for the weekly win.
