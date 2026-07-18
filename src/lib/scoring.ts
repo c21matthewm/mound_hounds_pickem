@@ -8,9 +8,9 @@ import {
   pickLockAtForRace,
   type RacePickFormat
 } from "@/lib/race-format";
+import { participantLeaderboardLabel } from "@/lib/participant-display";
 import { loadAllRows } from "@/lib/supabase/paginated-query";
 import { SCORING_CACHE_TAG } from "@/lib/scoring-cache";
-import { getLeagueSeasonDateRange, getLeagueYear } from "@/lib/timezone";
 import {
   assignWeeklyRanks,
   calculateOfficialSpeedDelta
@@ -44,6 +44,7 @@ type PickRow = {
 type ProfileRow = {
   full_name: string | null;
   id: string;
+  is_active: boolean;
   role: "admin" | "participant";
   team_name: string;
 };
@@ -54,6 +55,8 @@ type RaceRow = {
   pick_format: RacePickFormat;
   race_date: string;
   race_name: string;
+  round_number: number;
+  season_id: number;
   results_status: "draft" | "published";
 };
 
@@ -71,6 +74,7 @@ type RaceDriverGroupRow = {
 };
 
 type Participant = {
+  displayName: string;
   id: string;
   teamName: string;
 };
@@ -78,6 +82,7 @@ type Participant = {
 export type LeaderboardRow = {
   change: number;
   currentStanding: number;
+  displayName: string;
   raceBreakdown: Record<number, number>;
   teamName: string;
   totalPoints: number;
@@ -88,6 +93,7 @@ export type RaceBreakdownColumn = {
   raceDate: string;
   raceId: number;
   raceName: string;
+  roundNumber: number;
 };
 
 export type LeagueScoringSnapshot = {
@@ -102,6 +108,7 @@ export type PicksByRaceOption = {
   raceDate: string;
   raceId: number;
   raceName: string;
+  roundNumber: number;
   resultsStatus: "draft" | "published";
   qualifyingStartAt: string;
 };
@@ -114,6 +121,7 @@ export type PicksByRaceDriverCell = {
 
 export type PicksByRaceParticipantRow = {
   averageSpeed: number | null;
+  displayName: string;
   driverCells: PicksByRaceDriverCell[];
   rank: number | null;
   teamName: string;
@@ -138,6 +146,7 @@ export type ParticipantAnalyticsRaceRow = {
   raceDate: string;
   raceId: number;
   raceName: string;
+  roundNumber: number;
   submittedPick: boolean;
   tiebreakDelta: number | null;
   weeklyFinish: number | null;
@@ -393,18 +402,18 @@ const computeLowestFallbackByRace = (
 };
 
 export async function buildLeagueScoringSnapshotUncached(
-  seasonYear: number = getLeagueYear()
+  seasonId: number
 ): Promise<LeagueScoringSnapshot> {
   const supabase = createServiceRoleSupabaseClient();
-  const seasonRange = getLeagueSeasonDateRange(seasonYear);
 
   const [profiles, races, allPicks, allResults, drivers, allRaceDriverGroups] =
     await Promise.all([
       loadAllRows<ProfileRow>("profiles", (from, to) =>
         supabase
           .from("profiles")
-          .select("id,team_name,role,full_name")
+          .select("id,team_name,role,full_name,is_active")
           .in("role", ["participant", "admin"])
+          .eq("is_active", true)
           .order("team_name", { ascending: true })
           .order("id", { ascending: true })
           .range(from, to)
@@ -413,13 +422,12 @@ export async function buildLeagueScoringSnapshotUncached(
         supabase
           .from("races")
           .select(
-            "id,race_name,pick_format,race_date,official_winning_average_speed,results_status"
+            "id,race_name,pick_format,race_date,official_winning_average_speed,results_status,season_id,round_number"
           )
           .eq("is_archived", false)
           .eq("results_status", "published")
-          .gte("race_date", seasonRange.seasonStartIso)
-          .lt("race_date", seasonRange.seasonEndExclusiveIso)
-          .order("race_date", { ascending: true })
+          .eq("season_id", seasonId)
+          .order("round_number", { ascending: true })
           .order("id", { ascending: true })
           .range(from, to)
       ),
@@ -461,6 +469,7 @@ export async function buildLeagueScoringSnapshotUncached(
   const participants: Participant[] = profiles
     .filter((profile) => typeof profile.team_name === "string" && profile.team_name.trim().length > 0)
     .map((profile) => ({
+      displayName: participantLeaderboardLabel(profile.full_name, profile.team_name.trim()),
       id: profile.id,
       teamName: profile.team_name.trim()
     }));
@@ -487,7 +496,8 @@ export async function buildLeagueScoringSnapshotUncached(
   const raceColumns: RaceBreakdownColumn[] = completedRaces.map((race) => ({
     raceDate: race.race_date,
     raceId: race.id,
-    raceName: race.race_name
+    raceName: race.race_name,
+    roundNumber: race.round_number
   }));
 
   if (completedRaces.length === 0) {
@@ -575,6 +585,7 @@ export async function buildLeagueScoringSnapshotUncached(
       return {
         change,
         currentStanding,
+        displayName: participant.displayName,
         raceBreakdown: Object.fromEntries(raceBreakdownByUser.get(participant.id) ?? []),
         teamName: participant.teamName,
         totalPoints: cumulativeByUser.get(participant.id) ?? 0,
@@ -600,28 +611,29 @@ export async function buildLeagueScoringSnapshotUncached(
 }
 
 const buildCachedLeagueScoringSnapshot = unstable_cache(
-  async (seasonYear: number) => buildLeagueScoringSnapshotUncached(seasonYear),
-  ["league-scoring-snapshot"],
+  async (seasonId: number) => buildLeagueScoringSnapshotUncached(seasonId),
+  ["league-scoring-snapshot-v2"],
   { revalidate: 3600, tags: [SCORING_CACHE_TAG] }
 );
 
 export const buildLeagueScoringSnapshot = (
-  seasonYear: number = getLeagueYear()
-): Promise<LeagueScoringSnapshot> => buildCachedLeagueScoringSnapshot(seasonYear);
+  seasonId: number
+): Promise<LeagueScoringSnapshot> => buildCachedLeagueScoringSnapshot(seasonId);
 
 export async function buildPicksByRaceSnapshot(
+  seasonId: number,
   selectedRaceIdInput?: number
 ): Promise<PicksByRaceSnapshot> {
   const supabase = createServiceRoleSupabaseClient();
   const nowIso = new Date().toISOString();
-  const seasonRange = getLeagueSeasonDateRange();
 
   const [profiles, seasonRaceRows, drivers] = await Promise.all([
     loadAllRows<ProfileRow>("profiles", (from, to) =>
       supabase
         .from("profiles")
-        .select("id,team_name,role,full_name")
+        .select("id,team_name,role,full_name,is_active")
         .in("role", ["participant", "admin"])
+        .eq("is_active", true)
         .order("team_name", { ascending: true })
         .order("id", { ascending: true })
         .range(from, to)
@@ -630,13 +642,12 @@ export async function buildPicksByRaceSnapshot(
       supabase
         .from("races")
         .select(
-          "id,race_name,pick_format,race_date,qualifying_start_at,official_winning_average_speed,results_status"
+          "id,race_name,pick_format,race_date,qualifying_start_at,official_winning_average_speed,results_status,season_id,round_number"
         )
         .eq("is_archived", false)
-        .gte("race_date", seasonRange.seasonStartIso)
-        .lt("race_date", seasonRange.seasonEndExclusiveIso)
+        .eq("season_id", seasonId)
         .lte("qualifying_start_at", nowIso)
-        .order("qualifying_start_at", { ascending: false })
+        .order("round_number", { ascending: false })
         .order("id", { ascending: false })
         .range(from, to)
     ),
@@ -649,27 +660,12 @@ export async function buildPicksByRaceSnapshot(
     )
   ]);
 
-  let raceRows = seasonRaceRows;
-  if (raceRows.length === 0) {
-    raceRows = await loadAllRows<RaceRow & { qualifying_start_at: string }>(
-      "locked fallback races",
-      (from, to) =>
-        supabase
-        .from("races")
-        .select(
-          "id,race_name,pick_format,race_date,qualifying_start_at,official_winning_average_speed,results_status"
-        )
-        .eq("is_archived", false)
-        .lte("qualifying_start_at", nowIso)
-        .order("qualifying_start_at", { ascending: false })
-        .order("id", { ascending: false })
-        .range(from, to)
-    );
-  }
+  const raceRows = seasonRaceRows;
 
   const participants: Participant[] = profiles
     .filter((profile) => typeof profile.team_name === "string" && profile.team_name.trim().length > 0)
     .map((profile) => ({
+      displayName: participantLeaderboardLabel(profile.full_name, profile.team_name.trim()),
       id: profile.id,
       teamName: profile.team_name.trim()
     }));
@@ -687,6 +683,7 @@ export async function buildPicksByRaceSnapshot(
       raceDate: race.race_date,
       raceId: race.id,
       raceName: race.race_name,
+      roundNumber: race.round_number,
       resultsStatus: race.results_status,
       qualifyingStartAt: pickLockAtForRace(race)
     };
@@ -796,6 +793,7 @@ export async function buildPicksByRaceSnapshot(
 
     return {
       averageSpeed: pick ? asNumber(pick.average_speed) : null,
+      displayName: participant.displayName,
       driverCells,
       rank: null as number | null,
       teamName: participant.teamName,
@@ -875,18 +873,18 @@ const pickWorseWeek = (
 
 export async function buildParticipantAnalyticsSnapshotUncached(
   userId: string,
-  seasonYear: number = getLeagueYear()
+  seasonId: number
 ): Promise<ParticipantAnalyticsSnapshot> {
   const supabase = createServiceRoleSupabaseClient();
-  const seasonRange = getLeagueSeasonDateRange(seasonYear);
 
   const [profiles, races, allPicks, allResults, drivers, allRaceDriverGroups] =
     await Promise.all([
       loadAllRows<ProfileRow>("profiles", (from, to) =>
         supabase
           .from("profiles")
-          .select("id,team_name,role,full_name")
+          .select("id,team_name,role,full_name,is_active")
           .in("role", ["participant", "admin"])
+          .eq("is_active", true)
           .order("team_name", { ascending: true })
           .order("id", { ascending: true })
           .range(from, to)
@@ -895,13 +893,12 @@ export async function buildParticipantAnalyticsSnapshotUncached(
         supabase
           .from("races")
           .select(
-            "id,race_name,pick_format,race_date,official_winning_average_speed,results_status"
+            "id,race_name,pick_format,race_date,official_winning_average_speed,results_status,season_id,round_number"
           )
           .eq("is_archived", false)
           .eq("results_status", "published")
-          .gte("race_date", seasonRange.seasonStartIso)
-          .lt("race_date", seasonRange.seasonEndExclusiveIso)
-          .order("race_date", { ascending: true })
+          .eq("season_id", seasonId)
+          .order("round_number", { ascending: true })
           .order("id", { ascending: true })
           .range(from, to)
       ),
@@ -943,6 +940,7 @@ export async function buildParticipantAnalyticsSnapshotUncached(
   const participants: Participant[] = profiles
     .filter((profile) => typeof profile.team_name === "string" && profile.team_name.trim().length > 0)
     .map((profile) => ({
+      displayName: participantLeaderboardLabel(profile.full_name, profile.team_name.trim()),
       id: profile.id,
       teamName: profile.team_name.trim()
     }));
@@ -1088,6 +1086,7 @@ export async function buildParticipantAnalyticsSnapshotUncached(
       raceDate: race.race_date,
       raceId: race.id,
       raceName: race.race_name,
+      roundNumber: race.round_number,
       submittedPick: participantAverageSpeed !== null,
       tiebreakDelta: calculateOfficialSpeedDelta(participantAverageSpeed, officialRaceAverageSpeed),
       weeklyFinish: weeklyRankByUser.get(participant.id) ?? null,
@@ -1138,14 +1137,14 @@ export async function buildParticipantAnalyticsSnapshotUncached(
 }
 
 const buildCachedParticipantAnalyticsSnapshot = unstable_cache(
-  async (userId: string, seasonYear: number) =>
-    buildParticipantAnalyticsSnapshotUncached(userId, seasonYear),
+  async (userId: string, seasonId: number) =>
+    buildParticipantAnalyticsSnapshotUncached(userId, seasonId),
   ["participant-analytics-snapshot"],
   { revalidate: 3600, tags: [SCORING_CACHE_TAG] }
 );
 
 export const buildParticipantAnalyticsSnapshot = (
   userId: string,
-  seasonYear: number = getLeagueYear()
+  seasonId: number
 ): Promise<ParticipantAnalyticsSnapshot> =>
-  buildCachedParticipantAnalyticsSnapshot(userId, seasonYear);
+  buildCachedParticipantAnalyticsSnapshot(userId, seasonId);

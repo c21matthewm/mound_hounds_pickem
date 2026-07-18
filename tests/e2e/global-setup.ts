@@ -3,9 +3,10 @@ export default async function globalSetup() {
     return;
   }
 
-  const { cleanupPlaywrightArtifacts, requireSupabaseE2EOptIn } = await import(
+  const { cleanupPlaywrightArtifacts, ensureActiveLeagueSeason, requireSupabaseE2EOptIn } = await import(
     "./helpers/supabase"
   );
   requireSupabaseE2EOptIn();
+  await ensureActiveLeagueSeason();
   await cleanupPlaywrightArtifacts({ recomputeDriverPoints: true });
 }

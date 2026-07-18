@@ -32,6 +32,7 @@ type DriverRow = {
 
 type ProfileRow = {
   id: string;
+  is_active: boolean;
   team_name: string;
 };
 
@@ -198,8 +199,9 @@ export async function calculateRaceWinnerProfileId(
       .maybeSingle(),
     supabase
       .from("profiles")
-      .select("id,team_name")
+      .select("id,team_name,is_active")
       .in("role", ["participant", "admin"])
+      .eq("is_active", true)
       .order("team_name", { ascending: true }),
     supabase.from("drivers").select("id,group_number"),
     supabase

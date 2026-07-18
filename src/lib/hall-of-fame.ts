@@ -8,6 +8,7 @@ export type HallOfFameRaceBreakdown = {
   race_date: string;
   race_id: number;
   race_name: string;
+  round_number?: number;
 };
 
 export type HallOfFameEntry = {
@@ -61,7 +62,8 @@ const isRaceBreakdown = (value: unknown): value is HallOfFameRaceBreakdown => {
     typeof row.points === "number" &&
     typeof row.race_date === "string" &&
     typeof row.race_id === "number" &&
-    typeof row.race_name === "string"
+    typeof row.race_name === "string" &&
+    (row.round_number === undefined || typeof row.round_number === "number")
   );
 };
 

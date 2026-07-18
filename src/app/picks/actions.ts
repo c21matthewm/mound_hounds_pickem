@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { getPreviousRaceResultsGate } from "@/lib/pickem-results-gate";
-import { isProfileComplete, type ProfileRow } from "@/lib/profile";
+import { isProfileActive, isProfileComplete, type ProfileRow } from "@/lib/profile";
 import {
   groupNumbersForCount,
   normalizeRacePickFormat,
@@ -51,12 +51,16 @@ export async function saveWeeklyPickAction(formData: FormData) {
 
   const { data: profile } = await supabase
     .from("profiles")
-    .select("id,full_name,team_name,phone_number,phone_carrier,role")
+    .select("id,full_name,team_name,phone_number,phone_carrier,role,is_active")
     .eq("id", user.id)
     .maybeSingle<ProfileRow>();
 
   if (!profile || !isProfileComplete(profile)) {
     redirect("/onboarding");
+  }
+
+  if (!isProfileActive(profile)) {
+    picksErrorRedirect("Your participant profile is inactive for the current season.");
   }
 
   const raceId = parsePositiveInt(asText(formData.get("race_id")));
@@ -68,27 +72,13 @@ export async function saveWeeklyPickAction(formData: FormData) {
 
   const raceIdValue = raceId as number;
 
-  let { data: race, error: raceError } = await supabase
+  const { data: race, error: raceError } = await supabase
     .from("races")
-    .select("id,race_name,race_date,qualifying_start_at,is_archived,pick_format")
+    .select(
+      "id,race_name,race_date,qualifying_start_at,is_archived,pick_format,season_id,round_number"
+    )
     .eq("id", raceIdValue)
     .maybeSingle();
-
-  if (raceError && isMissingColumnError(raceError, "pick_format")) {
-    const legacyRaceResponse = await supabase
-      .from("races")
-      .select("id,race_name,race_date,qualifying_start_at,is_archived")
-      .eq("id", raceIdValue)
-      .maybeSingle();
-
-    race = legacyRaceResponse.data
-      ? {
-          ...legacyRaceResponse.data,
-          pick_format: "standard"
-        }
-      : null;
-    raceError = legacyRaceResponse.error;
-  }
 
   if (raceError || !race) {
     picksErrorRedirect("Selected race not found.");
@@ -100,7 +90,14 @@ export async function saveWeeklyPickAction(formData: FormData) {
 
   const previousResultsGate = await getPreviousRaceResultsGate(
     supabase,
-    race as { id: number; pick_format?: string | null; race_date: string; race_name: string }
+    race as {
+      id: number;
+      pick_format?: string | null;
+      race_date: string;
+      race_name: string;
+      round_number: number;
+      season_id: number;
+    }
   );
   if (previousResultsGate.status === "blocked") {
     picksErrorRedirect(previousResultsGate.message);

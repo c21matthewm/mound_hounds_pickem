@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { AuthenticatedPageShell } from "@/components/authenticated-page-shell";
+import { HallOfFameYearSelect } from "@/components/hall-of-fame-year-select";
 import { MobileBottomNav } from "@/components/mobile-bottom-nav";
 import { PicksRaceSelect } from "@/components/picks-race-select";
 import { SignOutButton } from "@/components/sign-out-button";
@@ -24,6 +25,7 @@ import {
   buildParticipantAnalyticsSnapshot,
   buildPicksByRaceSnapshot
 } from "@/lib/scoring";
+import { loadActiveLeagueSeason } from "@/lib/seasons";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
 import { formatLeagueDateTime, LEAGUE_TIME_ZONE } from "@/lib/timezone";
 
@@ -57,6 +59,11 @@ const parseRaceId = (value: string | undefined): number | undefined => {
   return parsed;
 };
 
+const parseSeasonYear = (value: string | undefined): number | undefined => {
+  const parsed = Number(value);
+  return Number.isInteger(parsed) && parsed >= 2000 && parsed <= 2100 ? parsed : undefined;
+};
+
 const tabHref = (tab: LeaderboardTab, raceId?: number): string => {
   const params = new URLSearchParams({ tab });
 
@@ -77,6 +84,7 @@ export default async function LeaderboardPage({ searchParams }: PageProps) {
   const params = await searchParams;
   const activeTab = parseLeaderboardTab(queryStringParam(params.tab));
   const selectedRaceId = parseRaceId(queryStringParam(params.race_id));
+  const selectedHallYear = parseSeasonYear(queryStringParam(params.year));
 
   const supabase = await createServerSupabaseClient();
   const {
@@ -89,7 +97,7 @@ export default async function LeaderboardPage({ searchParams }: PageProps) {
 
   const { data: profile } = await supabase
     .from("profiles")
-    .select("id,full_name,team_name,phone_number,phone_carrier,role")
+    .select("id,full_name,team_name,phone_number,phone_carrier,role,is_active")
     .eq("id", user.id)
     .maybeSingle<ProfileRow>();
 
@@ -97,19 +105,27 @@ export default async function LeaderboardPage({ searchParams }: PageProps) {
     redirect("/onboarding");
   }
 
+  const activeSeason = await loadActiveLeagueSeason(supabase);
+
   let standingsSnapshot: Awaited<ReturnType<typeof buildLeagueScoringSnapshot>> | null = null;
   let picksSnapshot: Awaited<ReturnType<typeof buildPicksByRaceSnapshot>> | null = null;
   let analyticsSnapshot: Awaited<ReturnType<typeof buildParticipantAnalyticsSnapshot>> | null = null;
   let hallOfFameSnapshot: HallOfFameSnapshot | null = null;
   try {
     if (activeTab === "picks") {
-      picksSnapshot = await buildPicksByRaceSnapshot(selectedRaceId);
-    } else if (activeTab === "analytics") {
-      analyticsSnapshot = await buildParticipantAnalyticsSnapshot(user.id);
+      picksSnapshot = activeSeason
+        ? await buildPicksByRaceSnapshot(activeSeason.id, selectedRaceId)
+        : { availableRaces: [], resultsPosted: false, rows: [], selectedRace: null };
+    } else if (activeTab === "analytics" && profile.is_active) {
+      analyticsSnapshot = activeSeason
+        ? await buildParticipantAnalyticsSnapshot(user.id, activeSeason.id)
+        : null;
     } else if (activeTab === "hall") {
       hallOfFameSnapshot = await loadHallOfFameSnapshot(supabase);
     } else {
-      standingsSnapshot = await buildLeagueScoringSnapshot();
+      standingsSnapshot = activeSeason
+        ? await buildLeagueScoringSnapshot(activeSeason.id)
+        : { leaderboardRows: [], raceColumns: [] };
     }
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown scoring error.";
@@ -133,6 +149,7 @@ export default async function LeaderboardPage({ searchParams }: PageProps) {
   const picksTableRows: PicksByRaceTableRow[] = picksSnapshot
     ? picksSnapshot.rows.map((row) => ({
       averageSpeed: row.averageSpeed,
+      displayName: row.displayName,
       drivers: row.driverCells.map((cell) => ({
         driverName: cell.driverName,
         points: cell.points
@@ -147,7 +164,8 @@ export default async function LeaderboardPage({ searchParams }: PageProps) {
   const standingsRaceColumns: StandingsTableRaceColumn[] = standingsSnapshot
     ? standingsSnapshot.raceColumns.map((column) => ({
       raceId: column.raceId,
-      raceName: column.raceName
+      raceName: column.raceName,
+      roundNumber: column.roundNumber
     }))
     : [];
 
@@ -155,6 +173,7 @@ export default async function LeaderboardPage({ searchParams }: PageProps) {
     ? standingsSnapshot.leaderboardRows.map((row) => ({
       change: row.change,
       currentStanding: row.currentStanding,
+      displayName: row.displayName,
       racePointsByRaceId: standingsSnapshot.raceColumns.reduce<Record<number, number>>(
         (accumulator, column) => {
           accumulator[column.raceId] = row.raceBreakdown[column.raceId] ?? 0;
@@ -162,13 +181,16 @@ export default async function LeaderboardPage({ searchParams }: PageProps) {
         },
         {}
       ),
-      teamName: row.teamName,
       totalPoints: row.totalPoints,
       userId: row.userId
     }))
     : [];
 
   const analyticsRaceRows = analyticsSnapshot?.raceRows ?? [];
+  const selectedHallSeason = hallOfFameSnapshot?.seasons.length
+    ? hallOfFameSnapshot.seasons.find((season) => season.seasonYear === selectedHallYear) ??
+      hallOfFameSnapshot.seasons[0]
+    : null;
   const totalVsLeagueAverage = analyticsRaceRows.reduce(
     (sum, row) => sum + row.pointsVsRaceAverage,
     0
@@ -276,10 +298,17 @@ export default async function LeaderboardPage({ searchParams }: PageProps) {
       {activeTab === "standings" && standingsSnapshot ? (
         standingsSnapshot.raceColumns.length === 0 ? (
           <p className="mt-6 rounded-md border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
-            No completed races with results yet. Add race results in admin to populate standings.
+            {activeSeason
+              ? `No completed races with results yet for ${activeSeason.seasonYear}.`
+              : "No league season is currently active."}
           </p>
         ) : (
-          <StandingsTable raceColumns={standingsRaceColumns} rows={standingsTableRows} />
+          <StandingsTable
+            currentUserId={user.id}
+            raceColumns={standingsRaceColumns}
+            rows={standingsTableRows}
+            seasonYear={activeSeason?.seasonYear ?? null}
+          />
         )
       ) : null}
 
@@ -303,7 +332,8 @@ export default async function LeaderboardPage({ searchParams }: PageProps) {
                   <PicksRaceSelect
                     races={picksSnapshot.availableRaces.map((race) => ({
                       raceId: race.raceId,
-                      raceName: race.raceName
+                      raceName: race.raceName,
+                      roundNumber: race.roundNumber
                     }))}
                     selectedRaceId={picksSnapshot.selectedRace?.raceId ?? null}
                   />
@@ -608,6 +638,22 @@ export default async function LeaderboardPage({ searchParams }: PageProps) {
         )
       ) : null}
 
+      {activeTab === "analytics" && !profile.is_active ? (
+        <section className="mt-6 rounded-lg border border-slate-200 bg-white p-5">
+          <h2 className="text-lg font-semibold text-slate-900">Current Season Analytics</h2>
+          <p className="mt-2 text-sm text-slate-700">
+            Analytics are available to teams that are active in the current season.
+          </p>
+        </section>
+      ) : null}
+
+      {activeTab === "analytics" && profile.is_active && !activeSeason ? (
+        <section className="mt-6 rounded-lg border border-slate-200 bg-white p-5">
+          <h2 className="text-lg font-semibold text-slate-900">Current Season Analytics</h2>
+          <p className="mt-2 text-sm text-slate-700">No league season is currently active.</p>
+        </section>
+      ) : null}
+
       {activeTab === "hall" && hallOfFameSnapshot ? (
         !hallOfFameSnapshot.migrationReady ? (
           <section className="mt-6 rounded-lg border border-amber-200 bg-amber-50 p-5">
@@ -621,17 +667,24 @@ export default async function LeaderboardPage({ searchParams }: PageProps) {
           <section className="mt-6 rounded-lg border border-slate-200 bg-white p-6">
             <h2 className="text-xl font-semibold text-slate-900">Hall of Fame</h2>
             <p className="mt-2 text-sm text-slate-700">
-              No seasons have been finalized yet. The first archive will appear here after an admin
-              saves the final standings following the last race.
+              Coming soon!
             </p>
           </section>
         ) : (
           <div className="mt-6 grid gap-4">
-            {hallOfFameSnapshot.seasons.map((season, seasonIndex) => (
+            {selectedHallSeason ? (
+              <div className="flex justify-end">
+                <HallOfFameYearSelect
+                  selectedYear={selectedHallSeason.seasonYear}
+                  years={hallOfFameSnapshot.seasons.map((season) => season.seasonYear)}
+                />
+              </div>
+            ) : null}
+            {selectedHallSeason ? [selectedHallSeason].map((season) => (
               <details
                 className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm"
                 key={season.seasonId}
-                open={seasonIndex === 0}
+                open
               >
                 <summary className="cursor-pointer list-none p-5 marker:hidden">
                   <div className="flex flex-wrap items-center justify-between gap-4">
@@ -718,7 +771,7 @@ export default async function LeaderboardPage({ searchParams }: PageProps) {
                   </div>
                 </div>
               </details>
-            ))}
+            )) : null}
           </div>
         )
       ) : null}

@@ -257,6 +257,14 @@ test.describe.serial("Full App Flow", () => {
       .update({ role: "admin" })
       .eq("id", participant1.id);
     expect(roleEscalationError, "Participant role escalation must be blocked by PostgreSQL.").toBeTruthy();
+    const { error: activityChangeError } = await participantDatabaseClient
+      .from("profiles")
+      .update({ is_active: false })
+      .eq("id", participant1.id);
+    expect(
+      activityChangeError,
+      "Participants must not be able to change their own season activity."
+    ).toBeTruthy();
     await participantDatabaseClient.auth.signOut();
 
     const driverCoverage = await ensureDriverCoverage();
@@ -315,6 +323,7 @@ test.describe.serial("Full App Flow", () => {
     const raceAStart = new Date(raceAQualifying.getTime() + 3 * 60 * 60 * 1000);
 
     await addRaceForm.locator('input[name="race_name"]').fill(raceAName);
+    await addRaceForm.locator('input[name="round_number"]').fill("90");
     await addRaceForm.locator('input[name="qualifying_start_at"]').fill(toLocalInput(raceAQualifying));
     await addRaceForm.locator('input[name="race_date"]').fill(toLocalInput(raceAStart));
     await addRaceForm.locator('input[name="payout"]').fill("150");
@@ -350,6 +359,7 @@ test.describe.serial("Full App Flow", () => {
     const raceBQualifying = new Date(now.getTime() + 5 * 24 * 60 * 60 * 1000);
     const raceBStart = new Date(raceBQualifying.getTime() + 2 * 60 * 60 * 1000);
     await addRaceFormSecond.locator('input[name="race_name"]').fill(raceBName);
+    await addRaceFormSecond.locator('input[name="round_number"]').fill("91");
     await addRaceFormSecond.locator('input[name="qualifying_start_at"]').fill(toLocalInput(raceBQualifying));
     await addRaceFormSecond.locator('input[name="race_date"]').fill(toLocalInput(raceBStart));
     await addRaceFormSecond.locator('input[name="payout"]').fill("95");
@@ -486,17 +496,10 @@ test.describe.serial("Full App Flow", () => {
     );
 
     await p1Page.goto("/leaderboard");
-    await expect(p1Page.locator("main")).toContainText(`Latest Race: ${raceAName}`);
 
     const standingsTable = p1Page.getByTestId("standings-table");
-    await p1Page.getByTestId("standings-filter-toggle").click();
-    const standingsTeamFilter = p1Page.getByTestId("standings-filter-team");
-    await standingsTeamFilter.fill(participant3.teamName);
-    await expect(standingsTable.locator("tbody tr")).toHaveCount(1);
-    await expect(standingsTable.locator("tbody tr").first()).toContainText(participant3.teamName);
-
-    await p1Page.getByTestId("standings-reset").click();
-    await expect(standingsTeamFilter).toHaveValue("");
+    await expect(standingsTable).toContainText("R90");
+    await expect(standingsTable.locator("tbody tr").filter({ hasText: participant3.teamName })).toHaveCount(1);
 
     const standingsTotalSort = p1Page.getByTestId("standings-sort-total");
     await standingsTotalSort.click();
@@ -541,14 +544,9 @@ test.describe.serial("Full App Flow", () => {
     const p1Row = p1Page.locator("tbody tr").filter({ hasText: participant1.teamName }).first();
     await expect(p1Row).not.toContainText("-");
 
-    await p1Page.getByTestId("picks-filter-toggle").click();
-    const teamFilter = p1Page.getByTestId("picks-filter-team");
-    await teamFilter.fill(participant2.teamName);
-    await expect(p1Page.locator("tbody tr")).toHaveCount(1);
-    await expect(p1Page.locator("tbody tr").first()).toContainText(participant2.teamName);
-
-    await p1Page.getByTestId("picks-table-reset").click();
-    await expect(teamFilter).toHaveValue("");
+    await expect(
+      p1Page.locator("tbody tr").filter({ hasText: participant2.teamName }).first()
+    ).toBeVisible();
 
     const totalScoreSort = p1Page.getByTestId("picks-sort-total-score");
     await totalScoreSort.click();

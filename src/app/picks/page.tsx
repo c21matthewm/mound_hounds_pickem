@@ -1,6 +1,5 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { isMissingColumnError } from "@/lib/supabase/schema-compat";
 import { AuthenticatedPageShell } from "@/components/authenticated-page-shell";
 import { MobileBottomNav } from "@/components/mobile-bottom-nav";
 import { PickSubmissionSnapshot } from "@/components/pick-submission-snapshot";
@@ -8,8 +7,9 @@ import { SignOutButton } from "@/components/sign-out-button";
 import { saveWeeklyPickAction } from "@/app/picks/actions";
 import { PickemForm } from "@/components/pickem-form";
 import { getPreviousRaceResultsGate } from "@/lib/pickem-results-gate";
-import { isProfileComplete, type ProfileRow } from "@/lib/profile";
+import { isProfileActive, isProfileComplete, type ProfileRow } from "@/lib/profile";
 import { queryStringParam } from "@/lib/query";
+import { raceContextLabel } from "@/lib/race-label";
 import {
   groupNumbersForCount,
   normalizeRacePickFormat,
@@ -17,12 +17,10 @@ import {
   pickLockAtForRace,
   type RacePickFormat
 } from "@/lib/race-format";
+import { loadActiveLeagueSeason } from "@/lib/seasons";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
-import {
-  formatLeagueDateTime,
-  getLeagueSeasonDateRange,
-  LEAGUE_TIME_ZONE
-} from "@/lib/timezone";
+import { isMissingColumnError } from "@/lib/supabase/schema-compat";
+import { formatLeagueDateTime, LEAGUE_TIME_ZONE } from "@/lib/timezone";
 
 type DriverRow = {
   championship_points: number;
@@ -41,6 +39,8 @@ type RaceRow = {
   qualifying_start_at: string;
   race_date: string;
   race_name: string;
+  round_number: number;
+  season_id: number;
   title_image_url: string | null;
 };
 
@@ -69,7 +69,8 @@ type PageProps = {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 };
 
-const PICKEM_RACE_SELECT_FIELDS = "id,race_name,title_image_url,qualifying_start_at,race_date,payout";
+const PICKEM_RACE_SELECT_FIELDS =
+  "id,race_name,pick_format,title_image_url,qualifying_start_at,race_date,payout,season_id,round_number";
 
 const formatRaceDate = (value: string): string =>
   formatLeagueDateTime(value, { dateStyle: "full", timeStyle: "short" });
@@ -99,7 +100,7 @@ export default async function PicksPage({ searchParams }: PageProps) {
 
   const { data: profile } = await supabase
     .from("profiles")
-    .select("id,full_name,team_name,phone_number,phone_carrier,role")
+    .select("id,full_name,team_name,phone_number,phone_carrier,role,is_active")
     .eq("id", user.id)
     .maybeSingle<ProfileRow>();
 
@@ -107,38 +108,56 @@ export default async function PicksPage({ searchParams }: PageProps) {
     redirect("/onboarding");
   }
 
+  if (!isProfileActive(profile)) {
+    return (
+      <AuthenticatedPageShell
+        actions={<SignOutButton className="static" />}
+        eyebrow="Race Picks"
+        maxWidth="max-w-4xl"
+        title="Pick'em Form"
+      >
+        <p className="mt-4 rounded-md border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
+          Your team is not active for the current season. Contact an admin if you are participating
+          this year.
+        </p>
+        <Link className="mt-4 text-sm font-semibold text-slate-900 underline" href="/leaderboard">
+          View leaderboard
+        </Link>
+      </AuthenticatedPageShell>
+    );
+  }
+
   const now = new Date();
   const nowIso = now.toISOString();
-  const seasonRange = getLeagueSeasonDateRange();
+  const activeSeason = await loadActiveLeagueSeason(supabase);
 
-  let upcomingRace: RaceRow | null = null;
-  {
-    const { data: seasonUpcomingRace } = await supabase
-      .from("races")
-      .select(PICKEM_RACE_SELECT_FIELDS)
-      .eq("is_archived", false)
-      .gte("race_date", seasonRange.seasonStartIso)
-      .lt("race_date", seasonRange.seasonEndExclusiveIso)
-      .gt("race_date", nowIso)
-      .order("race_date", { ascending: true })
-      .limit(1)
-      .maybeSingle<RaceRow>();
-
-    upcomingRace = seasonUpcomingRace ?? null;
+  if (!activeSeason) {
+    return (
+      <AuthenticatedPageShell
+        actions={<SignOutButton className="static" />}
+        eyebrow="Race Picks"
+        maxWidth="max-w-4xl"
+        title="Pick'em Form"
+      >
+        <p className="mt-4 rounded-md border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
+          No league season is currently active.
+        </p>
+        <Link className="mt-4 text-sm font-semibold text-slate-900 underline" href="/dashboard">
+          Back to dashboard
+        </Link>
+      </AuthenticatedPageShell>
+    );
   }
 
-  if (!upcomingRace) {
-    const { data: fallbackUpcomingRace } = await supabase
-      .from("races")
-      .select(PICKEM_RACE_SELECT_FIELDS)
-      .eq("is_archived", false)
-      .gt("race_date", nowIso)
-      .order("race_date", { ascending: true })
-      .limit(1)
-      .maybeSingle<RaceRow>();
-
-    upcomingRace = fallbackUpcomingRace ?? null;
-  }
+  const { data: upcomingRace } = await supabase
+    .from("races")
+    .select(PICKEM_RACE_SELECT_FIELDS)
+    .eq("is_archived", false)
+    .eq("season_id", activeSeason.id)
+    .gt("race_date", nowIso)
+    .order("round_number", { ascending: true })
+    .limit(1)
+    .maybeSingle<RaceRow>();
 
   if (!upcomingRace) {
     return (
@@ -149,7 +168,7 @@ export default async function PicksPage({ searchParams }: PageProps) {
         title="Pick'em Form"
       >
         <p className="mt-4 rounded-md border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
-          No future race is scheduled yet for the {seasonRange.seasonYear} season. Add a race in
+          No future race is scheduled yet for the {activeSeason.seasonYear} season. Add a race in
           admin with a start date in the future.
         </p>
         <Link className="mt-4 text-sm font-semibold text-slate-900 underline" href="/dashboard">
@@ -157,18 +176,6 @@ export default async function PicksPage({ searchParams }: PageProps) {
         </Link>
       </AuthenticatedPageShell>
     );
-  }
-
-  const pickFormatResponse = await supabase
-    .from("races")
-    .select("pick_format")
-    .eq("id", upcomingRace.id)
-    .maybeSingle<{ pick_format: RacePickFormat | null }>();
-  if (!pickFormatResponse.error) {
-    upcomingRace = {
-      ...upcomingRace,
-      pick_format: pickFormatResponse.data?.pick_format ?? "standard"
-    };
   }
 
   const racePickFormat = normalizeRacePickFormat(upcomingRace.pick_format);
@@ -179,7 +186,7 @@ export default async function PicksPage({ searchParams }: PageProps) {
 
   const [previousResultsGate, driversResponse, existingPickResponse, raceDriverGroupsResponse] =
     await Promise.all([
-      getPreviousRaceResultsGate(supabase, upcomingRace, seasonRange),
+      getPreviousRaceResultsGate(supabase, upcomingRace),
       supabase
         .from("drivers")
         .select("id,driver_name,image_url,championship_points,current_standing,group_number,is_active")
@@ -371,7 +378,10 @@ export default async function PicksPage({ searchParams }: PageProps) {
           <div className="flex flex-wrap items-start justify-between gap-4">
             <div>
               <p className="text-xs font-semibold uppercase tracking-[0.2em] text-cyan-200">
-                Current Pick&apos;em
+                {raceContextLabel({
+                  roundNumber: upcomingRace.round_number,
+                  seasonYear: activeSeason.seasonYear
+                })}
               </p>
               <h2 className="mt-2 text-3xl font-semibold tracking-tight">{upcomingRace.race_name}</h2>
             </div>

@@ -5,11 +5,12 @@ import { MobileBottomNav } from "@/components/mobile-bottom-nav";
 import { SignOutButton } from "@/components/sign-out-button";
 import { MOUND_HOUND_IMAGE_PATH } from "@/lib/branding";
 import { getPreviousRaceResultsGate } from "@/lib/pickem-results-gate";
-import { isProfileComplete, type ProfileRow } from "@/lib/profile";
+import { isProfileActive, isProfileComplete, type ProfileRow } from "@/lib/profile";
 import { queryStringParam } from "@/lib/query";
+import { raceContextLabel } from "@/lib/race-label";
 import { pickLockAtForRace, type RacePickFormat } from "@/lib/race-format";
+import { loadActiveLeagueSeason } from "@/lib/seasons";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
-import { getLeagueSeasonDateRange } from "@/lib/timezone";
 
 type PageProps = {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
@@ -21,9 +22,12 @@ type DashboardRaceRow = {
   qualifying_start_at: string;
   race_date: string;
   race_name: string;
+  round_number: number;
+  season_id: number;
 };
 
-const DASHBOARD_RACE_SELECT_FIELDS = "id,race_name,pick_format,qualifying_start_at,race_date";
+const DASHBOARD_RACE_SELECT_FIELDS =
+  "id,race_name,pick_format,qualifying_start_at,race_date,season_id,round_number";
 
 export default async function DashboardPage({ searchParams }: PageProps) {
   const params = await searchParams;
@@ -40,7 +44,7 @@ export default async function DashboardPage({ searchParams }: PageProps) {
 
   const { data: profile } = await supabase
     .from("profiles")
-    .select("id,full_name,team_name,phone_number,phone_carrier,role")
+    .select("id,full_name,team_name,phone_number,phone_carrier,role,is_active")
     .eq("id", user.id)
     .single<ProfileRow>();
 
@@ -50,31 +54,17 @@ export default async function DashboardPage({ searchParams }: PageProps) {
 
   const now = new Date();
   const nowIso = now.toISOString();
-  const seasonRange = getLeagueSeasonDateRange();
+  const activeSeason = await loadActiveLeagueSeason(supabase);
   let currentRace: DashboardRaceRow | null = null;
 
-  {
+  if (activeSeason) {
     const { data } = await supabase
       .from("races")
       .select(DASHBOARD_RACE_SELECT_FIELDS)
       .eq("is_archived", false)
-      .gte("race_date", seasonRange.seasonStartIso)
-      .lt("race_date", seasonRange.seasonEndExclusiveIso)
+      .eq("season_id", activeSeason.id)
       .gt("race_date", nowIso)
-      .order("race_date", { ascending: true })
-      .limit(1)
-      .maybeSingle<DashboardRaceRow>();
-
-    currentRace = data ?? null;
-  }
-
-  if (!currentRace) {
-    const { data } = await supabase
-      .from("races")
-      .select(DASHBOARD_RACE_SELECT_FIELDS)
-      .eq("is_archived", false)
-      .gt("race_date", nowIso)
-      .order("race_date", { ascending: true })
+      .order("round_number", { ascending: true })
       .limit(1)
       .maybeSingle<DashboardRaceRow>();
 
@@ -92,13 +82,23 @@ export default async function DashboardPage({ searchParams }: PageProps) {
   const pickLockAt = currentRace ? pickLockAtForRace(currentRace) : null;
   const picksLocked = pickLockAt ? Date.parse(pickLockAt) <= now.getTime() : false;
   const previousResultsGate = currentRace
-    ? await getPreviousRaceResultsGate(supabase, currentRace, seasonRange)
+    ? await getPreviousRaceResultsGate(supabase, currentRace)
     : null;
   const blockedPreviousResultsGate =
     previousResultsGate?.status === "blocked" ? previousResultsGate : null;
-  const raceAction = !currentRace
+  const raceAction = !isProfileActive(profile)
     ? {
-        body: `No active race is scheduled yet for the ${seasonRange.seasonYear} season.`,
+        body: "Your team is not active for the current season. You can still view standings and league history.",
+        href: "/leaderboard",
+        label: "View leaderboard",
+        status: "Inactive",
+        title: "Not entered this season"
+      }
+    : !currentRace
+    ? {
+        body: activeSeason
+          ? `No upcoming race is scheduled yet for the ${activeSeason.seasonYear} season.`
+          : "No league season is currently active.",
         href: "/leaderboard",
         label: "View leaderboard",
         status: "Waiting",
@@ -174,6 +174,14 @@ export default async function DashboardPage({ searchParams }: PageProps) {
                   {raceAction.status}
                 </span>
               </div>
+              {currentRace && activeSeason ? (
+                <p className="mt-1 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                  {raceContextLabel({
+                    roundNumber: currentRace.round_number,
+                    seasonYear: activeSeason.seasonYear
+                  })}
+                </p>
+              ) : null}
               <p className="mt-1 text-sm text-slate-600">{raceAction.body}</p>
             </div>
             <div className="flex flex-wrap items-center gap-2">

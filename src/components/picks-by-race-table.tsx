@@ -10,9 +10,7 @@ import { groupNumbersForCount } from "@/lib/race-format";
 import {
   compareNullableNumber,
   compareText,
-  numericMatch,
   sortIndicator,
-  textMatch,
   type SortDirection
 } from "@/lib/table-utils";
 
@@ -23,6 +21,7 @@ type DriverCell = {
 
 export type PicksByRaceTableRow = {
   averageSpeed: number | null;
+  displayName: string;
   drivers: DriverCell[];
   rank: number | null;
   teamName: string;
@@ -38,7 +37,7 @@ type Props = {
 
 type TieBreakRow = {
   averageSpeed: number | null;
-  teamName: string;
+  displayName: string;
   userId: string;
 };
 
@@ -50,24 +49,6 @@ type SortKey =
   | `driver${number}`
   | `score${number}`;
 
-type ColumnFilters = Record<string, string>;
-
-const createDefaultFilters = (groupCount: number): ColumnFilters => {
-  const filters: ColumnFilters = {
-    averageSpeed: "",
-    rank: "",
-    teamName: "",
-    totalPoints: ""
-  };
-
-  for (let groupNumber = 1; groupNumber <= groupCount; groupNumber += 1) {
-    filters[`driver${groupNumber}`] = "";
-    filters[`score${groupNumber}`] = "";
-  }
-
-  return filters;
-};
-
 const defaultSortDirection = (key: SortKey): SortDirection => {
   if (key === "teamName" || key.startsWith("driver") || key === "rank") {
     return "asc";
@@ -75,9 +56,6 @@ const defaultSortDirection = (key: SortKey): SortDirection => {
 
   return "desc";
 };
-
-const filterInputClassName =
-  "w-full rounded border border-slate-300 px-1.5 py-1 text-[11px] leading-tight text-slate-700 placeholder:text-slate-400";
 
 const formatAverageSpeed = (value: number | null): string =>
   value !== null ? value.toFixed(3) : "-";
@@ -88,8 +66,6 @@ export function PicksByRaceTable({ officialWinningAverageSpeed, resultsPosted, r
     () => groupNumbersForCount(groupCount),
     [groupCount]
   );
-  const [filters, setFilters] = useState<ColumnFilters>(() => createDefaultFilters(groupCount));
-  const [showFilters, setShowFilters] = useState(false);
   const [sortKey, setSortKey] = useState<SortKey>(resultsPosted ? "rank" : "teamName");
   const [sortDirection, setSortDirection] = useState<SortDirection>(
     defaultSortDirection(resultsPosted ? "rank" : "teamName")
@@ -106,39 +82,8 @@ export function PicksByRaceTable({ officialWinningAverageSpeed, resultsPosted, r
     setSortDirection(defaultSortDirection(key));
   };
 
-  const updateFilter = (key: SortKey, value: string) => {
-    setFilters((previous) => ({ ...previous, [key]: value }));
-  };
-
-  const resetView = () => {
-    setFilters(createDefaultFilters(groupCount));
-    const initialSortKey: SortKey = resultsPosted ? "rank" : "teamName";
-    setSortKey(initialSortKey);
-    setSortDirection(defaultSortDirection(initialSortKey));
-  };
-
-  const filteredAndSortedRows = useMemo(() => {
-    const filtered = rows.filter((row) => {
-      const baseMatches =
-        numericMatch(row.rank, filters.rank) &&
-        textMatch(row.teamName, filters.teamName) &&
-        numericMatch(row.totalPoints, filters.totalPoints) &&
-        numericMatch(row.averageSpeed, filters.averageSpeed);
-
-      if (!baseMatches) {
-        return false;
-      }
-
-      return groupNumbers.every((groupNumber) => {
-        const groupCell = row.drivers[groupNumber - 1];
-        return (
-          textMatch(groupCell?.driverName ?? "", filters[`driver${groupNumber}`] ?? "") &&
-          numericMatch(groupCell?.points ?? null, filters[`score${groupNumber}`] ?? "")
-        );
-      });
-    });
-
-    const sorted = [...filtered].sort((a, b) => {
+  const sortedRows = useMemo(() => {
+    return [...rows].sort((a, b) => {
       if (sortKey.startsWith("driver")) {
         const groupIndex = Number(sortKey.replace("driver", "")) - 1;
         return compareText(
@@ -161,7 +106,7 @@ export function PicksByRaceTable({ officialWinningAverageSpeed, resultsPosted, r
         case "rank":
           return compareNullableNumber(a.rank, b.rank, sortDirection);
         case "teamName":
-          return compareText(a.teamName, b.teamName, sortDirection);
+          return compareText(a.displayName, b.displayName, sortDirection);
         case "totalPoints":
           return compareNullableNumber(a.totalPoints, b.totalPoints, sortDirection);
         case "averageSpeed":
@@ -171,8 +116,7 @@ export function PicksByRaceTable({ officialWinningAverageSpeed, resultsPosted, r
       }
     });
 
-    return sorted;
-  }, [filters, groupNumbers, rows, sortDirection, sortKey]);
+  }, [rows, sortDirection, sortKey]);
 
   const tieBreakRows = useMemo(() => {
     if (!resultsPosted || !selectedRow || selectedRow.totalPoints === null) {
@@ -195,10 +139,11 @@ export function PicksByRaceTable({ officialWinningAverageSpeed, resultsPosted, r
     const topPoints = Math.max(...normalizedRows.map((row) => row.points));
     const tiedTopRows = normalizedRows.filter((row) => row.points === topPoints);
     const orderedTopRows = buildOrderedWeeklyRows(tiedTopRows, officialWinningAverageSpeed);
+    const displayNameByUserId = new Map(rows.map((row) => [row.userId, row.displayName]));
 
     return orderedTopRows.map((row) => ({
       averageSpeed: row.averageSpeed,
-      teamName: row.teamName,
+      displayName: displayNameByUserId.get(row.userId) ?? row.teamName,
       userId: row.userId
     }));
   }, [officialWinningAverageSpeed, resultsPosted, rows, selectedRow]);
@@ -215,41 +160,20 @@ export function PicksByRaceTable({ officialWinningAverageSpeed, resultsPosted, r
   return (
     <>
       <section className="mt-6 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 bg-gradient-to-r from-cyan-50 to-slate-50 px-4 py-3">
-          <div>
-            <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-800">
-              Picks Matrix
-            </h2>
-            <p className="mt-1 text-xs text-slate-600">
-              Showing <span className="font-semibold text-slate-900">{filteredAndSortedRows.length}</span>{" "}
-              of {rows.length} teams. Pick and score columns are paired by group.
-            </p>
-          </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <button
-              className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-100"
-              data-testid="picks-filter-toggle"
-              onClick={() => setShowFilters((previous) => !previous)}
-              type="button"
-            >
-              {showFilters ? "Hide filters" : "Advanced filters"}
-            </button>
-            <button
-              className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-100"
-              data-testid="picks-table-reset"
-              onClick={resetView}
-              type="button"
-            >
-              Reset view
-            </button>
-          </div>
+        <div className="border-b border-slate-200 bg-gradient-to-r from-cyan-50 to-slate-50 px-4 py-3">
+          <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-800">
+            Picks Matrix
+          </h2>
+          <p className="mt-1 text-xs text-slate-600">
+            {rows.length} teams. Pick and score columns are paired by group.
+          </p>
         </div>
 
         <div className="divide-y divide-slate-200 md:hidden">
-          {filteredAndSortedRows.length === 0 ? (
-            <p className="px-4 py-4 text-sm text-slate-600">No rows match your current filters.</p>
+          {sortedRows.length === 0 ? (
+            <p className="px-4 py-4 text-sm text-slate-600">No team picks are available.</p>
           ) : (
-            filteredAndSortedRows.map((row) => (
+            sortedRows.map((row) => (
               <article key={`mobile-picks-${row.userId}`} className="px-4 py-3">
                 <div className="flex items-start justify-between gap-3">
                   <button
@@ -260,8 +184,11 @@ export function PicksByRaceTable({ officialWinningAverageSpeed, resultsPosted, r
                     <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
                       {resultsPosted ? `Rank ${row.rank ?? "-"}` : "Submitted Pick"}
                     </p>
-                    <h3 className="mt-0.5 truncate text-base font-semibold text-slate-900 underline decoration-slate-300 underline-offset-2">
-                      {row.teamName}
+                    <h3
+                      className="mt-0.5 truncate text-base font-semibold text-slate-900 underline decoration-slate-300 underline-offset-2"
+                      title={row.displayName}
+                    >
+                      {row.displayName}
                     </h3>
                   </button>
                   <div className="text-right">
@@ -309,7 +236,7 @@ export function PicksByRaceTable({ officialWinningAverageSpeed, resultsPosted, r
                   onClick={() => onSort("teamName")}
                   type="button"
                 >
-                  Team Name {sortIndicator("teamName", sortKey, sortDirection)}
+                  Participant / Team {sortIndicator("teamName", sortKey, sortDirection)}
                 </button>
               </th>
               <th className="px-3 py-2 font-semibold">
@@ -356,83 +283,16 @@ export function PicksByRaceTable({ officialWinningAverageSpeed, resultsPosted, r
                 </Fragment>
               ))}
             </tr>
-            {showFilters ? (
-              <tr>
-                <th className="px-3 py-2">
-                  <input
-                    className={filterInputClassName}
-                    onChange={(event) => updateFilter("rank", event.target.value)}
-                    placeholder="<=5"
-                    type="text"
-                    value={filters.rank}
-                  />
-                </th>
-                <th className="px-3 py-2">
-                  <input
-                    className={filterInputClassName}
-                    data-testid="picks-filter-team"
-                    onChange={(event) => updateFilter("teamName", event.target.value)}
-                    placeholder="Team contains..."
-                    type="text"
-                    value={filters.teamName}
-                  />
-                </th>
-                <th className="px-3 py-2">
-                  <input
-                    className={filterInputClassName}
-                    onChange={(event) => updateFilter("totalPoints", event.target.value)}
-                    placeholder=">=200"
-                    type="text"
-                    value={filters.totalPoints}
-                  />
-                </th>
-                <th className="px-3 py-2">
-                  <input
-                    className={filterInputClassName}
-                    onChange={(event) => updateFilter("averageSpeed", event.target.value)}
-                    placeholder="175-180"
-                    type="text"
-                    value={filters.averageSpeed}
-                  />
-                </th>
-                {groupNumbers.map((groupNumber) => (
-                  <Fragment key={`group-filters-${groupNumber}`}>
-                    <th className="px-3 py-2">
-                      <input
-                        className={filterInputClassName}
-                        onChange={(event) =>
-                          updateFilter(`driver${groupNumber}` as SortKey, event.target.value)
-                        }
-                        placeholder="Driver..."
-                        type="text"
-                        value={filters[`driver${groupNumber}`] ?? ""}
-                      />
-                    </th>
-                    <th className="px-3 py-2">
-                      <input
-                        className={filterInputClassName}
-                        onChange={(event) =>
-                          updateFilter(`score${groupNumber}` as SortKey, event.target.value)
-                        }
-                        placeholder=">=30"
-                        type="text"
-                        value={filters[`score${groupNumber}`] ?? ""}
-                      />
-                    </th>
-                  </Fragment>
-                ))}
-              </tr>
-            ) : null}
           </thead>
           <tbody>
-            {filteredAndSortedRows.length === 0 ? (
+            {sortedRows.length === 0 ? (
               <tr>
                 <td className="px-3 py-4 text-sm text-slate-600" colSpan={4 + groupCount * 2}>
-                  No rows match your current filters.
+                  No team picks are available.
                 </td>
               </tr>
             ) : (
-              filteredAndSortedRows.map((row) => (
+              sortedRows.map((row) => (
                 <tr key={row.userId} className="border-t border-slate-200">
                   <td className="px-3 py-2 font-semibold">
                     {resultsPosted ? (row.rank ?? "-") : "-"}
@@ -443,7 +303,7 @@ export function PicksByRaceTable({ officialWinningAverageSpeed, resultsPosted, r
                       onClick={() => setSelectedRow(row)}
                       type="button"
                     >
-                      {row.teamName}
+                      {row.displayName}
                     </button>
                   </td>
                   <td className="px-3 py-2 font-semibold">
@@ -492,7 +352,7 @@ export function PicksByRaceTable({ officialWinningAverageSpeed, resultsPosted, r
           >
             <div className="flex items-start justify-between gap-3">
               <div>
-                <h3 className="text-lg font-semibold text-slate-900">{selectedRow.teamName}</h3>
+                <h3 className="text-lg font-semibold text-slate-900">{selectedRow.displayName}</h3>
                 <p className="mt-1 text-sm text-slate-600">Picks breakdown and tiebreak context</p>
               </div>
               <button
@@ -553,7 +413,7 @@ export function PicksByRaceTable({ officialWinningAverageSpeed, resultsPosted, r
                   </p>
                   <p className="mt-1 text-xs text-slate-600">
                     {selectedTieBreakRank
-                      ? `${selectedRow.teamName} is tiebreak position #${selectedTieBreakRank} of ${tieBreakRows.length}.`
+                      ? `${selectedRow.displayName} is tiebreak position #${selectedTieBreakRank} of ${tieBreakRows.length}.`
                       : "Selected team is not in the tiebreak group."}
                   </p>
                   <div className="mt-2 overflow-x-auto rounded-md border border-slate-200 bg-white">
@@ -575,7 +435,7 @@ export function PicksByRaceTable({ officialWinningAverageSpeed, resultsPosted, r
                             }`}
                           >
                             <td className="px-3 py-2">{index + 1}</td>
-                            <td className="px-3 py-2">{row.teamName}</td>
+                            <td className="px-3 py-2">{row.displayName}</td>
                             <td className="px-3 py-2">
                               {row.averageSpeed !== null ? row.averageSpeed.toFixed(3) : "-"}
                             </td>
