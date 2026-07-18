@@ -499,14 +499,7 @@ test.describe.serial("Full App Flow", () => {
 
     const standingsTable = p1Page.getByTestId("standings-table");
     await expect(standingsTable).toContainText("R90");
-    await p1Page.getByTestId("standings-filter-toggle").click();
-    const standingsTeamFilter = p1Page.getByTestId("standings-filter-team");
-    await standingsTeamFilter.fill(participant3.teamName);
-    await expect(standingsTable.locator("tbody tr")).toHaveCount(1);
-    await expect(standingsTable.locator("tbody tr").first()).toContainText(participant3.teamName);
-
-    await p1Page.getByTestId("standings-reset").click();
-    await expect(standingsTeamFilter).toHaveValue("");
+    await expect(standingsTable.locator("tbody tr").filter({ hasText: participant3.teamName })).toHaveCount(1);
 
     const standingsTotalSort = p1Page.getByTestId("standings-sort-total");
     await standingsTotalSort.click();
@@ -551,14 +544,9 @@ test.describe.serial("Full App Flow", () => {
     const p1Row = p1Page.locator("tbody tr").filter({ hasText: participant1.teamName }).first();
     await expect(p1Row).not.toContainText("-");
 
-    await p1Page.getByTestId("picks-filter-toggle").click();
-    const teamFilter = p1Page.getByTestId("picks-filter-team");
-    await teamFilter.fill(participant2.teamName);
-    await expect(p1Page.locator("tbody tr")).toHaveCount(1);
-    await expect(p1Page.locator("tbody tr").first()).toContainText(participant2.teamName);
-
-    await p1Page.getByTestId("picks-table-reset").click();
-    await expect(teamFilter).toHaveValue("");
+    await expect(
+      p1Page.locator("tbody tr").filter({ hasText: participant2.teamName }).first()
+    ).toBeVisible();
 
     const totalScoreSort = p1Page.getByTestId("picks-sort-total-score");
     await totalScoreSort.click();

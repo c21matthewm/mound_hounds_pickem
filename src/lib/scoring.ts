@@ -8,6 +8,7 @@ import {
   pickLockAtForRace,
   type RacePickFormat
 } from "@/lib/race-format";
+import { participantLeaderboardLabel } from "@/lib/participant-display";
 import { loadAllRows } from "@/lib/supabase/paginated-query";
 import { SCORING_CACHE_TAG } from "@/lib/scoring-cache";
 import {
@@ -73,6 +74,7 @@ type RaceDriverGroupRow = {
 };
 
 type Participant = {
+  displayName: string;
   id: string;
   teamName: string;
 };
@@ -80,6 +82,7 @@ type Participant = {
 export type LeaderboardRow = {
   change: number;
   currentStanding: number;
+  displayName: string;
   raceBreakdown: Record<number, number>;
   teamName: string;
   totalPoints: number;
@@ -118,6 +121,7 @@ export type PicksByRaceDriverCell = {
 
 export type PicksByRaceParticipantRow = {
   averageSpeed: number | null;
+  displayName: string;
   driverCells: PicksByRaceDriverCell[];
   rank: number | null;
   teamName: string;
@@ -465,6 +469,7 @@ export async function buildLeagueScoringSnapshotUncached(
   const participants: Participant[] = profiles
     .filter((profile) => typeof profile.team_name === "string" && profile.team_name.trim().length > 0)
     .map((profile) => ({
+      displayName: participantLeaderboardLabel(profile.full_name, profile.team_name.trim()),
       id: profile.id,
       teamName: profile.team_name.trim()
     }));
@@ -580,6 +585,7 @@ export async function buildLeagueScoringSnapshotUncached(
       return {
         change,
         currentStanding,
+        displayName: participant.displayName,
         raceBreakdown: Object.fromEntries(raceBreakdownByUser.get(participant.id) ?? []),
         teamName: participant.teamName,
         totalPoints: cumulativeByUser.get(participant.id) ?? 0,
@@ -606,7 +612,7 @@ export async function buildLeagueScoringSnapshotUncached(
 
 const buildCachedLeagueScoringSnapshot = unstable_cache(
   async (seasonId: number) => buildLeagueScoringSnapshotUncached(seasonId),
-  ["league-scoring-snapshot"],
+  ["league-scoring-snapshot-v2"],
   { revalidate: 3600, tags: [SCORING_CACHE_TAG] }
 );
 
@@ -659,6 +665,7 @@ export async function buildPicksByRaceSnapshot(
   const participants: Participant[] = profiles
     .filter((profile) => typeof profile.team_name === "string" && profile.team_name.trim().length > 0)
     .map((profile) => ({
+      displayName: participantLeaderboardLabel(profile.full_name, profile.team_name.trim()),
       id: profile.id,
       teamName: profile.team_name.trim()
     }));
@@ -786,6 +793,7 @@ export async function buildPicksByRaceSnapshot(
 
     return {
       averageSpeed: pick ? asNumber(pick.average_speed) : null,
+      displayName: participant.displayName,
       driverCells,
       rank: null as number | null,
       teamName: participant.teamName,
@@ -932,6 +940,7 @@ export async function buildParticipantAnalyticsSnapshotUncached(
   const participants: Participant[] = profiles
     .filter((profile) => typeof profile.team_name === "string" && profile.team_name.trim().length > 0)
     .map((profile) => ({
+      displayName: participantLeaderboardLabel(profile.full_name, profile.team_name.trim()),
       id: profile.id,
       teamName: profile.team_name.trim()
     }));

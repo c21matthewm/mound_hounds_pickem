@@ -5,9 +5,7 @@ import { compactRoundLabel } from "@/lib/race-label";
 import {
   compareNullableNumber,
   compareText,
-  numericMatch,
   sortIndicator,
-  textMatch,
   type SortDirection
 } from "@/lib/table-utils";
 
@@ -20,8 +18,8 @@ export type StandingsTableRaceColumn = {
 export type StandingsTableRow = {
   change: number;
   currentStanding: number;
+  displayName: string;
   racePointsByRaceId: Record<number, number>;
-  teamName: string;
   totalPoints: number;
   userId: string;
 };
@@ -35,7 +33,6 @@ type Props = {
 
 type BaseSortKey = "change" | "currentStanding" | "teamName" | "totalPoints";
 type SortKey = BaseSortKey | `race-${number}`;
-type RaceView = "all" | "recent";
 
 const PAGE_SIZE = 25;
 
@@ -47,6 +44,20 @@ const formatChange = (value: number): string => {
   return String(value);
 };
 
+const ChangeBadge = ({ value }: { value: number }) => (
+  <span
+    className={`inline-flex h-4 min-w-6 items-center justify-center rounded-full border px-1 text-[9px] font-bold leading-none tabular-nums ${
+      value > 0
+        ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+        : value < 0
+          ? "border-red-200 bg-red-50 text-red-700"
+          : "border-slate-200 bg-slate-100 text-slate-500"
+    }`}
+  >
+    {formatChange(value)}
+  </span>
+);
+
 export function StandingsTable({
   currentUserId,
   raceColumns,
@@ -55,19 +66,10 @@ export function StandingsTable({
 }: Props) {
   const [expandedUserId, setExpandedUserId] = useState<string | null>(null);
   const [page, setPage] = useState(1);
-  const [raceFilterId, setRaceFilterId] = useState<number | null>(null);
-  const [racePointsFilter, setRacePointsFilter] = useState("");
-  const [raceView, setRaceView] = useState<RaceView>("recent");
-  const [rankFilter, setRankFilter] = useState("");
-  const [showFilters, setShowFilters] = useState(false);
   const [sortDirection, setSortDirection] = useState<SortDirection>("asc");
   const [sortKey, setSortKey] = useState<SortKey>("currentStanding");
-  const [teamFilter, setTeamFilter] = useState("");
-  const [totalFilter, setTotalFilter] = useState("");
 
-  const visibleRaceColumns = raceView === "recent" ? raceColumns.slice(-6) : raceColumns;
-  const recentMobileRaces = raceColumns.slice(-3).reverse();
-  const desktopTableMinWidth = 400 + visibleRaceColumns.length * 64;
+  const desktopTableMinWidth = 480 + raceColumns.length * 64;
 
   const onSort = (key: SortKey) => {
     setPage(1);
@@ -79,39 +81,8 @@ export function StandingsTable({
     setSortDirection(defaultSortDirection(key));
   };
 
-  const resetView = () => {
-    setPage(1);
-    setRaceFilterId(null);
-    setRacePointsFilter("");
-    setRankFilter("");
-    setRaceView("recent");
-    setSortDirection("asc");
-    setSortKey("currentStanding");
-    setTeamFilter("");
-    setTotalFilter("");
-  };
-
-  const filteredAndSortedRows = useMemo(() => {
-    const filtered = rows.filter((row) => {
-      if (
-        !numericMatch(row.currentStanding, rankFilter) ||
-        !textMatch(row.teamName, teamFilter) ||
-        !numericMatch(row.totalPoints, totalFilter)
-      ) {
-        return false;
-      }
-
-      if (
-        raceFilterId !== null &&
-        !numericMatch(row.racePointsByRaceId[raceFilterId] ?? 0, racePointsFilter)
-      ) {
-        return false;
-      }
-
-      return true;
-    });
-
-    return [...filtered].sort((a, b) => {
+  const sortedRows = useMemo(() => {
+    return [...rows].sort((a, b) => {
       if (sortKey === "change") {
         return compareNullableNumber(a.change, b.change, sortDirection);
       }
@@ -119,7 +90,7 @@ export function StandingsTable({
         return compareNullableNumber(a.currentStanding, b.currentStanding, sortDirection);
       }
       if (sortKey === "teamName") {
-        return compareText(a.teamName, b.teamName, sortDirection);
+        return compareText(a.displayName, b.displayName, sortDirection);
       }
       if (sortKey === "totalPoints") {
         return compareNullableNumber(a.totalPoints, b.totalPoints, sortDirection);
@@ -132,148 +103,34 @@ export function StandingsTable({
         sortDirection
       );
     });
-  }, [raceFilterId, racePointsFilter, rankFilter, rows, sortDirection, sortKey, teamFilter, totalFilter]);
+  }, [rows, sortDirection, sortKey]);
 
-  const pageCount = Math.max(1, Math.ceil(filteredAndSortedRows.length / PAGE_SIZE));
+  const pageCount = Math.max(1, Math.ceil(sortedRows.length / PAGE_SIZE));
   const currentPage = Math.min(page, pageCount);
-  const pageRows = filteredAndSortedRows.slice(
+  const pageRows = sortedRows.slice(
     (currentPage - 1) * PAGE_SIZE,
     currentPage * PAGE_SIZE
   );
-  const firstVisible = filteredAndSortedRows.length === 0 ? 0 : (currentPage - 1) * PAGE_SIZE + 1;
-  const lastVisible = Math.min(currentPage * PAGE_SIZE, filteredAndSortedRows.length);
-  const currentUserIndex = filteredAndSortedRows.findIndex((row) => row.userId === currentUserId);
-
-  const findMyTeam = () => {
-    if (currentUserIndex < 0) return;
-    setPage(Math.floor(currentUserIndex / PAGE_SIZE) + 1);
-  };
-
+  const firstVisible = sortedRows.length === 0 ? 0 : (currentPage - 1) * PAGE_SIZE + 1;
+  const lastVisible = Math.min(currentPage * PAGE_SIZE, sortedRows.length);
   return (
     <section
       className="mt-6 overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm"
       data-testid="standings-table"
     >
       <div className="border-b border-slate-200 bg-slate-950 px-4 py-3 text-white">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <h2 className="text-sm font-semibold">
-              {seasonYear ? `${seasonYear} Standings` : "Season Standings"}
-            </h2>
-            <p className="mt-0.5 text-xs text-slate-300">
-              {firstVisible}-{lastVisible} of {filteredAndSortedRows.length} teams
-            </p>
-          </div>
-          <div className="flex flex-wrap items-center gap-2">
-            {currentUserIndex >= 0 ? (
-              <button
-                className="rounded-md border border-white/25 px-2.5 py-1.5 text-xs font-semibold hover:bg-white/10"
-                onClick={findMyTeam}
-                type="button"
-              >
-                Find my team
-              </button>
-            ) : null}
-            <button
-              className="rounded-md border border-white/25 px-2.5 py-1.5 text-xs font-semibold hover:bg-white/10"
-              data-testid="standings-filter-toggle"
-              onClick={() => setShowFilters((previous) => !previous)}
-              type="button"
-            >
-              {showFilters ? "Hide filters" : "Filters"}
-            </button>
-          </div>
-        </div>
-
-        <div className="mt-3 flex flex-wrap items-center gap-2">
-          <div className="inline-flex rounded-md border border-white/25 p-0.5 text-xs font-semibold">
-            <button
-              className={`rounded px-2.5 py-1 ${raceView === "recent" ? "bg-white text-slate-950" : "text-white"}`}
-              onClick={() => setRaceView("recent")}
-              type="button"
-            >
-              Recent races
-            </button>
-            <button
-              className={`rounded px-2.5 py-1 ${raceView === "all" ? "bg-white text-slate-950" : "text-white"}`}
-              onClick={() => setRaceView("all")}
-              type="button"
-            >
-              All races
-            </button>
-          </div>
-          <button
-            className="rounded-md px-2 py-1 text-xs font-semibold text-slate-300 hover:text-white"
-            data-testid="standings-reset"
-            onClick={resetView}
-            type="button"
-          >
-            Reset
-          </button>
-        </div>
+        <h2 className="text-sm font-semibold">
+          {seasonYear ? `${seasonYear} Standings` : "Season Standings"}
+        </h2>
+        <p className="mt-0.5 text-xs text-slate-300">
+          {firstVisible}-{lastVisible} of {sortedRows.length} teams
+        </p>
       </div>
 
-      {showFilters ? (
-        <div className="grid gap-2 border-b border-slate-200 bg-slate-50 p-3 sm:grid-cols-2 lg:grid-cols-5">
-          <input
-            className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm"
-            data-testid="standings-filter-team"
-            onChange={(event) => {
-              setPage(1);
-              setTeamFilter(event.target.value);
-            }}
-            placeholder="Team name"
-            value={teamFilter}
-          />
-          <input
-            className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm"
-            onChange={(event) => {
-              setPage(1);
-              setRankFilter(event.target.value);
-            }}
-            placeholder="Rank, e.g. <=10"
-            value={rankFilter}
-          />
-          <input
-            className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm"
-            onChange={(event) => {
-              setPage(1);
-              setTotalFilter(event.target.value);
-            }}
-            placeholder="Points, e.g. >=300"
-            value={totalFilter}
-          />
-          <select
-            className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm"
-            onChange={(event) => {
-              setPage(1);
-              setRaceFilterId(event.target.value ? Number(event.target.value) : null);
-            }}
-            value={raceFilterId ?? ""}
-          >
-            <option value="">Race score filter</option>
-            {raceColumns.map((race) => (
-              <option key={race.raceId} value={race.raceId}>
-                {compactRoundLabel(race.roundNumber)} · {race.raceName}
-              </option>
-            ))}
-          </select>
-          <input
-            className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm disabled:bg-slate-100"
-            disabled={raceFilterId === null}
-            onChange={(event) => {
-              setPage(1);
-              setRacePointsFilter(event.target.value);
-            }}
-            placeholder="Race points, e.g. >=30"
-            value={racePointsFilter}
-          />
-        </div>
-      ) : null}
-
-      <div className="grid grid-cols-[2.5rem_minmax(0,1fr)_4.5rem] gap-2 border-b border-slate-200 bg-slate-50 px-3 py-1.5 text-[10px] font-semibold uppercase text-slate-500 md:hidden">
+      <div className="grid grid-cols-[2.25rem_2.75rem_minmax(0,1fr)_4.25rem] gap-1.5 border-b border-slate-200 bg-slate-50 px-3 py-1.5 text-[10px] font-semibold uppercase text-slate-500 md:hidden">
         <span className="text-right">Rank</span>
-        <span>Team</span>
+        <span className="text-center">+/-</span>
+        <span>Participant / Team</span>
         <span className="text-right">Points</span>
       </div>
 
@@ -291,15 +148,18 @@ export function StandingsTable({
               >
                 <button
                   aria-expanded={expanded}
-                  className="grid w-full grid-cols-[2.5rem_minmax(0,1fr)_4.5rem] items-center gap-2 px-3 py-2.5 text-left"
+                  className="grid w-full grid-cols-[2.25rem_2.75rem_minmax(0,1fr)_4.25rem] items-center gap-1.5 px-3 py-2.5 text-left"
                   onClick={() => setExpandedUserId(expanded ? null : row.userId)}
                   type="button"
                 >
-                  <span className="text-right text-sm font-semibold tabular-nums text-slate-600">
+                  <span className="text-right text-sm font-semibold tabular-nums text-slate-700">
                     {row.currentStanding}
                   </span>
+                  <span className="flex justify-center">
+                    <ChangeBadge value={row.change} />
+                  </span>
                   <span className="min-w-0 truncate text-sm font-semibold text-slate-900">
-                    {row.teamName}
+                    {row.displayName}
                     {isCurrentUser ? <span className="ml-1 text-xs font-medium text-cyan-700">You</span> : null}
                   </span>
                   <span className="text-right text-sm font-semibold tabular-nums text-slate-950">
@@ -307,17 +167,23 @@ export function StandingsTable({
                   </span>
                 </button>
                 {expanded ? (
-                  <div className="grid grid-cols-3 gap-2 border-t border-slate-200 bg-slate-50 px-4 py-2">
-                    {recentMobileRaces.map((race) => (
-                      <div className="min-w-0 text-center" key={race.raceId} title={race.raceName}>
-                        <p className="text-[10px] font-semibold text-slate-500">
-                          {compactRoundLabel(race.roundNumber)}
-                        </p>
-                        <p className="text-sm font-semibold tabular-nums text-slate-900">
-                          {row.racePointsByRaceId[race.raceId] ?? 0}
-                        </p>
-                      </div>
-                    ))}
+                  <div className="overflow-x-auto border-t border-slate-200 bg-slate-50 px-4 py-2">
+                    <div className="flex min-w-max gap-2">
+                      {raceColumns.map((race) => (
+                        <div
+                          className="w-12 shrink-0 text-center"
+                          key={race.raceId}
+                          title={race.raceName}
+                        >
+                          <p className="text-[10px] font-semibold text-slate-500">
+                            {compactRoundLabel(race.roundNumber)}
+                          </p>
+                          <p className="text-sm font-semibold tabular-nums text-slate-900">
+                            {row.racePointsByRaceId[race.raceId] ?? 0}
+                          </p>
+                        </div>
+                      ))}
+                    </div>
                   </div>
                 ) : null}
               </article>
@@ -340,7 +206,12 @@ export function StandingsTable({
               </th>
               <th className="sticky left-20 z-30 w-56 bg-slate-50 px-3 py-2 text-left font-semibold">
                 <button onClick={() => onSort("teamName")} type="button">
-                  Team {sortIndicator("teamName", sortKey, sortDirection)}
+                  Participant / Team {sortIndicator("teamName", sortKey, sortDirection)}
+                </button>
+              </th>
+              <th className="w-20 px-3 py-2 text-right font-semibold">
+                <button onClick={() => onSort("change")} type="button">
+                  Change {sortIndicator("change", sortKey, sortDirection)}
                 </button>
               </th>
               <th className="w-24 px-3 py-2 text-right font-semibold">
@@ -352,7 +223,7 @@ export function StandingsTable({
                   Points {sortIndicator("totalPoints", sortKey, sortDirection)}
                 </button>
               </th>
-              {visibleRaceColumns.map((race) => (
+              {raceColumns.map((race) => (
                 <th
                   aria-label={`${race.raceName} points`}
                   className="w-16 px-2 py-2 text-right font-semibold"
@@ -370,7 +241,7 @@ export function StandingsTable({
           <tbody>
             {pageRows.length === 0 ? (
               <tr>
-                <td className="px-3 py-5 text-sm text-slate-600" colSpan={3 + visibleRaceColumns.length}>
+                <td className="px-3 py-5 text-sm text-slate-600" colSpan={4 + raceColumns.length}>
                   No teams match this view.
                 </td>
               </tr>
@@ -384,19 +255,17 @@ export function StandingsTable({
                   >
                     <td className={`sticky left-0 z-10 px-3 py-2 text-right font-semibold tabular-nums ${isCurrentUser ? "bg-cyan-50" : "bg-white"}`}>
                       {row.currentStanding}
-                      {row.change !== 0 ? (
-                        <span className={`ml-1 text-[10px] ${row.change > 0 ? "text-emerald-700" : "text-amber-700"}`}>
-                          {formatChange(row.change)}
-                        </span>
-                      ) : null}
                     </td>
-                    <td className={`sticky left-20 z-10 truncate px-3 py-2 text-left font-medium text-slate-900 ${isCurrentUser ? "bg-cyan-50" : "bg-white"}`} title={row.teamName}>
-                      {row.teamName}
+                    <td className={`sticky left-20 z-10 truncate px-3 py-2 text-left font-medium text-slate-900 ${isCurrentUser ? "bg-cyan-50" : "bg-white"}`} title={row.displayName}>
+                      {row.displayName}
+                    </td>
+                    <td className="px-3 py-2 text-right">
+                      <ChangeBadge value={row.change} />
                     </td>
                     <td className="px-3 py-2 text-right font-semibold tabular-nums text-slate-950">
                       {row.totalPoints}
                     </td>
-                    {visibleRaceColumns.map((race) => (
+                    {raceColumns.map((race) => (
                       <td className="px-2 py-2 text-right tabular-nums text-slate-700" key={race.raceId}>
                         {row.racePointsByRaceId[race.raceId] ?? 0}
                       </td>
@@ -409,7 +278,7 @@ export function StandingsTable({
         </table>
       </div>
 
-      {filteredAndSortedRows.length > PAGE_SIZE ? (
+      {sortedRows.length > PAGE_SIZE ? (
         <div className="flex items-center justify-between gap-3 border-t border-slate-200 px-3 py-2.5">
           <button
             className="rounded-md border border-slate-300 px-3 py-1.5 text-xs font-semibold text-slate-700 disabled:opacity-40"

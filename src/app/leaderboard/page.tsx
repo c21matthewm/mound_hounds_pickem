@@ -149,6 +149,7 @@ export default async function LeaderboardPage({ searchParams }: PageProps) {
   const picksTableRows: PicksByRaceTableRow[] = picksSnapshot
     ? picksSnapshot.rows.map((row) => ({
       averageSpeed: row.averageSpeed,
+      displayName: row.displayName,
       drivers: row.driverCells.map((cell) => ({
         driverName: cell.driverName,
         points: cell.points
@@ -172,6 +173,7 @@ export default async function LeaderboardPage({ searchParams }: PageProps) {
     ? standingsSnapshot.leaderboardRows.map((row) => ({
       change: row.change,
       currentStanding: row.currentStanding,
+      displayName: row.displayName,
       racePointsByRaceId: standingsSnapshot.raceColumns.reduce<Record<number, number>>(
         (accumulator, column) => {
           accumulator[column.raceId] = row.raceBreakdown[column.raceId] ?? 0;
@@ -179,7 +181,6 @@ export default async function LeaderboardPage({ searchParams }: PageProps) {
         },
         {}
       ),
-      teamName: row.teamName,
       totalPoints: row.totalPoints,
       userId: row.userId
     }))
