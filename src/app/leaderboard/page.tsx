@@ -16,6 +16,10 @@ import {
 import { isProfileComplete, type ProfileRow } from "@/lib/profile";
 import { queryStringParam } from "@/lib/query";
 import {
+  loadHallOfFameSnapshot,
+  type HallOfFameSnapshot
+} from "@/lib/hall-of-fame";
+import {
   buildLeagueScoringSnapshot,
   buildParticipantAnalyticsSnapshot,
   buildPicksByRaceSnapshot
@@ -25,7 +29,7 @@ import { formatLeagueDateTime, LEAGUE_TIME_ZONE } from "@/lib/timezone";
 
 export const dynamic = "force-dynamic";
 
-type LeaderboardTab = "standings" | "picks" | "analytics";
+type LeaderboardTab = "standings" | "picks" | "analytics" | "hall";
 
 type PageProps = {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
@@ -35,7 +39,7 @@ const formatRaceDate = (value: string): string =>
   formatLeagueDateTime(value, { dateStyle: "medium", timeStyle: "short" });
 
 const parseLeaderboardTab = (value: string | undefined): LeaderboardTab =>
-  value === "picks" || value === "analytics" ? value : "standings";
+  value === "picks" || value === "analytics" || value === "hall" ? value : "standings";
 
 const formatSignedValue = (value: number, digits = 1): string =>
   `${value >= 0 ? "+" : ""}${value.toFixed(digits)}`;
@@ -96,11 +100,14 @@ export default async function LeaderboardPage({ searchParams }: PageProps) {
   let standingsSnapshot: Awaited<ReturnType<typeof buildLeagueScoringSnapshot>> | null = null;
   let picksSnapshot: Awaited<ReturnType<typeof buildPicksByRaceSnapshot>> | null = null;
   let analyticsSnapshot: Awaited<ReturnType<typeof buildParticipantAnalyticsSnapshot>> | null = null;
+  let hallOfFameSnapshot: HallOfFameSnapshot | null = null;
   try {
     if (activeTab === "picks") {
       picksSnapshot = await buildPicksByRaceSnapshot(selectedRaceId);
     } else if (activeTab === "analytics") {
       analyticsSnapshot = await buildParticipantAnalyticsSnapshot(user.id);
+    } else if (activeTab === "hall") {
+      hallOfFameSnapshot = await loadHallOfFameSnapshot(supabase);
     } else {
       standingsSnapshot = await buildLeagueScoringSnapshot();
     }
@@ -150,7 +157,7 @@ export default async function LeaderboardPage({ searchParams }: PageProps) {
       currentStanding: row.currentStanding,
       racePointsByRaceId: standingsSnapshot.raceColumns.reduce<Record<number, number>>(
         (accumulator, column) => {
-          accumulator[column.raceId] = row.raceBreakdown.get(column.raceId) ?? 0;
+          accumulator[column.raceId] = row.raceBreakdown[column.raceId] ?? 0;
           return accumulator;
         },
         {}
@@ -215,17 +222,17 @@ export default async function LeaderboardPage({ searchParams }: PageProps) {
           </Link>
         </>
       }
-      description="Standings, locked picks by race, and season-long performance trends."
+      description="Standings, locked picks by race, season analytics, and league history."
       eyebrow="League Data"
       maxWidth="max-w-[1200px]"
       title="Season Leaderboard"
     >
 
       <nav className="mt-6">
-        <ul className="inline-flex rounded-md border border-slate-300 bg-white p-1 text-sm">
+        <ul className="grid w-full grid-cols-2 rounded-md border border-slate-300 bg-white p-1 text-sm sm:inline-flex sm:w-auto">
           <li>
             <Link
-              className={`rounded px-3 py-1.5 font-medium ${
+              className={`block rounded px-3 py-1.5 text-center font-medium ${
                 activeTab === "standings" ? "bg-slate-900 text-white" : "text-slate-700 hover:bg-slate-100"
               }`}
               href={tabHref("standings")}
@@ -235,7 +242,7 @@ export default async function LeaderboardPage({ searchParams }: PageProps) {
           </li>
           <li>
             <Link
-              className={`rounded px-3 py-1.5 font-medium ${
+              className={`block rounded px-3 py-1.5 text-center font-medium ${
                 activeTab === "picks" ? "bg-slate-900 text-white" : "text-slate-700 hover:bg-slate-100"
               }`}
               href={tabHref("picks", picksSnapshot?.selectedRace?.raceId)}
@@ -245,12 +252,22 @@ export default async function LeaderboardPage({ searchParams }: PageProps) {
           </li>
           <li>
             <Link
-              className={`rounded px-3 py-1.5 font-medium ${
+              className={`block rounded px-3 py-1.5 text-center font-medium ${
                 activeTab === "analytics" ? "bg-slate-900 text-white" : "text-slate-700 hover:bg-slate-100"
               }`}
               href={tabHref("analytics")}
             >
               Analytics
+            </Link>
+          </li>
+          <li>
+            <Link
+              className={`block rounded px-3 py-1.5 text-center font-medium ${
+                activeTab === "hall" ? "bg-slate-900 text-white" : "text-slate-700 hover:bg-slate-100"
+              }`}
+              href={tabHref("hall")}
+            >
+              Hall of Fame
             </Link>
           </li>
         </ul>
@@ -588,6 +605,121 @@ export default async function LeaderboardPage({ searchParams }: PageProps) {
               </div>
             </section>
           </>
+        )
+      ) : null}
+
+      {activeTab === "hall" && hallOfFameSnapshot ? (
+        !hallOfFameSnapshot.migrationReady ? (
+          <section className="mt-6 rounded-lg border border-amber-200 bg-amber-50 p-5">
+            <h2 className="text-lg font-semibold text-amber-950">Hall of Fame setup required</h2>
+            <p className="mt-2 text-sm text-amber-900">
+              The season archive migration has not been applied yet. An admin must apply
+              supabase/migrations/20260717_add_hall_of_fame.sql before final standings can be saved.
+            </p>
+          </section>
+        ) : hallOfFameSnapshot.seasons.length === 0 ? (
+          <section className="mt-6 rounded-lg border border-slate-200 bg-white p-6">
+            <h2 className="text-xl font-semibold text-slate-900">Hall of Fame</h2>
+            <p className="mt-2 text-sm text-slate-700">
+              No seasons have been finalized yet. The first archive will appear here after an admin
+              saves the final standings following the last race.
+            </p>
+          </section>
+        ) : (
+          <div className="mt-6 grid gap-4">
+            {hallOfFameSnapshot.seasons.map((season, seasonIndex) => (
+              <details
+                className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm"
+                key={season.seasonId}
+                open={seasonIndex === 0}
+              >
+                <summary className="cursor-pointer list-none p-5 marker:hidden">
+                  <div className="flex flex-wrap items-center justify-between gap-4">
+                    <div>
+                      <p className="text-xs font-semibold uppercase tracking-wide text-cyan-700">
+                        {season.seasonYear} Champion
+                      </p>
+                      <h2 className="mt-1 text-2xl font-semibold text-slate-950">
+                        {season.championTeamName}
+                      </h2>
+                    </div>
+                    <div className="flex items-center gap-5 text-right">
+                      <div>
+                        <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                          Points
+                        </p>
+                        <p className="text-xl font-semibold text-slate-900">
+                          {season.championTotalPoints}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                          Field
+                        </p>
+                        <p className="text-xl font-semibold text-slate-900">
+                          {season.participantCount}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                  <p className="mt-3 text-xs text-slate-500">
+                    {season.raceCount} races · Finalized {formatRaceDate(season.finalizedAt)}
+                  </p>
+                </summary>
+
+                <div className="border-t border-slate-200 p-4 sm:p-5">
+                  <div className="grid gap-2 md:hidden">
+                    {season.entries.map((entry) => (
+                      <div
+                        className="flex items-center justify-between gap-3 rounded-md border border-slate-200 bg-slate-50 px-3 py-2"
+                        key={`${season.seasonId}-${entry.teamName}`}
+                      >
+                        <div className="flex min-w-0 items-center gap-3">
+                          <span className="w-8 shrink-0 text-sm font-semibold text-slate-600">
+                            #{entry.finalRank}
+                          </span>
+                          <span className="truncate text-sm font-semibold text-slate-900">
+                            {entry.teamName}
+                          </span>
+                        </div>
+                        <span className="shrink-0 text-sm font-semibold text-slate-900">
+                          {entry.totalPoints} pts
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+
+                  <div className="hidden overflow-x-auto rounded-md border border-slate-200 md:block">
+                    <table className="min-w-full text-left text-sm">
+                      <thead className="bg-slate-50 text-slate-700">
+                        <tr>
+                          <th className="w-24 px-3 py-2 font-semibold">Final Rank</th>
+                          <th className="px-3 py-2 font-semibold">Team</th>
+                          <th className="px-3 py-2 text-right font-semibold">Total Points</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {season.entries.map((entry) => (
+                          <tr
+                            className="border-t border-slate-200"
+                            key={`${season.seasonId}-${entry.teamName}`}
+                          >
+                            <td className="px-3 py-2 font-semibold">#{entry.finalRank}</td>
+                            <td className="px-3 py-2 font-medium text-slate-900">
+                              {entry.teamName}
+                            </td>
+                            <td className="px-3 py-2 text-right font-semibold">
+                              {entry.totalPoints}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </details>
+            ))}
+          </div>
         )
       ) : null}
 

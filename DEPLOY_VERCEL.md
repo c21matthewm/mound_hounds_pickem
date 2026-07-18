@@ -14,8 +14,8 @@ Replace that with a future custom domain if you add one later.
 
 Vercel should be connected to this GitHub repo and production should deploy from `main`.
 
-Set the Vercel project Node.js version to 22.x. The pinned Supabase client requires Node 22 or
-newer, matching `.nvmrc`.
+Set the Vercel project Node.js version to 22.x. `package.json` is also pinned to `22.x` so Vercel
+cannot silently advance the app to a new major Node version. This matches `.nvmrc`.
 
 Daily development flow:
 
@@ -35,6 +35,10 @@ git checkout dev
 ```
 
 Vercel will build the pushed `main` branch.
+
+Do not use Vercel's manual **Redeploy** control for normal code releases. A push to `main` creates
+a fresh production deployment automatically. Use **Redeploy** only when intentionally rebuilding
+an existing commit, such as after correcting a Vercel environment variable without changing code.
 
 ## 2. Vercel Environment Variables
 
@@ -68,7 +72,15 @@ Optional reminder delivery values:
 RESEND_API_KEY
 RESEND_FROM_EMAIL
 RESEND_REPLY_TO
+PICK_EMAILS_ENABLED
+REMINDER_SMS_ENABLED
 ```
+
+Keep `PICK_EMAILS_ENABLED` set to `false` until the Resend domain, API key, and reminder migration
+are ready. Change it to `true` only when production delivery should begin.
+
+Set `REMINDER_SMS_ENABLED` to `false` for email-only reminders. Set it to `true` only after
+confirming the provider quota can cover both email and carrier-gateway delivery.
 
 Generate a strong cron secret locally:
 

@@ -1,7 +1,7 @@
 Place the official Mound Hounds image asset here:
 
-- file name: `mound-hound.png`
-- full path: `public/images/branding/mound-hound.png`
+- file name: `mound-hound.webp`
+- full path: `public/images/branding/mound-hound.webp`
 
 The app will automatically use it on:
 

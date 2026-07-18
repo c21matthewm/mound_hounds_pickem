@@ -1,5 +1,6 @@
 import "server-only";
 
+import { unstable_cache } from "next/cache";
 import { createServiceRoleSupabaseClient } from "@/lib/supabase/service-role";
 import {
   normalizeRacePickFormat,
@@ -8,7 +9,8 @@ import {
   type RacePickFormat
 } from "@/lib/race-format";
 import { loadAllRows } from "@/lib/supabase/paginated-query";
-import { getLeagueSeasonDateRange } from "@/lib/timezone";
+import { SCORING_CACHE_TAG } from "@/lib/scoring-cache";
+import { getLeagueSeasonDateRange, getLeagueYear } from "@/lib/timezone";
 import {
   assignWeeklyRanks,
   calculateOfficialSpeedDelta
@@ -76,7 +78,7 @@ type Participant = {
 export type LeaderboardRow = {
   change: number;
   currentStanding: number;
-  raceBreakdown: Map<number, number>;
+  raceBreakdown: Record<number, number>;
   teamName: string;
   totalPoints: number;
   userId: string;
@@ -390,8 +392,11 @@ const computeLowestFallbackByRace = (
   return byRace;
 };
 
-export async function buildLeagueScoringSnapshot(): Promise<LeagueScoringSnapshot> {
+export async function buildLeagueScoringSnapshotUncached(
+  seasonYear: number = getLeagueYear()
+): Promise<LeagueScoringSnapshot> {
   const supabase = createServiceRoleSupabaseClient();
+  const seasonRange = getLeagueSeasonDateRange(seasonYear);
 
   const [profiles, races, allPicks, allResults, drivers, allRaceDriverGroups] =
     await Promise.all([
@@ -412,6 +417,8 @@ export async function buildLeagueScoringSnapshot(): Promise<LeagueScoringSnapsho
           )
           .eq("is_archived", false)
           .eq("results_status", "published")
+          .gte("race_date", seasonRange.seasonStartIso)
+          .lt("race_date", seasonRange.seasonEndExclusiveIso)
           .order("race_date", { ascending: true })
           .order("id", { ascending: true })
           .range(from, to)
@@ -568,7 +575,7 @@ export async function buildLeagueScoringSnapshot(): Promise<LeagueScoringSnapsho
       return {
         change,
         currentStanding,
-        raceBreakdown: raceBreakdownByUser.get(participant.id) ?? new Map<number, number>(),
+        raceBreakdown: Object.fromEntries(raceBreakdownByUser.get(participant.id) ?? []),
         teamName: participant.teamName,
         totalPoints: cumulativeByUser.get(participant.id) ?? 0,
         userId: participant.id
@@ -591,6 +598,16 @@ export async function buildLeagueScoringSnapshot(): Promise<LeagueScoringSnapsho
     raceColumns
   };
 }
+
+const buildCachedLeagueScoringSnapshot = unstable_cache(
+  async (seasonYear: number) => buildLeagueScoringSnapshotUncached(seasonYear),
+  ["league-scoring-snapshot"],
+  { revalidate: 3600, tags: [SCORING_CACHE_TAG] }
+);
+
+export const buildLeagueScoringSnapshot = (
+  seasonYear: number = getLeagueYear()
+): Promise<LeagueScoringSnapshot> => buildCachedLeagueScoringSnapshot(seasonYear);
 
 export async function buildPicksByRaceSnapshot(
   selectedRaceIdInput?: number
@@ -856,10 +873,12 @@ const pickWorseWeek = (
   return candidate.raceDate > current.raceDate ? candidate : current;
 };
 
-export async function buildParticipantAnalyticsSnapshot(
-  userId: string
+export async function buildParticipantAnalyticsSnapshotUncached(
+  userId: string,
+  seasonYear: number = getLeagueYear()
 ): Promise<ParticipantAnalyticsSnapshot> {
   const supabase = createServiceRoleSupabaseClient();
+  const seasonRange = getLeagueSeasonDateRange(seasonYear);
 
   const [profiles, races, allPicks, allResults, drivers, allRaceDriverGroups] =
     await Promise.all([
@@ -880,6 +899,8 @@ export async function buildParticipantAnalyticsSnapshot(
           )
           .eq("is_archived", false)
           .eq("results_status", "published")
+          .gte("race_date", seasonRange.seasonStartIso)
+          .lt("race_date", seasonRange.seasonEndExclusiveIso)
           .order("race_date", { ascending: true })
           .order("id", { ascending: true })
           .range(from, to)
@@ -1115,3 +1136,16 @@ export async function buildParticipantAnalyticsSnapshot(
     userId: participant.id
   };
 }
+
+const buildCachedParticipantAnalyticsSnapshot = unstable_cache(
+  async (userId: string, seasonYear: number) =>
+    buildParticipantAnalyticsSnapshotUncached(userId, seasonYear),
+  ["participant-analytics-snapshot"],
+  { revalidate: 3600, tags: [SCORING_CACHE_TAG] }
+);
+
+export const buildParticipantAnalyticsSnapshot = (
+  userId: string,
+  seasonYear: number = getLeagueYear()
+): Promise<ParticipantAnalyticsSnapshot> =>
+  buildCachedParticipantAnalyticsSnapshot(userId, seasonYear);

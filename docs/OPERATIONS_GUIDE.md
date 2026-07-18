@@ -1,0 +1,111 @@
+# Mound Hounds Operations Guide
+
+This guide covers the account-level setup and end-of-season tasks that cannot be automated from the repository.
+
+## Connect the website domain to Vercel
+
+This is separate from Resend's email subdomain, but it makes links in league emails use the branded website address.
+
+1. In Vercel, open the Mound Hounds project and go to **Settings > Domains**.
+2. Add `moundhoundspickem.app`.
+3. Also add `www.moundhoundspickem.app` and configure it to redirect to `moundhoundspickem.app` if Vercel asks which address should be primary.
+4. Follow the exact DNS records Vercel displays. Add them wherever the domain's current nameservers are managed.
+5. Wait until Vercel marks both domains valid, then confirm `https://moundhoundspickem.app` opens the app.
+6. In **Settings > Environment Variables**, change the Production value of `NEXT_PUBLIC_SITE_URL` to `https://moundhoundspickem.app`.
+7. In Supabase **Authentication > URL Configuration**, set Site URL to `https://moundhoundspickem.app` and add `https://moundhoundspickem.app/auth/callback` to Redirect URLs. Keep the Vercel callback URL as an allowed fallback.
+
+## Resend custom SMTP for Supabase Auth
+
+Use `mail.moundhoundspickem.app` as the dedicated sending subdomain. It is only an email identity; no website needs to load at that address.
+
+1. Create a free Resend account, open **Domains**, select **Add Domain**, and enter `mail.moundhoundspickem.app`.
+2. Resend will display the required DNS records. Open the DNS manager for `moundhoundspickem.app` and add every record exactly as Resend shows it. If the domain uses Vercel nameservers, this is **Vercel > Domains > moundhoundspickem.app > DNS Records**. Otherwise, use the registrar or DNS provider named in the domain's nameserver settings.
+3. Do not invent a separate generic `mail` A or CNAME record. The Resend-provided records create and verify the sending subdomain. Be careful whether the DNS form automatically appends `.moundhoundspickem.app` to record names.
+4. Return to Resend and press **Verify DNS Records**. DNS changes can take time to propagate; continue only after the domain status is **Verified**.
+5. In Resend, open **API Keys** and create a key named `Mound Hounds Supabase SMTP`. Select **Sending access** and restrict it to `mail.moundhoundspickem.app`. Save the key when it is displayed; it is shown only once.
+6. In Supabase, open the project and go to **Authentication > Email > SMTP Settings**. Enable custom SMTP and enter:
+   - Sender name: `Mound Hounds Pick'em`
+   - Sender email: `noreply@mail.moundhoundspickem.app`
+   - Host: `smtp.resend.com`
+   - Port: `465`
+   - Username: `resend`
+   - Password: the Resend API key
+7. In **Authentication > URL Configuration**, confirm the Site URL and redirect URLs from the Vercel domain section above.
+8. In **Authentication > Rate Limits**, set the custom-SMTP email limit high enough for planned onboarding. `100` per hour is reasonable for an 80-person league, but the Resend free plan's daily limit still applies.
+9. Test one signup confirmation and one password reset with a non-admin email address. Confirm both in Resend's Logs page.
+
+Do not commit the Resend key. Supabase stores the SMTP credential.
+
+## Pick notification email setup
+
+1. In Resend, create a second API key named `Mound Hounds Pick Emails`. Select **Sending access** and restrict it to `mail.moundhoundspickem.app`.
+2. In Vercel, open **Project > Settings > Environment Variables**.
+3. Add these variables for **Production only**:
+
+   ```text
+   RESEND_API_KEY=<the Mound Hounds Pick Emails key>
+   RESEND_FROM_EMAIL=Mound Hounds Pick'em <picks@mail.moundhoundspickem.app>
+   RESEND_REPLY_TO=<the league administrator's real email address>
+   PICK_EMAILS_ENABLED=false
+   REMINDER_SMS_ENABLED=false
+   ```
+
+4. Confirm the existing `NEXT_PUBLIC_SITE_URL` Production variable is `https://moundhoundspickem.app` after the custom domain is active. Email links are built from this value.
+5. Save the variables with `PICK_EMAILS_ENABLED=false`. They take effect on the next production deployment; pushing the release to `main` will create that deployment without sending league email.
+6. Run `supabase/migrations/20260717_update_pick_reminder_windows.sql` in the Supabase SQL Editor.
+7. Confirm the existing `pick_reminders_5min` job is active with the verification query in `DEPLOY_VERCEL.md`.
+8. When the migration, domain, and sender are all verified, change `PICK_EMAILS_ENABLED` to `true` in Vercel and create a new production deployment. This arms email delivery. If the current race is already inside a notification window, eligible missing-pick teams can be emailed as soon as that deployment is active.
+
+The email schedule is:
+
+- 5 days before the pick deadline: “Picks are open” notice.
+- 2 days before the pick deadline: first reminder.
+- 4 hours before the pick deadline: final reminder.
+
+Only league profiles without a saved pick for that race receive a given email, and each window is deduplicated in `pick_reminders`. Standard-race deadlines are qualifying start. The Indianapolis 500 deadline remains race start because qualifying-order groups must be imported before that form is usable. If previous-race results have not been published, the form-open notice waits until those results are ready.
+
+For an 80-person league on Resend's free plan, set `REMINDER_SMS_ENABLED=false` in Vercel. One email reminder to 80 missing-pick participants fits under the 100-email daily limit. Enabling carrier-gateway SMS can double that window to 160 messages. Also avoid onboarding all 80 users on the same day as a full reminder run.
+
+## Deploying the Hall of Fame
+
+1. In Supabase, open **SQL Editor**.
+2. Run `supabase/migrations/20260717_add_hall_of_fame.sql` once against the production project.
+3. Deploy the application changes to Vercel.
+4. After the final race has started and every race has published results, open **Admin > Results**.
+5. Review the season status in **Season Archive**, then press **Finalize Season**.
+6. Open **Leaderboard > Hall of Fame** and verify the champion and full standings.
+
+The admin can use **Refresh Final Standings** if a published result is legitimately corrected later. The archive is stored independently from user profiles, picks, drivers, and race results.
+
+## Image storage maintenance
+
+New driver and race uploads are resized and converted to WebP before upload. Replacing, clearing, or deleting a managed image also removes the previous object after the database update succeeds.
+
+Run the orphan audit before deleting anything:
+
+```bash
+npm run cleanup:orphaned-images
+```
+
+Review every listed path. Only then apply the exact same audit with deletion enabled:
+
+```bash
+npm run cleanup:orphaned-images -- --apply
+```
+
+The script only inspects the app-managed `drivers/` and `races/` prefixes. It ignores external image URLs and is a dry run unless `--apply` is present.
+
+## Next-season driver rollover
+
+Do not delete driver records that are referenced by historical picks or results unless the historical races are also intentionally being removed. Those references protect scoring integrity.
+
+Use this rollover instead:
+
+1. Finalize the completed season in **Admin > Results**.
+2. In **Admin > Drivers**, mark drivers who are not returning as inactive.
+3. Clear an inactive driver's image to remove its managed storage object while retaining the small historical database row.
+4. For returning drivers, reuse the existing record, upload the new photo, update points, and mark it active.
+5. Add new drivers normally.
+6. Run the orphan-image dry run and inspect the output.
+
+Inactive drivers do not appear on the current pick form. Retaining their records preserves historical race and pick displays while consuming negligible database space.

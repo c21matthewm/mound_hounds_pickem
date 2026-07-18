@@ -405,6 +405,18 @@ export default async function PicksPage({ searchParams }: PageProps) {
               </p>
             </div>
           </div>
+          <p className="mt-3 text-xs text-slate-300">
+            Visit the official{" "}
+            <a
+              className="font-semibold text-cyan-200 underline decoration-cyan-300/60 underline-offset-2 hover:text-cyan-100"
+              href="https://www.indycar.com/"
+              rel="noreferrer"
+              target="_blank"
+            >
+              INDYCAR
+            </a>{" "}
+            website for more information.
+          </p>
           {isIndy500Pickem ? (
             <p className="mt-4 rounded-xl border border-cyan-300/30 bg-cyan-300/10 px-3 py-2 text-xs text-cyan-50">
               Indianapolis 500 picks use qualifying-order groups and lock when the race starts.

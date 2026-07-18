@@ -3,6 +3,7 @@
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { sanitizeNextPath } from "@/lib/query";
+import { invalidateScoringCache } from "@/lib/scoring-cache";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
 
 const errorRedirect = (path: string, message: string): never => {
@@ -105,6 +106,8 @@ export async function signUpAction(formData: FormData) {
     console.error("[auth] signUp failed:", error.message);
     errorRedirect("/signup", friendlyAuthError(error.message));
   }
+
+  invalidateScoringCache();
 
   if (data.session) {
     messageRedirect("/onboarding", "Account created. Complete your profile to continue.");
@@ -226,5 +229,6 @@ export async function saveProfileAction(formData: FormData) {
     errorRedirect("/onboarding", error.message);
   }
 
+  invalidateScoringCache();
   messageRedirect("/dashboard", "Profile saved.");
 }

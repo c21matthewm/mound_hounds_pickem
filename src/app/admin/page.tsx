@@ -6,6 +6,7 @@ import {
   createRaceAction,
   deleteRaceAction,
   deleteDriverAction,
+  finalizeHallOfFameSeasonAction,
   importChampionshipStandingsAction,
   importIndy500QualifyingOrderAction,
   importIndycarResultsAction,
@@ -33,6 +34,8 @@ import { loadAllRows } from "@/lib/supabase/paginated-query";
 import {
   formatLeagueDateTime,
   formatLeagueDateTimeLocalInput,
+  getLeagueSeasonDateRange,
+  getLeagueYear,
   LEAGUE_TIME_ZONE
 } from "@/lib/timezone";
 import { assignWeeklyRanks, calculateOfficialSpeedDelta } from "@/lib/weekly-ranking";
@@ -534,6 +537,36 @@ export default async function AdminPage({ searchParams }: PageProps) {
   const raceDriverGroups: RaceDriverGroupRow[] = (
     raceDriverGroupsResponse.data ?? []
   ) as RaceDriverGroupRow[];
+  const seasonYear = getLeagueYear();
+  const seasonRange = getLeagueSeasonDateRange(seasonYear);
+  const currentSeasonRaces = activeRaces.filter(
+    (race) =>
+      race.race_date >= seasonRange.seasonStartIso &&
+      race.race_date < seasonRange.seasonEndExclusiveIso
+  );
+  const unpublishedSeasonRaces = currentSeasonRaces.filter(
+    (race) => race.results_status !== "published"
+  );
+  const finalSeasonRace = [...currentSeasonRaces]
+    .sort((a, b) => Date.parse(a.race_date) - Date.parse(b.race_date))
+    .at(-1);
+  const currentTime = new Date().getTime();
+  const canFinalizeSeason =
+    currentSeasonRaces.length > 0 &&
+    unpublishedSeasonRaces.length === 0 &&
+    Boolean(finalSeasonRace && Date.parse(finalSeasonRace.race_date) <= currentTime);
+  const hallOfFameSeasonResponse = await supabase
+    .from("hall_of_fame_seasons")
+    .select("id,finalized_at,participant_count,race_count")
+    .eq("season_year", seasonYear)
+    .maybeSingle<{
+      finalized_at: string;
+      id: number;
+      participant_count: number;
+      race_count: number;
+    }>();
+  const savedHallOfFameSeason = hallOfFameSeasonResponse.data ?? null;
+  const hallOfFameMigrationReady = !hallOfFameSeasonResponse.error;
   const scoringAudits = buildScoringAudits({
     drivers,
     participants: winnerProfiles,
@@ -1607,6 +1640,55 @@ export default async function AdminPage({ searchParams }: PageProps) {
             </p>
           </form>
         </details>
+
+        <section className="mt-5 rounded-md border border-cyan-200 bg-cyan-50 p-4">
+          <div className="flex flex-wrap items-start justify-between gap-4">
+            <div className="min-w-0 flex-1">
+              <p className="text-xs font-semibold uppercase tracking-wide text-cyan-800">
+                Season Archive
+              </p>
+              <h3 className="mt-1 text-base font-semibold text-slate-900">
+                {seasonYear} Hall of Fame
+              </h3>
+              <p className="mt-1 text-sm text-slate-700">
+                Save the final standings before retiring this season&apos;s drivers. The archived
+                leaderboard does not depend on future driver or profile changes.
+              </p>
+              <p className="mt-2 text-xs font-medium text-slate-600">
+                {savedHallOfFameSeason
+                  ? `Saved ${formatDateTime(savedHallOfFameSeason.finalized_at)} · ${savedHallOfFameSeason.participant_count} teams · ${savedHallOfFameSeason.race_count} races`
+                  : canFinalizeSeason
+                    ? `${currentSeasonRaces.length} races published. Ready to finalize.`
+                    : unpublishedSeasonRaces.length > 0
+                      ? `${unpublishedSeasonRaces.length} race result set(s) still need publication.`
+                      : finalSeasonRace
+                        ? `Available after ${finalSeasonRace.race_name}.`
+                        : "Add this season's race schedule before finalizing."}
+              </p>
+              {!hallOfFameMigrationReady ? (
+                <p className="mt-2 text-xs font-semibold text-amber-800">
+                  Apply supabase/migrations/20260717_add_hall_of_fame.sql before using this control.
+                </p>
+              ) : null}
+            </div>
+            <form action={finalizeHallOfFameSeasonAction}>
+              <input name="tab" type="hidden" value="results" />
+              <input name="season_year" type="hidden" value={String(seasonYear)} />
+              <ConfirmSubmitButton
+                className="rounded-md bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
+                confirmMessage={
+                  savedHallOfFameSeason
+                    ? `Replace the saved ${seasonYear} Hall of Fame standings with the current final calculation?`
+                    : `Finalize and save the ${seasonYear} standings to the Hall of Fame?`
+                }
+                disabled={!canFinalizeSeason || !hallOfFameMigrationReady}
+                type="submit"
+              >
+                {savedHallOfFameSeason ? "Refresh Final Standings" : "Finalize Season"}
+              </ConfirmSubmitButton>
+            </form>
+          </div>
+        </section>
 
         <details className="mt-5 rounded-md border border-slate-200 bg-white">
           <summary className="cursor-pointer px-3 py-3 text-sm font-semibold text-slate-900">

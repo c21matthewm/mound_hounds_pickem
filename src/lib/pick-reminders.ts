@@ -7,7 +7,7 @@ import { createServiceRoleSupabaseClient } from "@/lib/supabase/service-role";
 import { isMissingColumnError } from "@/lib/supabase/schema-compat";
 import { formatLeagueDateTime, LEAGUE_TIME_ZONE } from "@/lib/timezone";
 
-type ReminderType = "4d" | "2d" | "2h";
+type ReminderType = "5d_open" | "2d" | "4h";
 type ReminderChannel = "email" | "sms";
 
 type ReminderWindow = {
@@ -46,6 +46,7 @@ type SendResult = {
 };
 
 type PickReminderSummary = {
+  emailDeliveryEnabled: boolean;
   emailSent: number;
   emailSkippedNoAddress: number;
   emailSkippedAlreadySent: number;
@@ -53,12 +54,14 @@ type PickReminderSummary = {
   raceId: number | null;
   raceName: string | null;
   reason:
+    | "delivery_disabled"
     | "no_upcoming_race"
     | "waiting_previous_results"
     | "no_window_due"
     | "no_missing_participants"
     | "reminders_sent";
   reminderType: ReminderType | null;
+  smsDeliveryEnabled: boolean;
   smsSent: number;
   smsSkippedAlreadySent: number;
   smsSkippedNoGatewayAddress: number;
@@ -68,9 +71,9 @@ const HOUR_MS = 60 * 60 * 1000;
 const DAY_MS = 24 * HOUR_MS;
 
 const REMINDER_WINDOWS: ReminderWindow[] = [
-  { key: "2h", label: "2 hours", maxMsUntilDeadline: 2 * HOUR_MS, minExclusiveMsUntilDeadline: 0 },
-  { key: "2d", label: "2 days", maxMsUntilDeadline: 2 * DAY_MS, minExclusiveMsUntilDeadline: 2 * HOUR_MS },
-  { key: "4d", label: "4 days", maxMsUntilDeadline: 4 * DAY_MS, minExclusiveMsUntilDeadline: 2 * DAY_MS }
+  { key: "4h", label: "4 hours", maxMsUntilDeadline: 4 * HOUR_MS, minExclusiveMsUntilDeadline: 0 },
+  { key: "2d", label: "2 days", maxMsUntilDeadline: 2 * DAY_MS, minExclusiveMsUntilDeadline: 4 * HOUR_MS },
+  { key: "5d_open", label: "5 days", maxMsUntilDeadline: 5 * DAY_MS, minExclusiveMsUntilDeadline: 2 * DAY_MS }
 ];
 
 const SMS_GATEWAY_DOMAIN_BY_CARRIER: Record<string, string | null> = {
@@ -200,21 +203,37 @@ const buildReminderMessage = (
   const siteUrl = getSiteUrl();
   const picksUrl = `${siteUrl}/picks`;
 
-  const subject = `[Mound Hounds Pick'em] ${reminderWindow.label} reminder: ${race.race_name}`;
+  const isFormOpenNotice = reminderWindow.key === "5d_open";
+  const isFinalReminder = reminderWindow.key === "4h";
+  const subject = isFormOpenNotice
+    ? `[Mound Hounds Pick'em] Picks are open: ${race.race_name}`
+    : isFinalReminder
+      ? `[Mound Hounds Pick'em] Final reminder: ${race.race_name}`
+      : `[Mound Hounds Pick'em] 2-day reminder: ${race.race_name}`;
   const text = [
-    "Pit lane reminder from the Mound Hounds Pick'em League.",
+    isFormOpenNotice
+      ? "The pick form is open and ready for the next race."
+      : isFinalReminder
+        ? "Final reminder from the Mound Hounds Pick'em League."
+        : "Reminder from the Mound Hounds Pick'em League.",
     "",
     `Race: ${race.race_name}`,
     `Pick deadline: ${pickDeadlineText} (${LEAGUE_TIME_ZONE})`,
     "",
-    "You have not submitted picks yet for this race.",
+    isFormOpenNotice
+      ? "The form is available now for your race selections."
+      : "You have not submitted picks yet for this race.",
     `Submit your picks here: ${picksUrl}`,
     "",
-    "Get your lineup locked before the pick deadline. Good luck and enjoy the race weekend!"
+    isFormOpenNotice
+      ? "Make your selections when you are ready. Good luck and enjoy the race weekend!"
+      : "Get your lineup locked before the pick deadline. Good luck and enjoy the race weekend!"
   ].join("\n");
 
   const smsText = [
-    `Mound Hounds Pick'em reminder (${reminderWindow.label}):`,
+    isFormOpenNotice
+      ? "Mound Hounds Pick'em: picks are open."
+      : `Mound Hounds Pick'em reminder (${reminderWindow.label}):`,
     `${race.race_name}`,
     `Pick deadline: ${pickDeadlineText} (${LEAGUE_TIME_ZONE})`,
     `Submit picks: ${picksUrl}`
@@ -333,6 +352,26 @@ const releaseReminderSlot = async (supabase: SupabaseClient, reminderId: number)
 export async function sendDuePickReminders(): Promise<PickReminderSummary> {
   const supabase = createServiceRoleSupabaseClient();
   const now = new Date();
+  const emailDeliveryEnabled = process.env.PICK_EMAILS_ENABLED?.trim().toLowerCase() === "true";
+  const smsDeliveryEnabled = process.env.REMINDER_SMS_ENABLED?.trim().toLowerCase() === "true";
+
+  if (!emailDeliveryEnabled) {
+    return {
+      emailDeliveryEnabled,
+      emailSent: 0,
+      emailSkippedAlreadySent: 0,
+      emailSkippedNoAddress: 0,
+      pendingParticipants: 0,
+      raceId: null,
+      raceName: null,
+      reason: "delivery_disabled",
+      reminderType: null,
+      smsDeliveryEnabled,
+      smsSent: 0,
+      smsSkippedAlreadySent: 0,
+      smsSkippedNoGatewayAddress: 0
+    };
+  }
 
   let { data: upcomingRaces, error: raceError } = await supabase
     .from("races")
@@ -372,6 +411,7 @@ export async function sendDuePickReminders(): Promise<PickReminderSummary> {
 
   if (!upcomingRace) {
     return {
+      emailDeliveryEnabled,
       emailSent: 0,
       emailSkippedAlreadySent: 0,
       emailSkippedNoAddress: 0,
@@ -380,6 +420,7 @@ export async function sendDuePickReminders(): Promise<PickReminderSummary> {
       raceName: null,
       reason: "no_upcoming_race",
       reminderType: null,
+      smsDeliveryEnabled,
       smsSent: 0,
       smsSkippedAlreadySent: 0,
       smsSkippedNoGatewayAddress: 0
@@ -389,6 +430,7 @@ export async function sendDuePickReminders(): Promise<PickReminderSummary> {
   const previousResultsGate = await getPreviousRaceResultsGate(supabase, upcomingRace);
   if (previousResultsGate.status === "blocked") {
     return {
+      emailDeliveryEnabled,
       emailSent: 0,
       emailSkippedAlreadySent: 0,
       emailSkippedNoAddress: 0,
@@ -397,6 +439,7 @@ export async function sendDuePickReminders(): Promise<PickReminderSummary> {
       raceName: upcomingRace.race_name,
       reason: "waiting_previous_results",
       reminderType: null,
+      smsDeliveryEnabled,
       smsSent: 0,
       smsSkippedAlreadySent: 0,
       smsSkippedNoGatewayAddress: 0
@@ -407,6 +450,7 @@ export async function sendDuePickReminders(): Promise<PickReminderSummary> {
   const reminderWindow = getReminderWindow(msUntilDeadline);
   if (!reminderWindow) {
     return {
+      emailDeliveryEnabled,
       emailSent: 0,
       emailSkippedAlreadySent: 0,
       emailSkippedNoAddress: 0,
@@ -415,6 +459,7 @@ export async function sendDuePickReminders(): Promise<PickReminderSummary> {
       raceName: upcomingRace.race_name,
       reason: "no_window_due",
       reminderType: null,
+      smsDeliveryEnabled,
       smsSent: 0,
       smsSkippedAlreadySent: 0,
       smsSkippedNoGatewayAddress: 0
@@ -426,7 +471,7 @@ export async function sendDuePickReminders(): Promise<PickReminderSummary> {
       supabase
         .from("profiles")
         .select("id,full_name,team_name,phone_number,phone_carrier")
-        .eq("role", "participant"),
+        .in("role", ["participant", "admin"]),
       supabase.from("picks").select("user_id").eq("race_id", upcomingRace.id)
     ]);
 
@@ -444,6 +489,7 @@ export async function sendDuePickReminders(): Promise<PickReminderSummary> {
 
   if (participantsMissingPicks.length === 0) {
     return {
+      emailDeliveryEnabled,
       emailSent: 0,
       emailSkippedAlreadySent: 0,
       emailSkippedNoAddress: 0,
@@ -452,6 +498,7 @@ export async function sendDuePickReminders(): Promise<PickReminderSummary> {
       raceName: upcomingRace.race_name,
       reason: "no_missing_participants",
       reminderType: reminderWindow.key,
+      smsDeliveryEnabled,
       smsSent: 0,
       smsSkippedAlreadySent: 0,
       smsSkippedNoGatewayAddress: 0
@@ -501,6 +548,10 @@ export async function sendDuePickReminders(): Promise<PickReminderSummary> {
       }
     }
 
+    if (!smsDeliveryEnabled) {
+      continue;
+    }
+
     const smsAddress = toSmsGatewayAddress(participant.phone_number, participant.phone_carrier);
     if (!smsAddress) {
       smsSkippedNoGatewayAddress += 1;
@@ -533,6 +584,7 @@ export async function sendDuePickReminders(): Promise<PickReminderSummary> {
   }
 
   return {
+    emailDeliveryEnabled,
     emailSent,
     emailSkippedAlreadySent,
     emailSkippedNoAddress,
@@ -541,6 +593,7 @@ export async function sendDuePickReminders(): Promise<PickReminderSummary> {
     raceName: upcomingRace.race_name,
     reason: "reminders_sent",
     reminderType: reminderWindow.key,
+    smsDeliveryEnabled,
     smsSent,
     smsSkippedAlreadySent,
     smsSkippedNoGatewayAddress
