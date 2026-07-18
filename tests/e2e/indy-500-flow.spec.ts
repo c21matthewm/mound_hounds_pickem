@@ -223,6 +223,7 @@ test.describe.serial("Indianapolis 500 Pick'em Flow", () => {
     const raceStart = new Date(now.getTime() + 90 * 60 * 1000);
 
     await createRaceForm.getByTestId("admin-race-create-name").fill(raceName);
+    await createRaceForm.locator('input[name="round_number"]').fill("92");
     await createRaceForm.getByTestId("admin-race-create-qualifying").fill(toLocalInput(qualifyingStart));
     await createRaceForm.getByTestId("admin-race-create-start").fill(toLocalInput(raceStart));
     await createRaceForm.getByTestId("admin-race-create-payout").fill("500");

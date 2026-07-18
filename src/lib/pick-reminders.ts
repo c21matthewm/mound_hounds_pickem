@@ -3,8 +3,8 @@ import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { pickLockAtForRace } from "@/lib/race-format";
 import { getPreviousRaceResultsGate } from "@/lib/pickem-results-gate";
+import { loadActiveLeagueSeason } from "@/lib/seasons";
 import { createServiceRoleSupabaseClient } from "@/lib/supabase/service-role";
-import { isMissingColumnError } from "@/lib/supabase/schema-compat";
 import { formatLeagueDateTime, LEAGUE_TIME_ZONE } from "@/lib/timezone";
 
 type ReminderType = "5d_open" | "2d" | "4h";
@@ -23,6 +23,8 @@ type UpcomingRace = {
   qualifying_start_at: string;
   race_date: string;
   race_name: string;
+  round_number: number;
+  season_id: number;
 };
 
 type ProfileForReminder = {
@@ -373,29 +375,17 @@ export async function sendDuePickReminders(): Promise<PickReminderSummary> {
     };
   }
 
-  let { data: upcomingRaces, error: raceError } = await supabase
+  const activeSeason = await loadActiveLeagueSeason(supabase);
+  const { data: upcomingRaces, error: raceError } = activeSeason
+    ? await supabase
     .from("races")
-    .select("id,race_name,pick_format,qualifying_start_at,race_date")
+    .select("id,race_name,pick_format,qualifying_start_at,race_date,season_id,round_number")
     .eq("is_archived", false)
+    .eq("season_id", activeSeason.id)
     .gt("race_date", now.toISOString())
-    .order("race_date", { ascending: true })
-    .limit(20);
-
-  if (raceError && isMissingColumnError(raceError, "pick_format")) {
-    const legacyRaceResponse = await supabase
-      .from("races")
-      .select("id,race_name,qualifying_start_at,race_date")
-      .eq("is_archived", false)
-      .gt("race_date", now.toISOString())
-      .order("race_date", { ascending: true })
-      .limit(20);
-
-    upcomingRaces = (legacyRaceResponse.data ?? []).map((race) => ({
-      ...race,
-      pick_format: "standard"
-    }));
-    raceError = legacyRaceResponse.error;
-  }
+    .order("round_number", { ascending: true })
+    .limit(20)
+    : { data: [], error: null };
 
   if (raceError) {
     throw new Error(`Failed loading upcoming race for reminders: ${raceError.message}`);
@@ -471,7 +461,8 @@ export async function sendDuePickReminders(): Promise<PickReminderSummary> {
       supabase
         .from("profiles")
         .select("id,full_name,team_name,phone_number,phone_carrier")
-        .in("role", ["participant", "admin"]),
+        .in("role", ["participant", "admin"])
+        .eq("is_active", true),
       supabase.from("picks").select("user_id").eq("race_id", upcomingRace.id)
     ]);
 

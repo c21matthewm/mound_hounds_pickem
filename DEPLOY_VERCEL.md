@@ -2,13 +2,13 @@
 
 This app is designed to run locally from `dev` and deploy publicly from `main`.
 
-Production URL currently used in examples:
+Production URL:
 
 ```text
-https://moundhoundspickem.vercel.app
+https://moundhoundspickem.app
 ```
 
-Replace that with a future custom domain if you add one later.
+The Vercel-generated URL can remain available as a fallback, but the custom domain is canonical.
 
 ## 1. GitHub And Branches
 
@@ -63,7 +63,7 @@ CRON_SECRET
 Set `NEXT_PUBLIC_SITE_URL` to:
 
 ```text
-https://moundhoundspickem.vercel.app
+https://moundhoundspickem.app
 ```
 
 Optional reminder delivery values:
@@ -101,23 +101,23 @@ Authentication -> URL Configuration
 Set Site URL:
 
 ```text
-https://moundhoundspickem.vercel.app
+https://moundhoundspickem.app
 ```
 
 Add Redirect URLs:
 
 ```text
 http://localhost:3000/auth/callback
-https://moundhoundspickem.vercel.app/auth/callback
+https://moundhoundspickem.app/auth/callback
 ```
 
 Password reset emails also use these callback URLs. The app sends users through
 `/auth/callback?next=/reset-password`, so no separate `/reset-password` redirect URL is required.
 
-If you add a custom domain later, also add:
+You can also keep the Vercel-generated callback as a fallback:
 
 ```text
-https://your-domain.com/auth/callback
+https://moundhoundspickem.vercel.app/auth/callback
 ```
 
 ## 4. Supabase Database
@@ -154,6 +154,55 @@ supabase/migrations/20260709_harden_roles_and_result_publication.sql
 Apply the hardening migration before deploying the application commit that uses it. Follow
 `HARDENING_DEPLOY.md` for backup, verification, and isolated-E2E setup steps.
 
+Latest season and participant-management migration:
+
+```text
+supabase/migrations/20260718_add_league_seasons_and_active_participants.sql
+```
+
+For the existing live database, apply this migration in **Supabase -> SQL Editor** before deploying
+the application commit that uses it. The migration creates the current season, assigns existing
+races to it, moves the old `Race N -` prefix into a separate round column, and leaves Hall of Fame
+snapshots independent from live profiles and races.
+
+After it succeeds, verify:
+
+```sql
+select season_year, display_name, status
+from public.league_seasons
+order by season_year desc;
+
+select round_number, race_name, season_id
+from public.races
+order by season_id, round_number;
+
+select count(*) filter (where is_active) as active_participants,
+       count(*) as total_profiles
+from public.profiles;
+```
+
+There should be exactly one `active` season, every race should have a round number, and existing
+participant profiles should initially remain active.
+
+### Season turnover workflow
+
+Use this order after the final race each year:
+
+1. Publish the final race results and confirm the current standings.
+2. In **Admin -> Race Results**, save the final standings to the Hall of Fame.
+3. In **Admin -> Races**, create the next season and add at least its first scheduled race.
+4. In **Admin -> Participants**, mark teams active or inactive for the new season.
+5. In **Admin -> Drivers**, mark departing drivers inactive, update returning drivers and images,
+   and add new drivers. Do not delete a driver referenced by historical picks or results.
+6. Activate the new season in **Admin -> Races**. Current driver points reset to zero and the prior
+   finishing order remains the opening seed.
+7. If the official preseason field order needs correction, use **Preseason seed tools** before any
+   new-season result is published.
+
+When creating races, enter only the complete event name, such as `Acura Grand Prix of Long Beach`.
+Enter its season and round in their separate fields. The Pick'em form continues to show the full
+event name.
+
 ## 5. Promote Admin
 
 After signing up with your commissioner/admin account, run this in Supabase SQL Editor:
@@ -169,7 +218,7 @@ where p.id = u.id
 Then visit:
 
 ```text
-https://moundhoundspickem.vercel.app/admin
+https://moundhoundspickem.app/admin
 ```
 
 ## 6. Verify Production
@@ -187,13 +236,13 @@ Cron health checks:
 ```bash
 curl -i \
   -H "Authorization: Bearer <CRON_SECRET>" \
-  https://moundhoundspickem.vercel.app/api/cron/fantasy-winner
+  https://moundhoundspickem.app/api/cron/fantasy-winner
 ```
 
 ```bash
 curl -i \
   -H "Authorization: Bearer <CRON_SECRET>" \
-  https://moundhoundspickem.vercel.app/api/cron/pick-reminders
+  https://moundhoundspickem.app/api/cron/pick-reminders
 ```
 
 Expected response includes:
@@ -238,7 +287,7 @@ select cron.schedule(
   '*/5 * * * *',
   $$
   select net.http_post(
-    url := 'https://moundhoundspickem.vercel.app/api/cron/fantasy-winner',
+    url := 'https://moundhoundspickem.app/api/cron/fantasy-winner',
     headers := jsonb_build_object(
       'authorization', 'Bearer YOUR_CRON_SECRET',
       'content-type', 'application/json'
@@ -271,7 +320,7 @@ select cron.schedule(
   '*/5 * * * *',
   $$
   select net.http_post(
-    url := 'https://moundhoundspickem.vercel.app/api/cron/pick-reminders',
+    url := 'https://moundhoundspickem.app/api/cron/pick-reminders',
     headers := jsonb_build_object(
       'authorization', 'Bearer YOUR_CRON_SECRET',
       'content-type', 'application/json'
@@ -308,7 +357,7 @@ SUPABASE_SERVICE_ROLE_KEY
 Optional repository variable:
 
 ```text
-PRODUCTION_BASE_URL=https://moundhoundspickem.vercel.app
+PRODUCTION_BASE_URL=https://moundhoundspickem.app
 ```
 
 The workflow can run automatically after successful deployments or manually from the GitHub

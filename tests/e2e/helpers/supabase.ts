@@ -161,6 +161,65 @@ export const createE2ESupabaseClient = (): SupabaseClient => {
 
 export const supabase = createE2ESupabaseClient();
 
+export const ensureActiveLeagueSeason = async (): Promise<number> => {
+  const { data: activeSeason, error: activeError } = await supabase
+    .from("league_seasons")
+    .select("id")
+    .eq("status", "active")
+    .maybeSingle<{ id: number }>();
+
+  if (activeError) {
+    throw new Error(`Failed loading active E2E season: ${activeError.message}`);
+  }
+  if (activeSeason) {
+    return activeSeason.id;
+  }
+
+  const seasonYear = Number(
+    new Intl.DateTimeFormat("en-US", {
+      timeZone: "America/Indiana/Indianapolis",
+      year: "numeric"
+    }).format(new Date())
+  );
+  const { data: existingSeason, error: existingError } = await supabase
+    .from("league_seasons")
+    .select("id")
+    .eq("season_year", seasonYear)
+    .maybeSingle<{ id: number }>();
+
+  if (existingError) {
+    throw new Error(`Failed loading ${seasonYear} E2E season: ${existingError.message}`);
+  }
+
+  if (existingSeason) {
+    const { error } = await supabase
+      .from("league_seasons")
+      .update({ status: "active" })
+      .eq("id", existingSeason.id);
+    if (error) {
+      throw new Error(`Failed activating ${seasonYear} E2E season: ${error.message}`);
+    }
+    return existingSeason.id;
+  }
+
+  const { data: createdSeason, error: createError } = await supabase
+    .from("league_seasons")
+    .insert({
+      activated_at: new Date().toISOString(),
+      display_name: String(seasonYear),
+      season_year: seasonYear,
+      status: "active"
+    })
+    .select("id")
+    .single<{ id: number }>();
+
+  if (createError || !createdSeason) {
+    throw new Error(`Failed creating ${seasonYear} E2E season: ${createError?.message ?? "unknown"}`);
+  }
+
+  return createdSeason.id;
+};
+
 const uniqueBy = <T, K extends keyof T>(rows: T[], key: K): T[] => {
   const seen = new Set<T[K]>();
   return rows.filter((row) => {

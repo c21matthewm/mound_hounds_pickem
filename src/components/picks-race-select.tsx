@@ -1,8 +1,11 @@
 "use client";
 
+import { raceOptionLabel } from "@/lib/race-label";
+
 type RaceOption = {
   raceId: number;
   raceName: string;
+  roundNumber: number;
 };
 
 type Props = {
@@ -22,7 +25,7 @@ export function PicksRaceSelect({ races, selectedRaceId }: Props) {
       >
         {races.map((race) => (
           <option key={race.raceId} value={race.raceId}>
-            {race.raceName}
+            {raceOptionLabel(race)}
           </option>
         ))}
       </select>

@@ -4,19 +4,14 @@ import {
   normalizeRacePickFormat,
   type RacePickFormat
 } from "@/lib/race-format";
-import { isMissingColumnError } from "@/lib/supabase/schema-compat";
-import { getLeagueSeasonDateRange, getLeagueYear } from "@/lib/timezone";
-
-type SeasonRange = {
-  seasonEndExclusiveIso: string;
-  seasonStartIso: string;
-};
 
 export type PickemRaceForResultsGate = {
   id: number;
   pick_format?: RacePickFormat | string | null;
   race_date: string;
   race_name: string;
+  round_number: number;
+  season_id: number;
   results_status?: "draft" | "published" | null;
 };
 
@@ -47,62 +42,19 @@ export type PreviousRaceResultsGate =
 
 const countValue = (value: number | null): number => (typeof value === "number" ? value : 0);
 
-const seasonRangeForRace = (
-  race: PickemRaceForResultsGate,
-  seasonRange?: SeasonRange
-): SeasonRange => {
-  const raceDate = new Date(race.race_date);
-  const raceTime = raceDate.getTime();
-
-  if (
-    seasonRange &&
-    Number.isFinite(raceTime) &&
-    raceTime >= Date.parse(seasonRange.seasonStartIso) &&
-    raceTime < Date.parse(seasonRange.seasonEndExclusiveIso)
-  ) {
-    return seasonRange;
-  }
-
-  return getLeagueSeasonDateRange(getLeagueYear(raceDate));
-};
-
 const loadPreviousRace = async (
   supabase: SupabaseClient,
-  race: PickemRaceForResultsGate,
-  seasonRange?: SeasonRange
+  race: PickemRaceForResultsGate
 ): Promise<PreviousRaceRow | null> => {
-  const resolvedSeasonRange = seasonRangeForRace(race, seasonRange);
-
-  const load = async (selectFields: string) => {
-    return supabase
-      .from("races")
-      .select(selectFields)
-      .eq("is_archived", false)
-      .gte("race_date", resolvedSeasonRange.seasonStartIso)
-      .lt("race_date", resolvedSeasonRange.seasonEndExclusiveIso)
-      .lt("race_date", race.race_date)
-      .order("race_date", { ascending: false })
-      .limit(1)
-      .maybeSingle<PreviousRaceRow>();
-  };
-
-  let { data, error } = await load("id,race_name,race_date,pick_format,results_status");
-
-  if (
-    error &&
-    (isMissingColumnError(error, "pick_format") ||
-      isMissingColumnError(error, "results_status"))
-  ) {
-    const legacyResponse = await load("id,race_name,race_date");
-    data = legacyResponse.data
-      ? {
-          ...legacyResponse.data,
-          pick_format: "standard",
-          results_status: null
-        }
-      : null;
-    error = legacyResponse.error;
-  }
+  const { data, error } = await supabase
+    .from("races")
+    .select("id,race_name,race_date,season_id,round_number,pick_format,results_status")
+    .eq("is_archived", false)
+    .eq("season_id", race.season_id)
+    .lt("round_number", race.round_number)
+    .order("round_number", { ascending: false })
+    .limit(1)
+    .maybeSingle<PreviousRaceRow>();
 
   if (error) {
     throw new Error(`Failed to load previous race: ${error.message}`);
@@ -113,10 +65,9 @@ const loadPreviousRace = async (
 
 export const getPreviousRaceResultsGate = async (
   supabase: SupabaseClient,
-  race: PickemRaceForResultsGate,
-  seasonRange?: SeasonRange
+  race: PickemRaceForResultsGate
 ): Promise<PreviousRaceResultsGate> => {
-  const previousRace = await loadPreviousRace(supabase, race, seasonRange);
+  const previousRace = await loadPreviousRace(supabase, race);
 
   if (!previousRace) {
     return {

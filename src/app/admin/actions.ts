@@ -25,18 +25,14 @@ import { createServiceRoleSupabaseClient } from "@/lib/supabase/service-role";
 import { isMissingColumnError, withMigrationHint } from "@/lib/supabase/schema-compat";
 import { invalidateScoringCache } from "@/lib/scoring-cache";
 import { buildLeagueScoringSnapshotUncached } from "@/lib/scoring";
-import {
-  getLeagueSeasonDateRange,
-  getLeagueYear,
-  parseLeagueDateTimeLocalInput
-} from "@/lib/timezone";
+import { getLeagueYear, parseLeagueDateTimeLocalInput } from "@/lib/timezone";
 
 const asText = (value: FormDataEntryValue | null): string =>
   typeof value === "string" ? value.trim() : "";
 
 const TEST_FLOW_PREFIX = "[TEST FLOW ";
 
-type AdminTab = "drivers" | "races" | "results" | "feedback";
+type AdminTab = "drivers" | "participants" | "races" | "results" | "feedback";
 
 type RaceStatusRow = {
   id: number;
@@ -45,7 +41,13 @@ type RaceStatusRow = {
 };
 
 const parseAdminTab = (value: string): AdminTab | null => {
-  if (value === "drivers" || value === "races" || value === "results" || value === "feedback") {
+  if (
+    value === "drivers" ||
+    value === "participants" ||
+    value === "races" ||
+    value === "results" ||
+    value === "feedback"
+  ) {
     return value;
   }
 
@@ -60,6 +62,8 @@ const RESULT_PUBLICATION_MIGRATION_FILE =
   "supabase/migrations/20260709_harden_roles_and_result_publication.sql";
 const HALL_OF_FAME_MIGRATION_FILE =
   "supabase/migrations/20260717_add_hall_of_fame.sql";
+const LEAGUE_SEASONS_MIGRATION_FILE =
+  "supabase/migrations/20260718_add_league_seasons_and_active_participants.sql";
 
 const withResultPublicationMigrationHint = (message: string): string =>
   /function .* does not exist|schema cache/i.test(message)
@@ -204,6 +208,102 @@ async function ensureRaceIsActive(supabase: SupabaseClient, raceId: number) {
   }
 }
 
+export async function createLeagueSeasonAction(formData: FormData) {
+  const { supabase } = await requireAdmin();
+  const seasonYear = parsePositiveInteger(asText(formData.get("season_year")));
+
+  if (!seasonYear || seasonYear < 2000 || seasonYear > 2100) {
+    adminRedirect("error", "Enter a valid four-digit season year.", "races");
+  }
+
+  const { error } = await supabase.from("league_seasons").insert({
+    display_name: String(seasonYear),
+    season_year: seasonYear,
+    status: "upcoming"
+  });
+
+  if (error) {
+    adminRedirect(
+      "error",
+      error.code === "23505"
+        ? `${seasonYear} already exists.`
+        : withMigrationHint(error.message, LEAGUE_SEASONS_MIGRATION_FILE),
+      "races"
+    );
+  }
+
+  revalidatePath("/admin");
+  adminRedirect("message", `${seasonYear} season created. Add its schedule before activation.`, "races");
+}
+
+export async function activateLeagueSeasonAction(formData: FormData) {
+  const { supabase } = await requireAdmin();
+  const seasonId = parsePositiveInteger(asText(formData.get("season_id")));
+
+  if (!seasonId) {
+    adminRedirect("error", "Select a season to activate.", "races");
+  }
+
+  const { error } = await supabase.rpc("activate_league_season", {
+    p_season_id: seasonId
+  });
+
+  if (error) {
+    adminRedirect(
+      "error",
+      withMigrationHint(error.message, LEAGUE_SEASONS_MIGRATION_FILE),
+      "races"
+    );
+  }
+
+  invalidateScoringCache();
+  revalidatePath("/admin");
+  revalidatePath("/dashboard");
+  revalidatePath("/picks");
+  revalidatePath("/leaderboard");
+  adminRedirect(
+    "message",
+    "Season activated. Driver points were reset and the prior final standings were retained as the opening seed order.",
+    "races"
+  );
+}
+
+export async function updateParticipantAction(formData: FormData) {
+  const { supabase } = await requireAdmin();
+  const profileId = asText(formData.get("profile_id"));
+  const fullName = asText(formData.get("full_name"));
+  const teamName = asText(formData.get("team_name"));
+  const isActive = asText(formData.get("is_active")) === "on";
+
+  if (!isUuid(profileId) || !teamName) {
+    adminRedirect("error", "A valid participant and team name are required.", "participants");
+  }
+
+  const { error } = await supabase
+    .from("profiles")
+    .update({
+      full_name: fullName || null,
+      is_active: isActive,
+      team_name: teamName
+    })
+    .eq("id", profileId);
+
+  if (error) {
+    adminRedirect(
+      "error",
+      error.code === "23505" ? "That team name is already in use." : error.message,
+      "participants"
+    );
+  }
+
+  invalidateScoringCache();
+  revalidatePath("/admin");
+  revalidatePath("/dashboard");
+  revalidatePath("/picks");
+  revalidatePath("/leaderboard");
+  adminRedirect("message", "Participant updated.", "participants");
+}
+
 export async function createDriverAction(formData: FormData) {
   const { supabase } = await requireAdmin();
   const tab = parseAdminTab(asText(formData.get("tab"))) ?? "drivers";
@@ -227,7 +327,8 @@ export async function createDriverAction(formData: FormData) {
       driver_name: driverName,
       group_number: 6,
       image_url: imageUrlInput || null,
-      is_active: isActive
+      is_active: isActive,
+      opening_seed_standing: 9999
     })
     .select("id")
     .single();
@@ -500,6 +601,40 @@ export async function importChampionshipStandingsAction(formData: FormData) {
     );
   }
 
+  const { data: activeSeason, error: activeSeasonError } = await supabase
+    .from("league_seasons")
+    .select("id,season_year")
+    .eq("status", "active")
+    .maybeSingle<{ id: number; season_year: number }>();
+
+  if (activeSeasonError || !activeSeason) {
+    redirectWithTab(
+      "error",
+      withMigrationHint(
+        activeSeasonError?.message ?? "Activate a league season before importing its opening seed.",
+        LEAGUE_SEASONS_MIGRATION_FILE
+      )
+    );
+  }
+  const selectedActiveSeason = activeSeason as { id: number; season_year: number };
+
+  const { count: publishedRaceCount, error: publishedRaceCountError } = await supabase
+    .from("races")
+    .select("id", { count: "exact", head: true })
+    .eq("season_id", selectedActiveSeason.id)
+    .eq("is_archived", false)
+    .eq("results_status", "published");
+
+  if (publishedRaceCountError) {
+    redirectWithTab("error", publishedRaceCountError.message);
+  }
+  if ((publishedRaceCount ?? 0) > 0) {
+    redirectWithTab(
+      "error",
+      `The ${selectedActiveSeason.season_year} opening seed is locked because season results have already been published. Correct race results instead.`
+    );
+  }
+
   const { data: existingDrivers, error: existingError } = await supabase
     .from("drivers")
     .select("id,driver_name");
@@ -536,8 +671,9 @@ export async function importChampionshipStandingsAction(formData: FormData) {
       const { error: updateError } = await supabase
         .from("drivers")
         .update({
-          championship_points: row.points,
-          current_standing: row.rank
+          championship_points: 0,
+          current_standing: row.rank,
+          opening_seed_standing: row.rank
         })
         .eq("id", existing.id);
 
@@ -550,12 +686,13 @@ export async function importChampionshipStandingsAction(formData: FormData) {
     }
 
     const { error: insertError } = await supabase.from("drivers").insert({
-      championship_points: row.points,
+      championship_points: 0,
       current_standing: row.rank,
       driver_name: row.driverName,
       group_number: 6,
       image_url: null,
-      is_active: true
+      is_active: true,
+      opening_seed_standing: row.rank
     });
 
     if (insertError) {
@@ -583,7 +720,7 @@ export async function importChampionshipStandingsAction(formData: FormData) {
     parsed.ignoredLineCount > 0 ? ` ${parsed.ignoredLineCount} line(s) ignored.` : "";
   redirectWithTab(
     "message",
-    `Standings imported: ${updatedCount} updated, ${createdCount} created.${ignoredSummary}`
+    `${selectedActiveSeason.season_year} opening seed imported: ${updatedCount} updated, ${createdCount} created. Current-season points remain at zero.${ignoredSummary}`
   );
 }
 
@@ -600,14 +737,20 @@ export async function createRaceAction(formData: FormData) {
   const titleImageFile = getFormFile(formData, "title_image_file");
   const pickFormat = parseRacePickFormat(asText(formData.get("pick_format")));
   const payoutValue = parseNonNegativeNumber(asText(formData.get("payout")));
+  const roundNumber = parsePositiveInteger(asText(formData.get("round_number")));
+  const seasonId = parsePositiveInteger(asText(formData.get("season_id")));
   const raceDate = parseLeagueDateTimeLocalInput(raceDateInput);
   const qualifyingStartAt = parseLeagueDateTimeLocalInput(qualifyingStartInput);
 
-  if (!raceName || payoutValue === null) {
+  if (!raceName || payoutValue === null || !roundNumber || !seasonId) {
     redirectWithTab(
       "error",
-      "Race name, qualifying start, race start, and payout are required. Use valid Indianapolis times."
+      "Season, round, race name, qualifying start, race start, and payout are required."
     );
+  }
+
+  if (/^\s*Race\s+\d+\s*-\s*/i.test(raceName)) {
+    redirectWithTab("error", "Enter only the event name. Round number belongs in the Round field.");
   }
 
   if (raceDate === null || qualifyingStartAt === null) {
@@ -625,7 +768,27 @@ export async function createRaceAction(formData: FormData) {
     redirectWithTab("error", "Qualifying start must be at or before race start.");
   }
 
-  let { data: insertedRace, error } = await supabase
+  const { data: season, error: seasonError } = await supabase
+    .from("league_seasons")
+    .select("id,season_year,status")
+    .eq("id", seasonId)
+    .maybeSingle<{ id: number; season_year: number; status: string }>();
+
+  if (seasonError || !season) {
+    redirectWithTab(
+      "error",
+      withMigrationHint(seasonError?.message ?? "Selected season was not found.", LEAGUE_SEASONS_MIGRATION_FILE)
+    );
+  }
+  const selectedSeason = season as { id: number; season_year: number; status: string };
+  if (selectedSeason.status === "completed") {
+    redirectWithTab("error", "Races cannot be added to a completed season.");
+  }
+  if (getLeagueYear(new Date(raceDate)) !== selectedSeason.season_year) {
+    redirectWithTab("error", `Race start year must match the ${selectedSeason.season_year} season.`);
+  }
+
+  const { data: insertedRace, error } = await supabase
     .from("races")
     .insert({
       pick_format: pickFormat,
@@ -633,37 +796,15 @@ export async function createRaceAction(formData: FormData) {
       qualifying_start_at: qualifyingStartAt,
       race_date: raceDate,
       race_name: raceName,
+      round_number: roundNumber,
+      season_id: seasonId,
       title_image_url: titleImageUrlInput || null
     })
     .select("id")
     .single();
 
-  if (error && isMissingColumnError(error, "pick_format")) {
-    if (pickFormat === "indy_500") {
-      redirectWithTab(
-        "error",
-        withMigrationHint("Indianapolis 500 pick rules require the latest database migration.", INDY_500_MIGRATION_FILE)
-      );
-    }
-
-    const legacyResponse = await supabase
-      .from("races")
-      .insert({
-        payout: payoutValue,
-        qualifying_start_at: qualifyingStartAt,
-        race_date: raceDate,
-        race_name: raceName,
-        title_image_url: titleImageUrlInput || null
-      })
-      .select("id")
-      .single();
-
-    insertedRace = legacyResponse.data;
-    error = legacyResponse.error;
-  }
-
   if (error) {
-    redirectWithTab("error", error.message);
+    redirectWithTab("error", withMigrationHint(error.message, LEAGUE_SEASONS_MIGRATION_FILE));
   }
 
   const insertedRaceId = insertedRace?.id;
@@ -719,19 +860,24 @@ export async function updateRaceAction(formData: FormData) {
   const titleImageFile = getFormFile(formData, "title_image_file");
   const pickFormat = parseRacePickFormat(asText(formData.get("pick_format")));
   const payoutValue = parseNonNegativeNumber(asText(formData.get("payout")));
+  const roundNumber = parsePositiveInteger(asText(formData.get("round_number")));
+  const seasonId = parsePositiveInteger(asText(formData.get("season_id")));
 
-  if (!raceId || !raceName || payoutValue === null) {
+  if (!raceId || !raceName || payoutValue === null || !roundNumber || !seasonId) {
     redirectWithTab(
       "error",
-      "Race id, race name, qualifying start, race start, and payout are required."
+      "Race id, season, round, race name, qualifying start, race start, and payout are required."
     );
+  }
+  if (/^\s*Race\s+\d+\s*-\s*/i.test(raceName)) {
+    redirectWithTab("error", "Enter only the event name. Round number belongs in the Round field.");
   }
   const raceIdValue = raceId as number;
   const { data: existingRace, error: existingRaceError } = await supabase
     .from("races")
-    .select("title_image_url")
+    .select("title_image_url,season_id,round_number")
     .eq("id", raceIdValue)
-    .maybeSingle<{ title_image_url: string | null }>();
+    .maybeSingle<{ round_number: number; season_id: number; title_image_url: string | null }>();
 
   if (existingRaceError) {
     redirectWithTab("error", existingRaceError.message);
@@ -739,7 +885,12 @@ export async function updateRaceAction(formData: FormData) {
   if (!existingRace) {
     redirectWithTab("error", "Race not found.");
   }
-  const existingRaceImageUrl = existingRace?.title_image_url ?? null;
+  const selectedExistingRace = existingRace as {
+    round_number: number;
+    season_id: number;
+    title_image_url: string | null;
+  };
+  const existingRaceImageUrl = selectedExistingRace.title_image_url;
 
   const raceDate = parseLeagueDateTimeLocalInput(raceDateInput);
   const qualifyingStartAt = parseLeagueDateTimeLocalInput(qualifyingStartInput);
@@ -758,6 +909,37 @@ export async function updateRaceAction(formData: FormData) {
     redirectWithTab("error", "Qualifying start must be at or before race start.");
   }
 
+  const { data: season, error: seasonError } = await supabase
+    .from("league_seasons")
+    .select("id,season_year,status")
+    .eq("id", seasonId)
+    .maybeSingle<{ id: number; season_year: number; status: string }>();
+  if (seasonError || !season) {
+    redirectWithTab(
+      "error",
+      withMigrationHint(seasonError?.message ?? "Selected season was not found.", LEAGUE_SEASONS_MIGRATION_FILE)
+    );
+  }
+  const selectedSeason = season as { id: number; season_year: number; status: string };
+  if (selectedSeason.status === "completed" && selectedExistingRace.season_id !== seasonId) {
+    redirectWithTab("error", "Races cannot be moved into a completed season.");
+  }
+  if (getLeagueYear(new Date(raceDate)) !== selectedSeason.season_year) {
+    redirectWithTab("error", `Race start year must match the ${selectedSeason.season_year} season.`);
+  }
+
+  const identityChanged =
+    selectedExistingRace.season_id !== seasonId || selectedExistingRace.round_number !== roundNumber;
+  if (identityChanged) {
+    const [{ count: pickCount }, { count: resultCount }] = await Promise.all([
+      supabase.from("picks").select("id", { count: "exact", head: true }).eq("race_id", raceIdValue),
+      supabase.from("results").select("id", { count: "exact", head: true }).eq("race_id", raceIdValue)
+    ]);
+    if ((pickCount ?? 0) > 0 || (resultCount ?? 0) > 0) {
+      redirectWithTab("error", "Season and round cannot change after picks or results exist.");
+    }
+  }
+
   let titleImageUrl = titleImageUrlInput || null;
 
   if (titleImageFile) {
@@ -774,7 +956,7 @@ export async function updateRaceAction(formData: FormData) {
     }
   }
 
-  let { error } = await supabase
+  const { error } = await supabase
     .from("races")
     .update({
       pick_format: pickFormat,
@@ -782,31 +964,11 @@ export async function updateRaceAction(formData: FormData) {
       qualifying_start_at: qualifyingStartAt,
       race_date: raceDate,
       race_name: raceName,
+      round_number: roundNumber,
+      season_id: seasonId,
       title_image_url: titleImageUrl
     })
     .eq("id", raceIdValue);
-
-  if (error && isMissingColumnError(error, "pick_format")) {
-    if (pickFormat === "indy_500") {
-      redirectWithTab(
-        "error",
-        withMigrationHint("Indianapolis 500 pick rules require the latest database migration.", INDY_500_MIGRATION_FILE)
-      );
-    }
-
-    const legacyResponse = await supabase
-      .from("races")
-      .update({
-        payout: payoutValue,
-        qualifying_start_at: qualifyingStartAt,
-        race_date: raceDate,
-        race_name: raceName,
-        title_image_url: titleImageUrl
-      })
-      .eq("id", raceIdValue);
-
-    error = legacyResponse.error;
-  }
 
   if (error) {
     if (titleImageFile && titleImageUrl !== existingRaceImageUrl) {
@@ -814,7 +976,7 @@ export async function updateRaceAction(formData: FormData) {
         console.error("[storage] Failed rolling back race image upload:", cleanupError);
       });
     }
-    redirectWithTab("error", error.message);
+    redirectWithTab("error", withMigrationHint(error.message, LEAGUE_SEASONS_MIGRATION_FILE));
   }
 
   let imageCleanupWarning = "";
@@ -1480,16 +1642,36 @@ export async function finalizeHallOfFameSeasonAction(formData: FormData) {
   const tab = parseAdminTab(asText(formData.get("tab"))) ?? "results";
   const redirectWithTab = (key: "error" | "message", value: string): never =>
     adminRedirect(key, value, tab);
-  const seasonYear = parsePositiveInteger(asText(formData.get("season_year"))) ?? getLeagueYear();
-  const seasonRange = getLeagueSeasonDateRange(seasonYear);
+  const seasonId = parsePositiveInteger(asText(formData.get("season_id")));
+
+  if (!seasonId) {
+    redirectWithTab("error", "An active season is required before final standings can be saved.");
+  }
+
+  const { data: season, error: seasonError } = await supabase
+    .from("league_seasons")
+    .select("id,season_year,status")
+    .eq("id", seasonId)
+    .maybeSingle<{ id: number; season_year: number; status: string }>();
+  if (seasonError || !season) {
+    redirectWithTab(
+      "error",
+      withMigrationHint(seasonError?.message ?? "Active season not found.", LEAGUE_SEASONS_MIGRATION_FILE)
+    );
+  }
+  const selectedSeason = season as { id: number; season_year: number; status: string };
+  if (selectedSeason.status !== "active") {
+    redirectWithTab("error", "Only the active season can be finalized.");
+  }
+  const seasonIdValue = seasonId as number;
+  const seasonYear = selectedSeason.season_year;
 
   const { data: seasonRaces, error: racesError } = await supabase
     .from("races")
-    .select("id,race_name,race_date,results_status")
+    .select("id,race_name,race_date,results_status,round_number")
     .eq("is_archived", false)
-    .gte("race_date", seasonRange.seasonStartIso)
-    .lt("race_date", seasonRange.seasonEndExclusiveIso)
-    .order("race_date", { ascending: true });
+    .eq("season_id", seasonIdValue)
+    .order("round_number", { ascending: true });
 
   if (racesError) {
     redirectWithTab("error", racesError.message);
@@ -1517,7 +1699,7 @@ export async function finalizeHallOfFameSeasonAction(formData: FormData) {
 
   let snapshot: Awaited<ReturnType<typeof buildLeagueScoringSnapshotUncached>> | null = null;
   try {
-    snapshot = await buildLeagueScoringSnapshotUncached(seasonYear);
+    snapshot = await buildLeagueScoringSnapshotUncached(seasonIdValue);
   } catch (snapshotError) {
     redirectWithTab(
       "error",
@@ -1547,7 +1729,8 @@ export async function finalizeHallOfFameSeasonAction(formData: FormData) {
       points: row.raceBreakdown[race.raceId] ?? 0,
       race_date: race.raceDate,
       race_id: race.raceId,
-      race_name: race.raceName
+      race_name: race.raceName,
+      round_number: race.roundNumber
     })),
     team_name: row.teamName,
     total_points: row.totalPoints
