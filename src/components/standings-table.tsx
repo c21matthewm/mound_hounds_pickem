@@ -81,6 +81,9 @@ export function StandingsTable({
     setSortDirection(defaultSortDirection(key));
   };
 
+  const ariaSortFor = (key: SortKey): "ascending" | "descending" | "none" =>
+    sortKey === key ? (sortDirection === "asc" ? "ascending" : "descending") : "none";
+
   const sortedRows = useMemo(() => {
     return [...rows].sort((a, b) => {
       if (sortKey === "change") {
@@ -148,6 +151,7 @@ export function StandingsTable({
               >
                 <button
                   aria-expanded={expanded}
+                  aria-label={`${row.displayName}, rank ${row.currentStanding}, ${row.totalPoints} points. ${expanded ? "Hide" : "Show"} race results.`}
                   className="grid w-full grid-cols-[2.25rem_2.75rem_minmax(0,1fr)_4.25rem] items-center gap-1.5 px-3 py-2.5 text-left"
                   onClick={() => setExpandedUserId(expanded ? null : row.userId)}
                   type="button"
@@ -197,24 +201,27 @@ export function StandingsTable({
           className="min-w-full table-fixed text-sm"
           style={{ minWidth: `${desktopTableMinWidth}px` }}
         >
+          <caption className="sr-only">
+            {seasonYear ? `${seasonYear} league standings` : "Current league standings"}
+          </caption>
           <thead className="sticky top-0 z-20 bg-slate-50 text-slate-700">
             <tr>
-              <th className="sticky left-0 z-30 w-20 bg-slate-50 px-3 py-2 text-right font-semibold">
+              <th aria-sort={ariaSortFor("currentStanding")} className="sticky left-0 z-30 w-20 bg-slate-50 px-3 py-2 text-right font-semibold">
                 <button onClick={() => onSort("currentStanding")} type="button">
                   Rank {sortIndicator("currentStanding", sortKey, sortDirection)}
                 </button>
               </th>
-              <th className="sticky left-20 z-30 w-56 bg-slate-50 px-3 py-2 text-left font-semibold">
+              <th aria-sort={ariaSortFor("teamName")} className="sticky left-20 z-30 w-56 bg-slate-50 px-3 py-2 text-left font-semibold">
                 <button onClick={() => onSort("teamName")} type="button">
                   Participant / Team {sortIndicator("teamName", sortKey, sortDirection)}
                 </button>
               </th>
-              <th className="w-20 px-3 py-2 text-right font-semibold">
+              <th aria-sort={ariaSortFor("change")} className="w-20 px-3 py-2 text-right font-semibold">
                 <button onClick={() => onSort("change")} type="button">
                   Change {sortIndicator("change", sortKey, sortDirection)}
                 </button>
               </th>
-              <th className="w-24 px-3 py-2 text-right font-semibold">
+              <th aria-sort={ariaSortFor("totalPoints")} className="w-24 px-3 py-2 text-right font-semibold">
                 <button
                   data-testid="standings-sort-total"
                   onClick={() => onSort("totalPoints")}
@@ -226,6 +233,7 @@ export function StandingsTable({
               {raceColumns.map((race) => (
                 <th
                   aria-label={`${race.raceName} points`}
+                  aria-sort={ariaSortFor(`race-${race.raceId}`)}
                   className="w-16 px-2 py-2 text-right font-semibold"
                   key={race.raceId}
                   title={race.raceName}

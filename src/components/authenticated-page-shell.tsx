@@ -19,7 +19,7 @@ export function AuthenticatedPageShell({
 }: Props) {
   return (
     <main className={`mx-auto flex min-h-screen ${maxWidth} flex-col px-5 py-8 pb-24 sm:px-6 md:py-10 md:pb-12`}>
-      <header className="rounded-2xl border border-slate-200 bg-white/95 p-5 shadow-sm md:p-6">
+      <header className="border-b border-slate-200 pb-5 md:pb-6">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div className="min-w-0 max-w-3xl">
             <p className="inline-flex rounded-full border border-blue-200 bg-blue-50 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-blue-700">

@@ -6,6 +6,7 @@ const AUTH_ROUTE_PREFIXES = ["/login", "/signup"];
 const PROTECTED_ROUTE_PREFIXES = [
   "/dashboard",
   "/onboarding",
+  "/season-registration",
   "/picks",
   "/leaderboard",
   "/admin",

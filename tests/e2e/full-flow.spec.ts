@@ -3,7 +3,12 @@ import { randomUUID } from "node:crypto";
 import { expect, test, type Dialog, type Page } from "@playwright/test";
 import { createClient } from "@supabase/supabase-js";
 import { trackClientIssues } from "./helpers/monitoring";
-import { cleanupPlaywrightArtifacts, requiredE2EEnv, supabase } from "./helpers/supabase";
+import {
+  cleanupPlaywrightArtifacts,
+  registerProfileForActiveSeason,
+  requiredE2EEnv,
+  supabase
+} from "./helpers/supabase";
 
 const LEAGUE_TIME_ZONE = "America/Indiana/Indianapolis";
 const TEST_PASSWORD = "Pw-E2E-Flow-2026!";
@@ -77,7 +82,7 @@ const signIn = async (page: Page, email: string) => {
   await page.locator('input[name="email"]').fill(email);
   await page.locator('input[name="password"]').fill(TEST_PASSWORD);
   await page.getByRole("button", { name: "Sign in" }).click();
-  await expect(page).toHaveURL(/\/dashboard|\/admin|\/onboarding/);
+  await expect(page).toHaveURL(/\/dashboard|\/admin|\/onboarding|\/season-registration/);
   await expect(page).not.toHaveURL(/\/login\?error=/);
 };
 
@@ -114,6 +119,8 @@ const createSeedUser = async (label: string, role: Role): Promise<SeedUser> => {
   if (profileError) {
     throw new Error(`Failed upserting ${label} profile: ${profileError.message}`);
   }
+
+  await registerProfileForActiveSeason(userData.user.id);
 
   return {
     email,
@@ -263,7 +270,7 @@ test.describe.serial("Full App Flow", () => {
       .eq("id", participant1.id);
     expect(
       activityChangeError,
-      "Participants must not be able to change their own season activity."
+      "Participants must not be able to change their own account eligibility."
     ).toBeTruthy();
     await participantDatabaseClient.auth.signOut();
 

@@ -60,6 +60,7 @@ export default async function LoginPage({ searchParams }: PageProps) {
             required
             className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm"
             name="email"
+            autoComplete="email"
             type="email"
           />
         </label>
@@ -75,6 +76,7 @@ export default async function LoginPage({ searchParams }: PageProps) {
             required
             className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm"
             name="password"
+            autoComplete="current-password"
             type="password"
           />
         </label>

@@ -22,7 +22,7 @@ import {
   type RacePickFormat
 } from "@/lib/race-format";
 import { createServiceRoleSupabaseClient } from "@/lib/supabase/service-role";
-import { isMissingColumnError, withMigrationHint } from "@/lib/supabase/schema-compat";
+import { withMigrationHint } from "@/lib/supabase/migration-errors";
 import { invalidateScoringCache } from "@/lib/scoring-cache";
 import { buildLeagueScoringSnapshotUncached } from "@/lib/scoring";
 import { getLeagueYear, parseLeagueDateTimeLocalInput } from "@/lib/timezone";
@@ -31,6 +31,9 @@ const asText = (value: FormDataEntryValue | null): string =>
   typeof value === "string" ? value.trim() : "";
 
 const TEST_FLOW_PREFIX = "[TEST FLOW ";
+const MAX_DRIVER_NAME_LENGTH = 100;
+const MAX_PROFILE_NAME_LENGTH = 100;
+const MAX_RACE_NAME_LENGTH = 200;
 
 type AdminTab = "drivers" | "participants" | "races" | "results" | "feedback";
 
@@ -57,7 +60,6 @@ const parseAdminTab = (value: string): AdminTab | null => {
 const parseRacePickFormat = (value: string): RacePickFormat =>
   isRacePickFormat(value) ? value : "standard";
 
-const INDY_500_MIGRATION_FILE = "supabase/migrations/20260528_add_indy_500_pick_format.sql";
 const RESULT_PUBLICATION_MIGRATION_FILE =
   "supabase/migrations/20260709_harden_roles_and_result_publication.sql";
 const HALL_OF_FAME_MIGRATION_FILE =
@@ -71,12 +73,22 @@ const withResultPublicationMigrationHint = (message: string): string =>
     : message;
 
 const adminRedirect = (key: "error" | "message", value: string, tab?: AdminTab): never => {
-  invalidateScoringCache();
   const params = new URLSearchParams({ [key]: value });
   if (tab) {
     params.set("tab", tab);
   }
   redirect(`/admin?${params.toString()}`);
+};
+
+const adminMutationRedirect = (
+  key: "error" | "message",
+  value: string,
+  tab: AdminTab
+): never => {
+  if (key === "message") {
+    invalidateScoringCache();
+  }
+  return adminRedirect(key, value, tab);
 };
 
 const parsePositiveInteger = (value: string): number | null => {
@@ -173,27 +185,11 @@ async function refreshDriverStandingsAndGroups(supabase: SupabaseClient) {
 }
 
 async function ensureRaceIsActive(supabase: SupabaseClient, raceId: number) {
-  let { data: race, error } = await supabase
+  const { data: race, error } = await supabase
     .from("races")
     .select("id,is_archived,pick_format")
     .eq("id", raceId)
     .maybeSingle<RaceStatusRow>();
-
-  if (error && isMissingColumnError(error, "pick_format")) {
-    const legacyResponse = await supabase
-      .from("races")
-      .select("id,is_archived")
-      .eq("id", raceId)
-      .maybeSingle<Omit<RaceStatusRow, "pick_format">>();
-
-    error = legacyResponse.error;
-    race = legacyResponse.data
-      ? {
-          ...legacyResponse.data,
-          pick_format: "standard"
-        }
-      : null;
-  }
 
   if (error) {
     throw new Error(error.message);
@@ -273,27 +269,59 @@ export async function updateParticipantAction(formData: FormData) {
   const profileId = asText(formData.get("profile_id"));
   const fullName = asText(formData.get("full_name"));
   const teamName = asText(formData.get("team_name"));
-  const isActive = asText(formData.get("is_active")) === "on";
+  const seasonRegistered = asText(formData.get("season_registered")) === "on";
 
   if (!isUuid(profileId) || !teamName) {
     adminRedirect("error", "A valid participant and team name are required.", "participants");
   }
+  if (fullName.length > MAX_PROFILE_NAME_LENGTH || teamName.length > MAX_PROFILE_NAME_LENGTH) {
+    adminRedirect("error", "Participant and team names must be 100 characters or fewer.", "participants");
+  }
 
-  const { error } = await supabase
+  const { error: profileError } = await supabase
     .from("profiles")
     .update({
       full_name: fullName || null,
-      is_active: isActive,
       team_name: teamName
     })
     .eq("id", profileId);
 
-  if (error) {
+  if (profileError) {
     adminRedirect(
       "error",
-      error.code === "23505" ? "That team name is already in use." : error.message,
+      profileError.code === "23505" ? "That team name is already in use." : profileError.message,
       "participants"
     );
+  }
+
+  const { data: activeSeason, error: seasonError } = await supabase
+    .from("league_seasons")
+    .select("id")
+    .eq("status", "active")
+    .maybeSingle<{ id: number }>();
+
+  if (seasonError || !activeSeason) {
+    return adminRedirect(
+      "error",
+      seasonError?.message ?? "Activate a season before changing participant registration.",
+      "participants"
+    );
+  }
+
+  const now = new Date().toISOString();
+  const { error: registrationError } = await supabase.from("season_participants").upsert(
+    {
+      decided_at: now,
+      profile_id: profileId,
+      registered_at: seasonRegistered ? now : null,
+      season_id: activeSeason.id,
+      status: seasonRegistered ? "registered" : "declined"
+    },
+    { onConflict: "season_id,profile_id" }
+  );
+
+  if (registrationError) {
+    adminRedirect("error", registrationError.message, "participants");
   }
 
   invalidateScoringCache();
@@ -308,7 +336,7 @@ export async function createDriverAction(formData: FormData) {
   const { supabase } = await requireAdmin();
   const tab = parseAdminTab(asText(formData.get("tab"))) ?? "drivers";
   const redirectWithTab = (key: "error" | "message", value: string): never =>
-    adminRedirect(key, value, tab);
+    adminMutationRedirect(key, value, tab);
 
   const driverName = asText(formData.get("driver_name"));
   const imageUrlInput = asText(formData.get("image_url"));
@@ -317,6 +345,9 @@ export async function createDriverAction(formData: FormData) {
 
   if (!driverName) {
     redirectWithTab("error", "Driver name is required.");
+  }
+  if (driverName.length > MAX_DRIVER_NAME_LENGTH) {
+    redirectWithTab("error", "Driver names must be 100 characters or fewer.");
   }
 
   const { data: insertedDriver, error } = await supabase
@@ -394,7 +425,7 @@ export async function updateDriverAction(formData: FormData) {
   const { supabase } = await requireAdmin();
   const tab = parseAdminTab(asText(formData.get("tab"))) ?? "drivers";
   const redirectWithTab = (key: "error" | "message", value: string): never =>
-    adminRedirect(key, value, tab);
+    adminMutationRedirect(key, value, tab);
 
   const driverId = parsePositiveInteger(asText(formData.get("driver_id")));
   const driverName = asText(formData.get("driver_name"));
@@ -404,6 +435,9 @@ export async function updateDriverAction(formData: FormData) {
 
   if (!driverId || !driverName) {
     redirectWithTab("error", "Driver update requires id and name.");
+  }
+  if (driverName.length > MAX_DRIVER_NAME_LENGTH) {
+    redirectWithTab("error", "Driver names must be 100 characters or fewer.");
   }
   const driverIdValue = driverId as number;
   const { data: existingDriver, error: existingDriverError } = await supabase
@@ -489,7 +523,7 @@ export async function deleteDriverAction(formData: FormData) {
   const { supabase } = await requireAdmin();
   const tab = parseAdminTab(asText(formData.get("tab"))) ?? "drivers";
   const redirectWithTab = (key: "error" | "message", value: string): never =>
-    adminRedirect(key, value, tab);
+    adminMutationRedirect(key, value, tab);
   const driverId = parsePositiveInteger(asText(formData.get("driver_id")));
 
   if (!driverId) {
@@ -497,7 +531,7 @@ export async function deleteDriverAction(formData: FormData) {
   }
   const driverIdValue = driverId as number;
 
-  const [initialPickUsageResponse, resultUsageResponse, raceFieldUsageResponse] = await Promise.all([
+  const [pickUsageResponse, resultUsageResponse, raceFieldUsageResponse] = await Promise.all([
     supabase
       .from("picks")
       .select("id")
@@ -512,22 +546,6 @@ export async function deleteDriverAction(formData: FormData) {
       .eq("driver_id", driverIdValue)
       .limit(1)
   ]);
-  let pickUsageResponse = initialPickUsageResponse;
-
-  if (
-    pickUsageResponse.error &&
-    (isMissingColumnError(pickUsageResponse.error, "driver_group7_id") ||
-      isMissingColumnError(pickUsageResponse.error, "driver_group8_id"))
-  ) {
-    pickUsageResponse = await supabase
-      .from("picks")
-      .select("id")
-      .or(
-        `driver_group1_id.eq.${driverIdValue},driver_group2_id.eq.${driverIdValue},driver_group3_id.eq.${driverIdValue},driver_group4_id.eq.${driverIdValue},driver_group5_id.eq.${driverIdValue},driver_group6_id.eq.${driverIdValue}`
-      )
-      .limit(1);
-  }
-
   if (pickUsageResponse.error) {
     redirectWithTab("error", pickUsageResponse.error.message);
   }
@@ -586,7 +604,7 @@ export async function importChampionshipStandingsAction(formData: FormData) {
   const { supabase } = await requireAdmin();
   const tab = parseAdminTab(asText(formData.get("tab"))) ?? "drivers";
   const redirectWithTab = (key: "error" | "message", value: string): never =>
-    adminRedirect(key, value, tab);
+    adminMutationRedirect(key, value, tab);
   const rawPaste = asText(formData.get("standings_paste"));
 
   if (!rawPaste) {
@@ -728,7 +746,7 @@ export async function createRaceAction(formData: FormData) {
   const { supabase } = await requireAdmin();
   const tab = parseAdminTab(asText(formData.get("tab"))) ?? "races";
   const redirectWithTab = (key: "error" | "message", value: string): never =>
-    adminRedirect(key, value, tab);
+    adminMutationRedirect(key, value, tab);
 
   const raceName = asText(formData.get("race_name"));
   const raceDateInput = asText(formData.get("race_date"));
@@ -751,6 +769,9 @@ export async function createRaceAction(formData: FormData) {
 
   if (/^\s*Race\s+\d+\s*-\s*/i.test(raceName)) {
     redirectWithTab("error", "Enter only the event name. Round number belongs in the Round field.");
+  }
+  if (raceName.length > MAX_RACE_NAME_LENGTH) {
+    redirectWithTab("error", "Race names must be 200 characters or fewer.");
   }
 
   if (raceDate === null || qualifyingStartAt === null) {
@@ -850,7 +871,7 @@ export async function updateRaceAction(formData: FormData) {
   const { supabase } = await requireAdmin();
   const tab = parseAdminTab(asText(formData.get("tab"))) ?? "races";
   const redirectWithTab = (key: "error" | "message", value: string): never =>
-    adminRedirect(key, value, tab);
+    adminMutationRedirect(key, value, tab);
 
   const raceId = parsePositiveInteger(asText(formData.get("race_id")));
   const raceName = asText(formData.get("race_name"));
@@ -871,6 +892,9 @@ export async function updateRaceAction(formData: FormData) {
   }
   if (/^\s*Race\s+\d+\s*-\s*/i.test(raceName)) {
     redirectWithTab("error", "Enter only the event name. Round number belongs in the Round field.");
+  }
+  if (raceName.length > MAX_RACE_NAME_LENGTH) {
+    redirectWithTab("error", "Race names must be 200 characters or fewer.");
   }
   const raceIdValue = raceId as number;
   const { data: existingRace, error: existingRaceError } = await supabase
@@ -999,7 +1023,7 @@ export async function deleteRaceAction(formData: FormData) {
   const { supabase } = await requireAdmin();
   const tab = parseAdminTab(asText(formData.get("tab"))) ?? "races";
   const redirectWithTab = (key: "error" | "message", value: string): never =>
-    adminRedirect(key, value, tab);
+    adminMutationRedirect(key, value, tab);
 
   const raceId = parsePositiveInteger(asText(formData.get("race_id")));
   if (!raceId) {
@@ -1045,7 +1069,7 @@ export async function setRaceArchivedAction(formData: FormData) {
   const { supabase } = await requireAdmin();
   const tab = parseAdminTab(asText(formData.get("tab"))) ?? "races";
   const redirectWithTab = (key: "error" | "message", value: string): never =>
-    adminRedirect(key, value, tab);
+    adminMutationRedirect(key, value, tab);
 
   const raceId = parsePositiveInteger(asText(formData.get("race_id")));
   const shouldArchive = asText(formData.get("archive")) === "true";
@@ -1092,7 +1116,7 @@ export async function setRaceWinnerAction(formData: FormData) {
   const { supabase } = await requireAdmin();
   const tab = parseAdminTab(asText(formData.get("tab"))) ?? "races";
   const redirectWithTab = (key: "error" | "message", value: string): never =>
-    adminRedirect(key, value, tab);
+    adminMutationRedirect(key, value, tab);
 
   const raceId = parsePositiveInteger(asText(formData.get("race_id")));
   const winnerProfileIdInput = asText(formData.get("winner_profile_id"));
@@ -1179,7 +1203,7 @@ export async function importIndy500QualifyingOrderAction(formData: FormData) {
   const { supabase } = await requireAdmin();
   const tab = parseAdminTab(asText(formData.get("tab"))) ?? "results";
   const redirectWithTab = (key: "error" | "message", value: string): never =>
-    adminRedirect(key, value, tab);
+    adminMutationRedirect(key, value, tab);
 
   const raceIdInput = parsePositiveInteger(asText(formData.get("race_id")));
   const rawPaste = asText(formData.get("qualifying_order_paste"));
@@ -1196,13 +1220,6 @@ export async function importIndy500QualifyingOrderAction(formData: FormData) {
     .maybeSingle<RaceStatusRow & { race_name: string }>();
 
   if (raceError) {
-    if (isMissingColumnError(raceError, "pick_format")) {
-      redirectWithTab(
-        "error",
-        withMigrationHint("Indianapolis 500 qualifying order requires the latest database migration.", INDY_500_MIGRATION_FILE)
-      );
-    }
-
     redirectWithTab("error", raceError.message);
   }
   if (!race) {
@@ -1362,7 +1379,7 @@ export async function upsertResultAction(formData: FormData) {
   const { supabase } = await requireAdmin();
   const tab = parseAdminTab(asText(formData.get("tab"))) ?? "results";
   const redirectWithTab = (key: "error" | "message", value: string): never =>
-    adminRedirect(key, value, tab);
+    adminMutationRedirect(key, value, tab);
 
   const raceId = parsePositiveInteger(asText(formData.get("race_id")));
   const driverId = parsePositiveInteger(asText(formData.get("driver_id")));
@@ -1431,7 +1448,7 @@ export async function publishSavedRaceResultsAction(formData: FormData) {
   const { supabase } = await requireAdmin();
   const tab = parseAdminTab(asText(formData.get("tab"))) ?? "results";
   const redirectWithTab = (key: "error" | "message", value: string): never =>
-    adminRedirect(key, value, tab);
+    adminMutationRedirect(key, value, tab);
 
   const raceId = parsePositiveInteger(asText(formData.get("race_id")));
   const officialWinningAverageSpeed = parseNonNegativeNumber(
@@ -1468,7 +1485,7 @@ export async function importIndycarResultsAction(formData: FormData) {
   const { supabase } = await requireAdmin();
   const tab = parseAdminTab(asText(formData.get("tab"))) ?? "results";
   const redirectWithTab = (key: "error" | "message", value: string): never =>
-    adminRedirect(key, value, tab);
+    adminMutationRedirect(key, value, tab);
 
   const raceIdInput = parsePositiveInteger(asText(formData.get("race_id")));
   const rawPaste = asText(formData.get("results_paste"));
@@ -1641,7 +1658,7 @@ export async function finalizeHallOfFameSeasonAction(formData: FormData) {
   const { supabase } = await requireAdmin();
   const tab = parseAdminTab(asText(formData.get("tab"))) ?? "results";
   const redirectWithTab = (key: "error" | "message", value: string): never =>
-    adminRedirect(key, value, tab);
+    adminMutationRedirect(key, value, tab);
   const seasonId = parsePositiveInteger(asText(formData.get("season_id")));
 
   if (!seasonId) {
@@ -1763,7 +1780,7 @@ export async function cleanupTestFlowDataAction(formData: FormData) {
   await requireAdmin();
   const tab = parseAdminTab(asText(formData.get("tab"))) ?? "feedback";
   const redirectWithTab = (key: "error" | "message", value: string): never =>
-    adminRedirect(key, value, tab);
+    adminMutationRedirect(key, value, tab);
 
   const serviceRoleSupabase = createServiceRoleSupabaseClient();
 

@@ -1,6 +1,6 @@
 import Link from "next/link";
-import { redirect } from "next/navigation";
 import { AuthenticatedPageShell } from "@/components/authenticated-page-shell";
+import { AnalyticsRaceHistory } from "@/components/analytics-race-history";
 import { HallOfFameYearSelect } from "@/components/hall-of-fame-year-select";
 import { MobileBottomNav } from "@/components/mobile-bottom-nav";
 import { PicksRaceSelect } from "@/components/picks-race-select";
@@ -14,7 +14,7 @@ import {
   type StandingsTableRaceColumn,
   type StandingsTableRow
 } from "@/components/standings-table";
-import { isProfileComplete, type ProfileRow } from "@/lib/profile";
+import { requireAppUser } from "@/lib/authenticated-user";
 import { queryStringParam } from "@/lib/query";
 import {
   loadHallOfFameSnapshot,
@@ -25,9 +25,8 @@ import {
   buildParticipantAnalyticsSnapshot,
   buildPicksByRaceSnapshot
 } from "@/lib/scoring";
-import { loadActiveLeagueSeason } from "@/lib/seasons";
-import { createServerSupabaseClient } from "@/lib/supabase/server";
-import { formatLeagueDateTime, LEAGUE_TIME_ZONE } from "@/lib/timezone";
+import { isRegisteredForSeason } from "@/lib/season-participation";
+import { formatLeagueDateTime } from "@/lib/timezone";
 
 export const dynamic = "force-dynamic";
 
@@ -86,26 +85,10 @@ export default async function LeaderboardPage({ searchParams }: PageProps) {
   const selectedRaceId = parseRaceId(queryStringParam(params.race_id));
   const selectedHallYear = parseSeasonYear(queryStringParam(params.year));
 
-  const supabase = await createServerSupabaseClient();
-  const {
-    data: { user }
-  } = await supabase.auth.getUser();
-
-  if (!user) {
-    redirect("/login");
-  }
-
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("id,full_name,team_name,phone_number,phone_carrier,role,is_active")
-    .eq("id", user.id)
-    .maybeSingle<ProfileRow>();
-
-  if (!profile || !isProfileComplete(profile)) {
-    redirect("/onboarding");
-  }
-
-  const activeSeason = await loadActiveLeagueSeason(supabase);
+  const { activeSeason, participation, supabase, user } = await requireAppUser({
+    requireSeasonDecision: true
+  });
+  const registeredForActiveSeason = isRegisteredForSeason(participation);
 
   let standingsSnapshot: Awaited<ReturnType<typeof buildLeagueScoringSnapshot>> | null = null;
   let picksSnapshot: Awaited<ReturnType<typeof buildPicksByRaceSnapshot>> | null = null;
@@ -116,7 +99,7 @@ export default async function LeaderboardPage({ searchParams }: PageProps) {
       picksSnapshot = activeSeason
         ? await buildPicksByRaceSnapshot(activeSeason.id, selectedRaceId)
         : { availableRaces: [], resultsPosted: false, rows: [], selectedRace: null };
-    } else if (activeTab === "analytics" && profile.is_active) {
+    } else if (activeTab === "analytics" && registeredForActiveSeason) {
       analyticsSnapshot = activeSeason
         ? await buildParticipantAnalyticsSnapshot(user.id, activeSeason.id)
         : null;
@@ -238,9 +221,9 @@ export default async function LeaderboardPage({ searchParams }: PageProps) {
           </Link>
           <Link
             className="rounded-md border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100"
-            href="/picks"
+            href={registeredForActiveSeason ? "/picks" : "/season-registration"}
           >
-            Pick&apos;em Form
+            {registeredForActiveSeason ? "Pick'em Form" : "Season Registration"}
           </Link>
         </>
       }
@@ -374,21 +357,16 @@ export default async function LeaderboardPage({ searchParams }: PageProps) {
           </section>
         ) : (
           <>
-            <section className="mt-6 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-              <div className="bg-[radial-gradient(circle_at_top_left,_#06b6d4,_transparent_35%),linear-gradient(135deg,_#0f172a,_#1e293b)] p-6 text-white">
+            <section className="mt-6 overflow-hidden rounded-lg border border-slate-200 bg-white">
+              <div className="bg-slate-950 p-5 text-white sm:p-6">
                 <p className="text-xs font-semibold uppercase tracking-[0.2em] text-cyan-200">
                   Personal Analytics
                 </p>
                 <h2 className="mt-2 text-2xl font-semibold tracking-tight">
                   {analyticsSnapshot.teamName}
                 </h2>
-                <p className="mt-2 max-w-2xl text-sm text-slate-300">
-                  A snapshot of your weekly finishes, pace against the field, recent form, and
-                  tiebreak accuracy across completed races.
-                </p>
-
-                <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-                  <div className="rounded-xl border border-white/15 bg-white/10 p-3 backdrop-blur">
+                <div className="mt-5 grid border-t border-white/15 sm:grid-cols-2 lg:grid-cols-4 lg:divide-x lg:divide-white/15">
+                  <div className="border-b border-white/15 py-3 sm:px-3 lg:border-b-0 lg:first:pl-0">
                     <p className="text-xs font-semibold uppercase tracking-wide text-slate-300">
                       Current Rank
                     </p>
@@ -401,7 +379,7 @@ export default async function LeaderboardPage({ searchParams }: PageProps) {
                       Field of {analyticsSnapshot.summary.fieldSize}
                     </p>
                   </div>
-                  <div className="rounded-xl border border-white/15 bg-white/10 p-3 backdrop-blur">
+                  <div className="border-b border-white/15 py-3 sm:px-3 lg:border-b-0">
                     <p className="text-xs font-semibold uppercase tracking-wide text-slate-300">
                       Total Points
                     </p>
@@ -412,7 +390,7 @@ export default async function LeaderboardPage({ searchParams }: PageProps) {
                       {formatOptionalNumber(analyticsSnapshot.summary.averageWeeklyPoints)} per race
                     </p>
                   </div>
-                  <div className="rounded-xl border border-white/15 bg-white/10 p-3 backdrop-blur">
+                  <div className="border-b border-white/15 py-3 sm:px-3 lg:border-b-0">
                     <p className="text-xs font-semibold uppercase tracking-wide text-slate-300">
                       Vs League Avg
                     </p>
@@ -423,7 +401,7 @@ export default async function LeaderboardPage({ searchParams }: PageProps) {
                       {aboveAverageWeekCount}/{analyticsRaceRows.length} weeks above average
                     </p>
                   </div>
-                  <div className="rounded-xl border border-white/15 bg-white/10 p-3 backdrop-blur">
+                  <div className="py-3 sm:px-3 lg:last:pr-0">
                     <p className="text-xs font-semibold uppercase tracking-wide text-slate-300">
                       Best Finish
                     </p>
@@ -439,7 +417,7 @@ export default async function LeaderboardPage({ searchParams }: PageProps) {
               </div>
 
               <div className="grid gap-4 p-6 lg:grid-cols-[1.1fr_0.9fr]">
-                <section className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                <section className="border-t border-slate-200 pt-4 lg:border-t-0 lg:pt-0">
                   <div className="flex items-center justify-between gap-3">
                     <div>
                       <h3 className="text-sm font-semibold uppercase tracking-wide text-slate-700">
@@ -483,8 +461,8 @@ export default async function LeaderboardPage({ searchParams }: PageProps) {
                   </div>
                 </section>
 
-                <section className="grid gap-3">
-                  <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4">
+                <section className="divide-y divide-slate-200 border-y border-slate-200">
+                  <div className="py-3">
                     <p className="text-xs font-semibold uppercase tracking-wide text-emerald-700">
                       Best Week
                     </p>
@@ -501,7 +479,7 @@ export default async function LeaderboardPage({ searchParams }: PageProps) {
                       <p className="mt-1 text-sm text-emerald-800">-</p>
                     )}
                   </div>
-                  <div className="rounded-xl border border-amber-200 bg-amber-50 p-4">
+                  <div className="py-3">
                     <p className="text-xs font-semibold uppercase tracking-wide text-amber-700">
                       Toughest Week
                     </p>
@@ -518,7 +496,7 @@ export default async function LeaderboardPage({ searchParams }: PageProps) {
                       <p className="mt-1 text-sm text-amber-800">-</p>
                     )}
                   </div>
-                  <div className="rounded-xl border border-slate-200 bg-white p-4">
+                  <div className="py-3">
                     <p className="text-xs font-semibold uppercase tracking-wide text-slate-600">
                       Tiebreak Read
                     </p>
@@ -534,8 +512,8 @@ export default async function LeaderboardPage({ searchParams }: PageProps) {
                 </section>
               </div>
 
-              <div className="grid gap-3 border-t border-slate-200 bg-slate-50 p-6 lg:grid-cols-2">
-                <div className="rounded-xl border border-slate-200 bg-white p-4">
+              <div className="grid gap-4 border-t border-slate-200 bg-slate-50 px-6 py-4 lg:grid-cols-2">
+                <div>
                   <p className="text-xs font-semibold uppercase tracking-wide text-slate-600">
                     Biggest Jump On The Field
                   </p>
@@ -547,7 +525,7 @@ export default async function LeaderboardPage({ searchParams }: PageProps) {
                       : "-"}
                   </p>
                 </div>
-                <div className="rounded-xl border border-slate-200 bg-white p-4">
+                <div>
                   <p className="text-xs font-semibold uppercase tracking-wide text-slate-600">
                     Biggest Miss On The Field
                   </p>
@@ -562,92 +540,21 @@ export default async function LeaderboardPage({ searchParams }: PageProps) {
               </div>
             </section>
 
-            <section className="mt-6 rounded-lg border border-slate-200 bg-white p-6">
-              <h3 className="text-lg font-semibold text-slate-900">Race Log</h3>
-              <p className="mt-1 text-sm text-slate-600">
-                Your week-by-week scorecard with finish, field comparison, and tiebreak accuracy.
-              </p>
-              <p className="mt-1 text-xs text-slate-500">Times shown in {LEAGUE_TIME_ZONE}.</p>
-              <div className="mt-4 overflow-x-auto rounded-md border border-slate-200">
-                <table className="min-w-full text-left text-sm">
-                  <thead className="bg-slate-50 text-slate-700">
-                    <tr>
-                      <th className="px-3 py-2 font-semibold">Race</th>
-                      <th className="px-3 py-2 font-semibold">Finish</th>
-                      <th className="px-3 py-2 font-semibold">Race Points</th>
-                      <th className="px-3 py-2 font-semibold">Vs League Avg</th>
-                      <th className="px-3 py-2 font-semibold">Cumulative</th>
-                      <th className="px-3 py-2 font-semibold">Scored As</th>
-                      <th className="px-3 py-2 font-semibold">Tiebreak Guess</th>
-                      <th className="px-3 py-2 font-semibold">Official Avg Speed</th>
-                      <th className="px-3 py-2 font-semibold">Delta</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {analyticsSnapshot.raceRows.map((row) => (
-                      <tr key={row.raceId} className="border-t border-slate-200">
-                        <td className="px-3 py-2">
-                          <div className="font-medium text-slate-900">{row.raceName}</div>
-                          <div className="text-xs text-slate-500">{formatRaceDate(row.raceDate)}</div>
-                        </td>
-                        <td className="px-3 py-2">
-                          {row.weeklyFinish !== null ? `${row.weeklyFinish}/${row.fieldSize}` : "-"}
-                        </td>
-                        <td className="px-3 py-2 font-semibold">{row.weeklyPoints}</td>
-                        <td
-                          className={`px-3 py-2 font-medium ${
-                            row.pointsVsRaceAverage > 0
-                              ? "text-emerald-700"
-                              : row.pointsVsRaceAverage < 0
-                                ? "text-amber-700"
-                                : "text-slate-700"
-                          }`}
-                        >
-                          {formatSignedValue(row.pointsVsRaceAverage)}
-                        </td>
-                        <td className="px-3 py-2">{row.cumulativePoints}</td>
-                        <td className="px-3 py-2">
-                          {row.submittedPick ? (
-                            <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-xs font-semibold text-emerald-700">
-                              Submitted picks
-                            </span>
-                          ) : (
-                            <span className="rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-xs font-semibold text-amber-700">
-                              Lowest score fallback
-                            </span>
-                          )}
-                        </td>
-                        <td className="px-3 py-2">
-                          {row.averageSpeedGuess !== null ? row.averageSpeedGuess.toFixed(3) : "-"}
-                        </td>
-                        <td className="px-3 py-2">
-                          {row.officialRaceAverageSpeed !== null
-                            ? row.officialRaceAverageSpeed.toFixed(3)
-                            : "-"}
-                        </td>
-                        <td className="px-3 py-2">
-                          {row.tiebreakDelta !== null ? row.tiebreakDelta.toFixed(3) : "-"}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </section>
+            <AnalyticsRaceHistory rows={analyticsSnapshot.raceRows} />
           </>
         )
       ) : null}
 
-      {activeTab === "analytics" && !profile.is_active ? (
+      {activeTab === "analytics" && !registeredForActiveSeason ? (
         <section className="mt-6 rounded-lg border border-slate-200 bg-white p-5">
           <h2 className="text-lg font-semibold text-slate-900">Current Season Analytics</h2>
           <p className="mt-2 text-sm text-slate-700">
-            Analytics are available to teams that are active in the current season.
+            Analytics are available to teams registered for the current season.
           </p>
         </section>
       ) : null}
 
-      {activeTab === "analytics" && profile.is_active && !activeSeason ? (
+      {activeTab === "analytics" && registeredForActiveSeason && !activeSeason ? (
         <section className="mt-6 rounded-lg border border-slate-200 bg-white p-5">
           <h2 className="text-lg font-semibold text-slate-900">Current Season Analytics</h2>
           <p className="mt-2 text-sm text-slate-700">No league season is currently active.</p>

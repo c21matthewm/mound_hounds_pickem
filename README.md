@@ -10,7 +10,8 @@ season standings, league rules, feedback, and admin operations.
 - Tailwind CSS
 - Supabase Auth, PostgreSQL, Storage, RLS, and `pg_cron`/`pg_net`
 - Vercel for production hosting
-- Playwright for end-to-end testing
+- Vitest for deterministic scoring/import unit tests
+- Playwright for read-only production smoke tests and isolated end-to-end testing
 
 ## Core Concepts
 
@@ -26,6 +27,8 @@ season standings, league rules, feedback, and admin operations.
 - Highest and lowest benchmark scores are calculated from the best/worst driver in each
   race-specific group.
 - Average speed tiebreaks apply only to first-place ties for a race.
+- Accounts and profiles are permanent. Participation is registered separately for each season, so
+  returning users sign in with the same credentials and confirm whether they are joining that year.
 
 ## Local Setup
 
@@ -82,6 +85,7 @@ That runs:
 
 - `npm run lint`
 - `npm run typecheck`
+- `npm run test`
 - `npm run build`
 
 Run Playwright smoke tests:
@@ -133,8 +137,15 @@ The production hardening and atomic result-publication migration is:
 supabase/migrations/20260709_harden_roles_and_result_publication.sql
 ```
 
-Apply that migration before deploying code that uses draft/published results. See
-`HARDENING_DEPLOY.md` for the rollout checklist.
+The current season foundation and yearly enrollment migrations are:
+
+```text
+supabase/migrations/20260718_add_league_seasons_and_active_participants.sql
+supabase/migrations/20260718_add_season_enrollment_and_delivery_hardening.sql
+```
+
+Apply all pending migrations in filename order before deploying application code that depends on
+them. The deployment and verification sequence is maintained in `DEPLOY_VERCEL.md`.
 
 After creating your first user account, promote it to admin in Supabase SQL Editor:
 
@@ -148,8 +159,10 @@ where p.id = u.id
 
 ## Admin Workflow
 
-1. Import preseason championship standings or manage drivers manually.
-2. Add races with race start, qualifying start, payout, and optional title image.
+1. Create or activate the league season, then import preseason championship standings or manage
+   drivers manually.
+2. Add races with a separate season and round, full event name, race start, qualifying start,
+   payout, and optional title image.
 3. For the Indianapolis 500, mark the race with Indy 500 pick rules and import its 33-car
    qualifying order.
 4. Participants submit picks before the race-specific pick deadline.
@@ -158,7 +171,10 @@ where p.id = u.id
    are saved automatically as zero-point nonstarters.
 6. Draft rows stay hidden and do not affect standings. Publish a complete draft with the official
    winning average speed to refresh championship standings/groups and schedule winner calculation.
-7. Use the leaderboard tabs to review standings, locked picks by race, and participant analytics.
+7. Use the leaderboard tabs to review standings, locked picks by race, participant analytics, and
+   finalized Hall of Fame seasons.
+8. Use **Admin > System Health** to verify the schema contract, active season, next-race result
+   gate, registration count, and recent reminder delivery attempts.
 
 Example paste formats live in:
 
@@ -188,12 +204,13 @@ Vercel production deploys from `main`.
 
 - `/login` and `/signup`: public auth pages
 - `/forgot-password` and `/reset-password`: Supabase password recovery flow
+- `/season-registration`: returning-user confirmation for the active season
 - `/dashboard`: participant home, rules/support links, profile snapshot
 - `/picks`: active race pick form
-- `/leaderboard`: standings, picks by race, analytics
+- `/leaderboard`: current standings, picks by race, analytics, and Hall of Fame archives
 - `/feedback`: participant bug/improvement submissions
 - `/rules`: in-app rules PDF viewer
-- `/admin`: admin-only drivers, races, results, and feedback management
+- `/admin`: admin-only participants, drivers, races, results, feedback, and system health
 - `/api/cron/fantasy-winner`: protected fantasy winner finalization cron
 - `/api/cron/pick-reminders`: protected pick reminder cron
 
@@ -201,5 +218,5 @@ Vercel production deploys from `main`.
 
 - `.venv` is not required; this is a Node/Next.js app.
 - `node_modules`, `.next`, Playwright artifacts, and local env files are intentionally ignored.
-- Reminder emails/SMS require a configured email provider. Without a custom sending domain, leave
-  Resend values unset and keep reminder delivery on hold.
+- Reminder delivery requires a configured email provider. Without a verified sending domain, leave
+  Resend values unset and keep `PICK_EMAILS_ENABLED=false`.

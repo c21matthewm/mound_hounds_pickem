@@ -220,6 +220,25 @@ export const ensureActiveLeagueSeason = async (): Promise<number> => {
   return createdSeason.id;
 };
 
+export const registerProfileForActiveSeason = async (profileId: string): Promise<void> => {
+  const seasonId = await ensureActiveLeagueSeason();
+  const now = new Date().toISOString();
+  const { error } = await supabase.from("season_participants").upsert(
+    {
+      decided_at: now,
+      profile_id: profileId,
+      registered_at: now,
+      season_id: seasonId,
+      status: "registered"
+    },
+    { onConflict: "season_id,profile_id" }
+  );
+
+  if (error) {
+    throw new Error(`Failed registering E2E profile for the active season: ${error.message}`);
+  }
+};
+
 const uniqueBy = <T, K extends keyof T>(rows: T[], key: K): T[] => {
   const seen = new Set<T[K]>();
   return rows.filter((row) => {

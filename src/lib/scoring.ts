@@ -1,5 +1,6 @@
 import "server-only";
 
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { unstable_cache } from "next/cache";
 import { createServiceRoleSupabaseClient } from "@/lib/supabase/service-role";
 import {
@@ -9,6 +10,13 @@ import {
   type RacePickFormat
 } from "@/lib/race-format";
 import { participantLeaderboardLabel } from "@/lib/participant-display";
+import {
+  computeGroupScoreExtremes,
+  pickDriverEntries,
+  pickDriverIdsForGroupCount,
+  scorePickSelection,
+  scoringNumber as asNumber
+} from "@/lib/scoring-engine";
 import { loadAllRows } from "@/lib/supabase/paginated-query";
 import { SCORING_CACHE_TAG } from "@/lib/scoring-cache";
 import {
@@ -49,6 +57,10 @@ type ProfileRow = {
   team_name: string;
 };
 
+type SeasonParticipantRow = {
+  profile_id: string;
+};
+
 type RaceRow = {
   id: number;
   official_winning_average_speed: number | string | null;
@@ -77,6 +89,38 @@ type Participant = {
   displayName: string;
   id: string;
   teamName: string;
+};
+
+const loadRegisteredProfiles = async (
+  supabase: SupabaseClient,
+  seasonId: number
+): Promise<ProfileRow[]> => {
+  const registrations = await loadAllRows<SeasonParticipantRow>(
+    "season participant registrations",
+    (from, to) =>
+      supabase
+        .from("season_participants")
+        .select("profile_id")
+        .eq("season_id", seasonId)
+        .eq("status", "registered")
+        .order("profile_id", { ascending: true })
+        .range(from, to)
+  );
+  const profileIds = registrations.map((registration) => registration.profile_id);
+  if (profileIds.length === 0) {
+    return [];
+  }
+
+  return loadAllRows<ProfileRow>("registered profiles", (from, to) =>
+    supabase
+      .from("profiles")
+      .select("id,team_name,role,full_name,is_active")
+      .in("id", profileIds)
+      .eq("is_active", true)
+      .order("team_name", { ascending: true })
+      .order("id", { ascending: true })
+      .range(from, to)
+  );
 };
 
 export type LeaderboardRow = {
@@ -177,21 +221,6 @@ export type ParticipantAnalyticsSnapshot = {
   userId: string;
 };
 
-const asNumber = (value: number | string | null | undefined): number => {
-  if (typeof value === "number") {
-    return value;
-  }
-
-  if (typeof value === "string") {
-    const parsed = Number(value);
-    if (!Number.isNaN(parsed)) {
-      return parsed;
-    }
-  }
-
-  return 0;
-};
-
 const compareLeaderboardRows = (
   a: { racePoints: number; teamName: string; totalPoints: number },
   b: { racePoints: number; teamName: string; totalPoints: number }
@@ -238,24 +267,6 @@ const assignCompetitionRanks = <T extends { teamName: string; totalPoints: numbe
 const keyForRaceDriver = (raceId: number, driverId: number): string => `${raceId}:${driverId}`;
 const keyForRaceUser = (raceId: number, userId: string): string => `${raceId}:${userId}`;
 
-const pickDriverIdsForGroupCount = (
-  pick: PickRow | null,
-  groupCount: number
-): Array<number | null> => {
-  const allDriverIds = [
-    pick?.driver_group1_id ?? null,
-    pick?.driver_group2_id ?? null,
-    pick?.driver_group3_id ?? null,
-    pick?.driver_group4_id ?? null,
-    pick?.driver_group5_id ?? null,
-    pick?.driver_group6_id ?? null,
-    pick?.driver_group7_id ?? null,
-    pick?.driver_group8_id ?? null
-  ];
-
-  return allDriverIds.slice(0, groupCount);
-};
-
 const buildGroupCountByRaceId = (races: RaceRow[]): Map<number, number> => {
   const groupCountByRaceId = new Map<number, number>();
   races.forEach((race) => {
@@ -291,18 +302,7 @@ const buildPickedDriverGroupByRaceDriver = (picks: PickRow[]): Map<string, numbe
   const pickedDriverGroupByRaceDriver = new Map<string, number>();
 
   picks.forEach((pick) => {
-    const groupedDriverIds: Array<[number, number]> = [
-      [pick.driver_group1_id, 1],
-      [pick.driver_group2_id, 2],
-      [pick.driver_group3_id, 3],
-      [pick.driver_group4_id, 4],
-      [pick.driver_group5_id, 5],
-      [pick.driver_group6_id, 6],
-      [pick.driver_group7_id, 7],
-      [pick.driver_group8_id, 8]
-    ].filter((row): row is [number, number] => row[0] !== null);
-
-    groupedDriverIds.forEach(([driverId, groupNumber]) => {
+    pickDriverEntries(pick).forEach(([driverId, groupNumber]) => {
       const key = keyForRaceDriver(pick.race_id, driverId);
       if (!pickedDriverGroupByRaceDriver.has(key)) {
         pickedDriverGroupByRaceDriver.set(key, groupNumber);
@@ -318,17 +318,11 @@ const scorePick = (
   groupCount: number,
   resultPointsByRaceDriver: Map<string, number>
 ): { averageSpeed: number; racePoints: number } => {
-  const driverIds = pickDriverIdsForGroupCount(pick, groupCount).filter(
-    (driverId): driverId is number => driverId !== null
-  );
-
-  const racePoints = driverIds.reduce((sum, driverId) => {
-    return sum + (resultPointsByRaceDriver.get(keyForRaceDriver(pick.race_id, driverId)) ?? 0);
-  }, 0);
-
   return {
     averageSpeed: asNumber(pick.average_speed),
-    racePoints
+    racePoints: scorePickSelection(pick, groupCount, (driverId) =>
+      resultPointsByRaceDriver.get(keyForRaceDriver(pick.race_id, driverId))
+    )
   };
 };
 
@@ -340,41 +334,19 @@ const computeRaceExtremes = (
   pickedDriverGroupByRaceDriver: Map<string, number>,
   currentDriverGroupById: Map<number, number>
 ): { highest: number; lowest: number } => {
-  const pointsByGroup = new Map<number, number[]>();
-  for (let group = 1; group <= groupCount; group += 1) {
-    pointsByGroup.set(group, []);
-  }
-
-  results.forEach((result) => {
-    const group = resolveRaceDriverGroup(
-      raceId,
-      result.driver_id,
-      raceDriverGroupByRaceDriver,
-      pickedDriverGroupByRaceDriver,
-      currentDriverGroupById
-    );
-    if (!group || group < 1 || group > groupCount) {
-      return;
-    }
-
-    const arr = pointsByGroup.get(group) ?? [];
-    arr.push(asNumber(result.points));
-    pointsByGroup.set(group, arr);
-  });
-
-  let highest = 0;
-  let lowest = 0;
-  for (let group = 1; group <= groupCount; group += 1) {
-    const arr = pointsByGroup.get(group) ?? [];
-    if (arr.length === 0) {
-      continue;
-    }
-
-    highest += Math.max(...arr);
-    lowest += Math.min(...arr);
-  }
-
-  return { highest, lowest };
+  return computeGroupScoreExtremes(
+    groupCount,
+    results,
+    (result) =>
+      resolveRaceDriverGroup(
+        raceId,
+        result.driver_id,
+        raceDriverGroupByRaceDriver,
+        pickedDriverGroupByRaceDriver,
+        currentDriverGroupById
+      ),
+    (result) => result.points
+  );
 };
 
 const computeLowestFallbackByRace = (
@@ -406,18 +378,8 @@ export async function buildLeagueScoringSnapshotUncached(
 ): Promise<LeagueScoringSnapshot> {
   const supabase = createServiceRoleSupabaseClient();
 
-  const [profiles, races, allPicks, allResults, drivers, allRaceDriverGroups] =
-    await Promise.all([
-      loadAllRows<ProfileRow>("profiles", (from, to) =>
-        supabase
-          .from("profiles")
-          .select("id,team_name,role,full_name,is_active")
-          .in("role", ["participant", "admin"])
-          .eq("is_active", true)
-          .order("team_name", { ascending: true })
-          .order("id", { ascending: true })
-          .range(from, to)
-      ),
+  const [profiles, races, drivers] = await Promise.all([
+      loadRegisteredProfiles(supabase, seasonId),
       loadAllRows<RaceRow>("published races", (from, to) =>
         supabase
           .from("races")
@@ -431,12 +393,27 @@ export async function buildLeagueScoringSnapshotUncached(
           .order("id", { ascending: true })
           .range(from, to)
       ),
+      loadAllRows<DriverRow>("drivers", (from, to) =>
+        supabase
+          .from("drivers")
+          .select("id,group_number")
+          .order("id", { ascending: true })
+          .range(from, to)
+      )
+    ]);
+
+  const publishedRaceIds = races.map((race) => race.id);
+  const [picks, results, raceDriverGroups]: [PickRow[], ResultRow[], RaceDriverGroupRow[]] =
+    publishedRaceIds.length === 0
+      ? [[], [], []]
+      : await Promise.all([
       loadAllRows<PickRow>("picks", (from, to) =>
         supabase
           .from("picks")
           .select(
             "user_id,race_id,average_speed,driver_group1_id,driver_group2_id,driver_group3_id,driver_group4_id,driver_group5_id,driver_group6_id,driver_group7_id,driver_group8_id"
           )
+          .in("race_id", publishedRaceIds)
           .order("race_id", { ascending: true })
           .order("user_id", { ascending: true })
           .range(from, to)
@@ -445,21 +422,16 @@ export async function buildLeagueScoringSnapshotUncached(
         supabase
           .from("results")
           .select("race_id,driver_id,points")
+          .in("race_id", publishedRaceIds)
           .order("race_id", { ascending: true })
           .order("driver_id", { ascending: true })
-          .range(from, to)
-      ),
-      loadAllRows<DriverRow>("drivers", (from, to) =>
-        supabase
-          .from("drivers")
-          .select("id,group_number")
-          .order("id", { ascending: true })
           .range(from, to)
       ),
       loadAllRows<RaceDriverGroupRow>("race driver groups", (from, to) =>
         supabase
           .from("race_driver_groups")
           .select("race_id,driver_id,group_number")
+          .in("race_id", publishedRaceIds)
           .order("race_id", { ascending: true })
           .order("driver_id", { ascending: true })
           .range(from, to)
@@ -473,13 +445,6 @@ export async function buildLeagueScoringSnapshotUncached(
       id: profile.id,
       teamName: profile.team_name.trim()
     }));
-
-  const publishedRaceIds = new Set(races.map((race) => race.id));
-  const picks = allPicks.filter((pick) => publishedRaceIds.has(pick.race_id));
-  const results = allResults.filter((result) => publishedRaceIds.has(result.race_id));
-  const raceDriverGroups = allRaceDriverGroups.filter((row) =>
-    publishedRaceIds.has(row.race_id)
-  );
 
   const resultPointsByRaceDriver = new Map<string, number>();
   const resultsByRace = new Map<number, ResultRow[]>();
@@ -628,16 +593,7 @@ export async function buildPicksByRaceSnapshot(
   const nowIso = new Date().toISOString();
 
   const [profiles, seasonRaceRows, drivers] = await Promise.all([
-    loadAllRows<ProfileRow>("profiles", (from, to) =>
-      supabase
-        .from("profiles")
-        .select("id,team_name,role,full_name,is_active")
-        .in("role", ["participant", "admin"])
-        .eq("is_active", true)
-        .order("team_name", { ascending: true })
-        .order("id", { ascending: true })
-        .range(from, to)
-    ),
+    loadRegisteredProfiles(supabase, seasonId),
     loadAllRows<RaceRow & { qualifying_start_at: string }>("locked season races", (from, to) =>
       supabase
         .from("races")
@@ -877,18 +833,8 @@ export async function buildParticipantAnalyticsSnapshotUncached(
 ): Promise<ParticipantAnalyticsSnapshot> {
   const supabase = createServiceRoleSupabaseClient();
 
-  const [profiles, races, allPicks, allResults, drivers, allRaceDriverGroups] =
-    await Promise.all([
-      loadAllRows<ProfileRow>("profiles", (from, to) =>
-        supabase
-          .from("profiles")
-          .select("id,team_name,role,full_name,is_active")
-          .in("role", ["participant", "admin"])
-          .eq("is_active", true)
-          .order("team_name", { ascending: true })
-          .order("id", { ascending: true })
-          .range(from, to)
-      ),
+  const [profiles, races, drivers] = await Promise.all([
+      loadRegisteredProfiles(supabase, seasonId),
       loadAllRows<RaceRow>("published races", (from, to) =>
         supabase
           .from("races")
@@ -902,12 +848,27 @@ export async function buildParticipantAnalyticsSnapshotUncached(
           .order("id", { ascending: true })
           .range(from, to)
       ),
+      loadAllRows<DriverRow>("drivers", (from, to) =>
+        supabase
+          .from("drivers")
+          .select("id,group_number")
+          .order("id", { ascending: true })
+          .range(from, to)
+      )
+    ]);
+
+  const publishedRaceIds = races.map((race) => race.id);
+  const [picks, results, raceDriverGroups]: [PickRow[], ResultRow[], RaceDriverGroupRow[]] =
+    publishedRaceIds.length === 0
+      ? [[], [], []]
+      : await Promise.all([
       loadAllRows<PickRow>("picks", (from, to) =>
         supabase
           .from("picks")
           .select(
             "user_id,race_id,average_speed,driver_group1_id,driver_group2_id,driver_group3_id,driver_group4_id,driver_group5_id,driver_group6_id,driver_group7_id,driver_group8_id"
           )
+          .in("race_id", publishedRaceIds)
           .order("race_id", { ascending: true })
           .order("user_id", { ascending: true })
           .range(from, to)
@@ -916,21 +877,16 @@ export async function buildParticipantAnalyticsSnapshotUncached(
         supabase
           .from("results")
           .select("race_id,driver_id,points")
+          .in("race_id", publishedRaceIds)
           .order("race_id", { ascending: true })
           .order("driver_id", { ascending: true })
-          .range(from, to)
-      ),
-      loadAllRows<DriverRow>("drivers", (from, to) =>
-        supabase
-          .from("drivers")
-          .select("id,group_number")
-          .order("id", { ascending: true })
           .range(from, to)
       ),
       loadAllRows<RaceDriverGroupRow>("race driver groups", (from, to) =>
         supabase
           .from("race_driver_groups")
           .select("race_id,driver_id,group_number")
+          .in("race_id", publishedRaceIds)
           .order("race_id", { ascending: true })
           .order("driver_id", { ascending: true })
           .range(from, to)
@@ -949,12 +905,6 @@ export async function buildParticipantAnalyticsSnapshotUncached(
     throw new Error("Participant profile not found for analytics.");
   }
 
-  const publishedRaceIds = new Set(races.map((race) => race.id));
-  const picks = allPicks.filter((pick) => publishedRaceIds.has(pick.race_id));
-  const results = allResults.filter((result) => publishedRaceIds.has(result.race_id));
-  const raceDriverGroups = allRaceDriverGroups.filter((row) =>
-    publishedRaceIds.has(row.race_id)
-  );
   const fieldSize = participants.length;
 
   const resultPointsByRaceDriver = new Map<string, number>();

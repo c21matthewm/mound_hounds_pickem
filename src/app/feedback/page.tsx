@@ -1,5 +1,4 @@
 import Link from "next/link";
-import { redirect } from "next/navigation";
 import { AuthenticatedPageShell } from "@/components/authenticated-page-shell";
 import { MobileBottomNav } from "@/components/mobile-bottom-nav";
 import { SignOutButton } from "@/components/sign-out-button";
@@ -10,9 +9,8 @@ import {
   feedbackCategoryLabel,
   feedbackTypeLabel
 } from "@/lib/feedback";
-import { isProfileComplete, type ProfileRow } from "@/lib/profile";
+import { requireAppUser } from "@/lib/authenticated-user";
 import { queryStringParam } from "@/lib/query";
-import { createServerSupabaseClient } from "@/lib/supabase/server";
 import { formatLeagueDateTime, LEAGUE_TIME_ZONE } from "@/lib/timezone";
 
 type FeedbackItemRow = {
@@ -43,24 +41,7 @@ export default async function FeedbackPage({ searchParams }: PageProps) {
   const message = queryStringParam(params.message);
   const error = queryStringParam(params.error);
 
-  const supabase = await createServerSupabaseClient();
-  const {
-    data: { user }
-  } = await supabase.auth.getUser();
-
-  if (!user) {
-    redirect("/login");
-  }
-
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("id,full_name,team_name,phone_number,phone_carrier,role")
-    .eq("id", user.id)
-    .maybeSingle<ProfileRow>();
-
-  if (!profile || !isProfileComplete(profile)) {
-    redirect("/onboarding");
-  }
+  const { supabase, user } = await requireAppUser({ requireSeasonDecision: true });
 
   const { data: myFeedbackRows } = await supabase
     .from("feedback_items")
@@ -154,6 +135,8 @@ export default async function FeedbackPage({ searchParams }: PageProps) {
             </span>
             <textarea
               className="h-40 w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm"
+              maxLength={4000}
+              minLength={20}
               name="details"
               placeholder="Please include exact steps, what you expected to happen, what happened instead, and any relevant values."
               required

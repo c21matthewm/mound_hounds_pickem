@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import {
   buildOrderedWeeklyRows,
   calculateOfficialSpeedDelta,
@@ -71,6 +71,8 @@ export function PicksByRaceTable({ officialWinningAverageSpeed, resultsPosted, r
     defaultSortDirection(resultsPosted ? "rank" : "teamName")
   );
   const [selectedRow, setSelectedRow] = useState<PicksByRaceTableRow | null>(null);
+  const dialogRef = useRef<HTMLElement | null>(null);
+  const lastDialogTriggerRef = useRef<HTMLButtonElement | null>(null);
 
   const onSort = (key: SortKey) => {
     if (sortKey === key) {
@@ -81,6 +83,51 @@ export function PicksByRaceTable({ officialWinningAverageSpeed, resultsPosted, r
     setSortKey(key);
     setSortDirection(defaultSortDirection(key));
   };
+
+  const ariaSortFor = (key: SortKey): "ascending" | "descending" | "none" =>
+    sortKey === key ? (sortDirection === "asc" ? "ascending" : "descending") : "none";
+
+  useEffect(() => {
+    if (!selectedRow || !dialogRef.current) {
+      return;
+    }
+
+    const dialog = dialogRef.current;
+    const focusable = Array.from(
+      dialog.querySelectorAll<HTMLElement>(
+        'button:not([disabled]), a[href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+      )
+    );
+    focusable[0]?.focus();
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        setSelectedRow(null);
+        return;
+      }
+
+      if (event.key !== "Tab" || focusable.length === 0) {
+        return;
+      }
+
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("keydown", onKeyDown);
+      lastDialogTriggerRef.current?.focus();
+    };
+  }, [selectedRow]);
 
   const sortedRows = useMemo(() => {
     return [...rows].sort((a, b) => {
@@ -178,7 +225,10 @@ export function PicksByRaceTable({ officialWinningAverageSpeed, resultsPosted, r
                 <div className="flex items-start justify-between gap-3">
                   <button
                     className="min-w-0 text-left"
-                    onClick={() => setSelectedRow(row)}
+                    onClick={(event) => {
+                      lastDialogTriggerRef.current = event.currentTarget;
+                      setSelectedRow(row);
+                    }}
                     type="button"
                   >
                     <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
@@ -223,14 +273,15 @@ export function PicksByRaceTable({ officialWinningAverageSpeed, resultsPosted, r
 
         <div className="hidden overflow-x-auto md:block">
         <table className="min-w-full text-left text-sm">
+          <caption className="sr-only">Participant picks and scores by driver group</caption>
           <thead className="bg-slate-50 text-slate-700">
             <tr>
-              <th className="px-3 py-2 font-semibold">
+              <th aria-sort={ariaSortFor("rank")} className="px-3 py-2 font-semibold">
                 <button className="inline-flex items-center gap-1" onClick={() => onSort("rank")} type="button">
                   Rank {sortIndicator("rank", sortKey, sortDirection)}
                 </button>
               </th>
-              <th className="px-3 py-2 font-semibold">
+              <th aria-sort={ariaSortFor("teamName")} className="px-3 py-2 font-semibold">
                 <button
                   className="inline-flex items-center gap-1"
                   onClick={() => onSort("teamName")}
@@ -239,7 +290,7 @@ export function PicksByRaceTable({ officialWinningAverageSpeed, resultsPosted, r
                   Participant / Team {sortIndicator("teamName", sortKey, sortDirection)}
                 </button>
               </th>
-              <th className="px-3 py-2 font-semibold">
+              <th aria-sort={ariaSortFor("totalPoints")} className="px-3 py-2 font-semibold">
                 <button
                   className="inline-flex items-center gap-1"
                   data-testid="picks-sort-total-score"
@@ -249,7 +300,7 @@ export function PicksByRaceTable({ officialWinningAverageSpeed, resultsPosted, r
                   Total Score {sortIndicator("totalPoints", sortKey, sortDirection)}
                 </button>
               </th>
-              <th className="px-3 py-2 font-semibold">
+              <th aria-sort={ariaSortFor("averageSpeed")} className="px-3 py-2 font-semibold">
                 <button
                   className="inline-flex items-center gap-1"
                   onClick={() => onSort("averageSpeed")}
@@ -260,7 +311,7 @@ export function PicksByRaceTable({ officialWinningAverageSpeed, resultsPosted, r
               </th>
               {groupNumbers.map((groupNumber) => (
                 <Fragment key={`group-columns-${groupNumber}`}>
-                  <th className="px-3 py-2 font-semibold">
+                  <th aria-sort={ariaSortFor(`driver${groupNumber}` as SortKey)} className="px-3 py-2 font-semibold">
                     <button
                       className="inline-flex items-center gap-1"
                       onClick={() => onSort(`driver${groupNumber}` as SortKey)}
@@ -270,7 +321,7 @@ export function PicksByRaceTable({ officialWinningAverageSpeed, resultsPosted, r
                       {sortIndicator(`driver${groupNumber}` as SortKey, sortKey, sortDirection)}
                     </button>
                   </th>
-                  <th className="px-3 py-2 font-semibold">
+                  <th aria-sort={ariaSortFor(`score${groupNumber}` as SortKey)} className="px-3 py-2 font-semibold">
                     <button
                       className="inline-flex items-center gap-1"
                       onClick={() => onSort(`score${groupNumber}` as SortKey)}
@@ -300,7 +351,10 @@ export function PicksByRaceTable({ officialWinningAverageSpeed, resultsPosted, r
                   <td className="px-3 py-2">
                     <button
                       className="font-semibold text-slate-900 underline decoration-slate-300 underline-offset-2 hover:text-slate-700"
-                      onClick={() => setSelectedRow(row)}
+                      onClick={(event) => {
+                        lastDialogTriggerRef.current = event.currentTarget;
+                        setSelectedRow(row);
+                      }}
                       type="button"
                     >
                       {row.displayName}
@@ -346,13 +400,16 @@ export function PicksByRaceTable({ officialWinningAverageSpeed, resultsPosted, r
           role="presentation"
         >
           <section
+            aria-labelledby="picks-detail-title"
+            aria-modal="true"
             className="max-h-[90vh] w-full max-w-3xl overflow-y-auto rounded-lg border border-slate-200 bg-white p-5"
             onClick={(event) => event.stopPropagation()}
+            ref={dialogRef}
             role="dialog"
           >
             <div className="flex items-start justify-between gap-3">
               <div>
-                <h3 className="text-lg font-semibold text-slate-900">{selectedRow.displayName}</h3>
+                <h3 className="text-lg font-semibold text-slate-900" id="picks-detail-title">{selectedRow.displayName}</h3>
                 <p className="mt-1 text-sm text-slate-600">Picks breakdown and tiebreak context</p>
               </div>
               <button
@@ -418,6 +475,7 @@ export function PicksByRaceTable({ officialWinningAverageSpeed, resultsPosted, r
                   </p>
                   <div className="mt-2 overflow-x-auto rounded-md border border-slate-200 bg-white">
                     <table className="min-w-full text-left text-sm">
+                      <caption className="sr-only">First-place average-speed tiebreak comparison</caption>
                       <thead className="bg-slate-50 text-slate-700">
                         <tr>
                           <th className="px-3 py-2 font-semibold">Tiebreak Rank</th>
@@ -457,6 +515,7 @@ export function PicksByRaceTable({ officialWinningAverageSpeed, resultsPosted, r
               <h4 className="text-sm font-semibold text-slate-900">Per-Driver Scoring</h4>
               <div className="mt-2 overflow-x-auto rounded-md border border-slate-200">
                 <table className="min-w-full text-left text-sm">
+                  <caption className="sr-only">Selected team driver picks and points</caption>
                   <thead className="bg-slate-50 text-slate-700">
                     <tr>
                       <th className="px-3 py-2 font-semibold">Group</th>

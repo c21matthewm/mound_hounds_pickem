@@ -2,16 +2,14 @@
 
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
+import { requireAppUser } from "@/lib/authenticated-user";
 import { getPreviousRaceResultsGate } from "@/lib/pickem-results-gate";
-import { isProfileActive, isProfileComplete, type ProfileRow } from "@/lib/profile";
 import {
   groupNumbersForCount,
   normalizeRacePickFormat,
   pickGroupCountForFormat,
   pickLockAtForRace
 } from "@/lib/race-format";
-import { isMissingColumnError } from "@/lib/supabase/schema-compat";
-import { createServerSupabaseClient } from "@/lib/supabase/server";
 
 const asText = (value: FormDataEntryValue | null): string =>
   typeof value === "string" ? value.trim() : "";
@@ -40,28 +38,10 @@ const picksErrorRedirect = (message: string): never => {
 };
 
 export async function saveWeeklyPickAction(formData: FormData) {
-  const supabase = await createServerSupabaseClient();
-  const {
-    data: { user }
-  } = await supabase.auth.getUser();
-
-  if (!user) {
-    redirect("/login");
-  }
-
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("id,full_name,team_name,phone_number,phone_carrier,role,is_active")
-    .eq("id", user.id)
-    .maybeSingle<ProfileRow>();
-
-  if (!profile || !isProfileComplete(profile)) {
-    redirect("/onboarding");
-  }
-
-  if (!isProfileActive(profile)) {
-    picksErrorRedirect("Your participant profile is inactive for the current season.");
-  }
+  const { supabase, user } = await requireAppUser({
+    requireRegistration: true,
+    requireSeasonDecision: true
+  });
 
   const raceId = parsePositiveInt(asText(formData.get("race_id")));
   const averageSpeed = parsePositiveDecimal(asText(formData.get("average_speed")));
@@ -133,7 +113,7 @@ export async function saveWeeklyPickAction(formData: FormData) {
     );
   }
 
-  let { error: upsertError } = await supabase.from("picks").upsert(
+  const { error: upsertError } = await supabase.from("picks").upsert(
     {
       average_speed: averageSpeed,
       driver_group1_id: selectedDriverIds[0],
@@ -149,30 +129,6 @@ export async function saveWeeklyPickAction(formData: FormData) {
     },
     { onConflict: "user_id,race_id" }
   );
-
-  if (
-    upsertError &&
-    pickFormat === "standard" &&
-    (isMissingColumnError(upsertError, "driver_group7_id") ||
-      isMissingColumnError(upsertError, "driver_group8_id"))
-  ) {
-    const legacyUpsertResponse = await supabase.from("picks").upsert(
-      {
-        average_speed: averageSpeed,
-        driver_group1_id: selectedDriverIds[0],
-        driver_group2_id: selectedDriverIds[1],
-        driver_group3_id: selectedDriverIds[2],
-        driver_group4_id: selectedDriverIds[3],
-        driver_group5_id: selectedDriverIds[4],
-        driver_group6_id: selectedDriverIds[5],
-        race_id: raceIdValue,
-        user_id: user.id
-      },
-      { onConflict: "user_id,race_id" }
-    );
-
-    upsertError = legacyUpsertResponse.error;
-  }
 
   if (upsertError) {
     picksErrorRedirect(upsertError.message);

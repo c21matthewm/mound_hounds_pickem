@@ -3,8 +3,13 @@
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { sanitizeNextPath } from "@/lib/query";
+import { loadActiveLeagueSeason } from "@/lib/seasons";
 import { invalidateScoringCache } from "@/lib/scoring-cache";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
+import { createServiceRoleSupabaseClient } from "@/lib/supabase/service-role";
+
+const MAX_NAME_LENGTH = 100;
+const MIN_PASSWORD_LENGTH = 10;
 
 const errorRedirect = (path: string, message: string): never => {
   const params = new URLSearchParams({ error: message });
@@ -79,12 +84,21 @@ export async function signUpAction(formData: FormData) {
     errorRedirect("/signup", "All fields are required.");
   }
 
-  if (password.length < 6) {
-    errorRedirect("/signup", "Password must be at least 6 characters.");
+  if (fullName.length > MAX_NAME_LENGTH || teamName.length > MAX_NAME_LENGTH) {
+    errorRedirect("/signup", "Names must be 100 characters or fewer.");
+  }
+
+  if (password.length < MIN_PASSWORD_LENGTH) {
+    errorRedirect("/signup", `Password must be at least ${MIN_PASSWORD_LENGTH} characters.`);
   }
 
   if (password !== confirmPassword) {
     errorRedirect("/signup", "Password confirmation does not match.");
+  }
+
+  const registrationSeason = await loadActiveLeagueSeason(createServiceRoleSupabaseClient());
+  if (!registrationSeason) {
+    errorRedirect("/signup", "Registration is not open because no league season is active.");
   }
 
   const supabase = await createServerSupabaseClient();
@@ -106,8 +120,6 @@ export async function signUpAction(formData: FormData) {
     console.error("[auth] signUp failed:", error.message);
     errorRedirect("/signup", friendlyAuthError(error.message));
   }
-
-  invalidateScoringCache();
 
   if (data.session) {
     messageRedirect("/onboarding", "Account created. Complete your profile to continue.");
@@ -149,8 +161,11 @@ export async function updatePasswordAction(formData: FormData) {
     errorRedirect("/reset-password", "Password and confirmation are required.");
   }
 
-  if (password.length < 6) {
-    errorRedirect("/reset-password", "Password must be at least 6 characters.");
+  if (password.length < MIN_PASSWORD_LENGTH) {
+    errorRedirect(
+      "/reset-password",
+      `Password must be at least ${MIN_PASSWORD_LENGTH} characters.`
+    );
   }
 
   if (password !== confirmPassword) {
@@ -191,11 +206,15 @@ export async function saveProfileAction(formData: FormData) {
   const phoneCarrier = asText(formData.get("phone_carrier"));
   const digitsOnly = phoneNumber.replace(/\D/g, "");
 
-  if (!fullName || !teamName || !phoneNumber || !phoneCarrier) {
-    errorRedirect("/onboarding", "All onboarding fields are required.");
+  if (!fullName || !teamName) {
+    errorRedirect("/onboarding", "Your name and team name are required.");
   }
 
-  if (digitsOnly.length < 10) {
+  if (fullName.length > MAX_NAME_LENGTH || teamName.length > MAX_NAME_LENGTH) {
+    errorRedirect("/onboarding", "Names must be 100 characters or fewer.");
+  }
+
+  if (phoneNumber && digitsOnly.length < 10) {
     errorRedirect("/onboarding", "Phone number must include at least 10 digits.");
   }
 
@@ -214,8 +233,8 @@ export async function saveProfileAction(formData: FormData) {
     {
       full_name: fullName,
       id: userId,
-      phone_carrier: phoneCarrier,
-      phone_number: phoneNumber,
+      phone_carrier: phoneCarrier || null,
+      phone_number: phoneNumber || null,
       team_name: teamName
     },
     { onConflict: "id" }
@@ -229,6 +248,47 @@ export async function saveProfileAction(formData: FormData) {
     errorRedirect("/onboarding", error.message);
   }
 
+  const { error: registrationError } = await supabase.rpc("set_active_season_participation", {
+    p_register: true
+  });
+
+  if (registrationError) {
+    errorRedirect("/season-registration", registrationError.message);
+  }
+
   invalidateScoringCache();
-  messageRedirect("/dashboard", "Profile saved.");
+  messageRedirect("/dashboard", "Profile saved and season registration confirmed.");
+}
+
+export async function setSeasonParticipationAction(formData: FormData) {
+  const decision = asText(formData.get("decision"));
+  const next = sanitizeNextPath(asText(formData.get("next")) || "/dashboard");
+
+  if (decision !== "register" && decision !== "decline") {
+    errorRedirect("/season-registration", "Choose whether you are joining this season.");
+  }
+
+  const supabase = await createServerSupabaseClient();
+  const {
+    data: { user }
+  } = await supabase.auth.getUser();
+
+  if (!user) {
+    errorRedirect("/login", "Your session expired. Please sign in again.");
+  }
+
+  const { error } = await supabase.rpc("set_active_season_participation", {
+    p_register: decision === "register"
+  });
+
+  if (error) {
+    errorRedirect("/season-registration", error.message);
+  }
+
+  invalidateScoringCache();
+  const message =
+    decision === "register"
+      ? "Season registration confirmed."
+      : "You will not appear in this season's field. You can change this decision before making picks.";
+  messageRedirect(next, message);
 }

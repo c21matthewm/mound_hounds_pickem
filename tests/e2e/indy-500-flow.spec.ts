@@ -1,7 +1,11 @@
 import { randomUUID } from "node:crypto";
 import { expect, test, type Page } from "@playwright/test";
 import { trackClientIssues } from "./helpers/monitoring";
-import { cleanupPlaywrightArtifacts, supabase } from "./helpers/supabase";
+import {
+  cleanupPlaywrightArtifacts,
+  registerProfileForActiveSeason,
+  supabase
+} from "./helpers/supabase";
 
 const LEAGUE_TIME_ZONE = "America/Indiana/Indianapolis";
 const TEST_PASSWORD = "Pw-Indy-Flow-2026!";
@@ -104,6 +108,8 @@ const createSeedUser = async (label: string, role: Role): Promise<SeedUser> => {
     throw new Error(`Failed upserting ${label} profile: ${profileError.message}`);
   }
 
+  await registerProfileForActiveSeason(userData.user.id);
+
   return {
     email,
     id: userData.user.id,
@@ -116,7 +122,7 @@ const signIn = async (page: Page, email: string) => {
   await page.locator('input[name="email"]').fill(email);
   await page.locator('input[name="password"]').fill(TEST_PASSWORD);
   await page.getByRole("button", { name: "Sign in" }).click();
-  await expect(page).toHaveURL(/\/dashboard|\/admin|\/onboarding/);
+  await expect(page).toHaveURL(/\/dashboard|\/admin|\/onboarding|\/season-registration/);
   await expect(page).not.toHaveURL(/\/login\?error=/);
 };
 

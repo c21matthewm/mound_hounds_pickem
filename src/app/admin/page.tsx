@@ -22,17 +22,26 @@ import {
 } from "@/app/admin/actions";
 import { AuthenticatedPageShell } from "@/components/authenticated-page-shell";
 import { AdminResultsImportForm } from "@/components/admin-results-import-form";
+import {
+  AdminSystemHealth,
+  type AdminReminderHealthRow
+} from "@/components/admin-system-health";
 import { ConfirmSubmitButton } from "@/components/confirm-submit-button";
 import { SignOutButton } from "@/components/sign-out-button";
 import { requireAdmin } from "@/lib/admin";
 import { feedbackCategoryLabel, feedbackTypeLabel } from "@/lib/feedback";
+import { getPreviousRaceResultsGate } from "@/lib/pickem-results-gate";
 import { queryStringParam } from "@/lib/query";
+import {
+  computeGroupScoreExtremes,
+  pickDriverEntries,
+  scorePickSelection
+} from "@/lib/scoring-engine";
 import {
   normalizeRacePickFormat,
   pickGroupCountForFormat,
   type RacePickFormat
 } from "@/lib/race-format";
-import { isMissingColumnError } from "@/lib/supabase/schema-compat";
 import { loadAllRows } from "@/lib/supabase/paginated-query";
 import {
   formatLeagueDateTime,
@@ -81,6 +90,11 @@ type WinnerProfileRow = {
   team_name: string;
 };
 
+type SeasonParticipantRow = {
+  profile_id: string;
+  status: "declined" | "registered";
+};
+
 type LeagueSeasonRow = {
   activated_at: string | null;
   completed_at: string | null;
@@ -127,11 +141,22 @@ type FeedbackItemRow = {
   user_id: string;
 };
 
+type HealthRaceRow = {
+  id: number;
+  pick_format: RacePickFormat;
+  qualifying_start_at: string;
+  race_date: string;
+  race_name: string;
+  results_status: "draft" | "published";
+  round_number: number;
+  season_id: number;
+};
+
 type PageProps = {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 };
 
-type AdminTab = "drivers" | "participants" | "races" | "results" | "feedback";
+type AdminTab = "drivers" | "participants" | "races" | "results" | "feedback" | "health";
 
 type ScoringAuditDriverCell = {
   driverName: string | null;
@@ -178,7 +203,8 @@ const parseAdminTab = (value: string | undefined): AdminTab => {
     value === "participants" ||
     value === "races" ||
     value === "results" ||
-    value === "feedback"
+    value === "feedback" ||
+    value === "health"
   ) {
     return value;
   }
@@ -207,26 +233,7 @@ const formatOptionalDecimal = (value: number | null, digits = 3): string =>
 const loadAdminRaces = async (supabase: SupabaseClient) => {
   const fields =
     "id,race_name,pick_format,title_image_url,qualifying_start_at,race_date,payout,official_winning_average_speed,results_status,results_published_at,is_archived,archived_at,winner_profile_id,winner_source,winner_is_manual_override,winner_auto_eligible_at,winner_set_at,season_id,round_number";
-  const legacyFields =
-    "id,race_name,title_image_url,qualifying_start_at,race_date,payout,official_winning_average_speed,results_status,results_published_at,is_archived,archived_at,winner_profile_id,winner_source,winner_is_manual_override,winner_auto_eligible_at,winner_set_at";
-
-  const response = await supabase.from("races").select(fields).order("race_date", { ascending: false });
-  if (!response.error || !isMissingColumnError(response.error, "pick_format")) {
-    return response;
-  }
-
-  const legacyResponse = await supabase
-    .from("races")
-    .select(legacyFields)
-    .order("race_date", { ascending: false });
-
-  return {
-    ...legacyResponse,
-    data: (legacyResponse.data ?? []).map((race) => ({
-      ...race,
-      pick_format: "standard" as const
-    }))
-  };
+  return supabase.from("races").select(fields).order("race_date", { ascending: false });
 };
 
 const paginatedAdminLoad = async <T,>(
@@ -243,23 +250,25 @@ const paginatedAdminLoad = async <T,>(
   }
 };
 
-const loadRaceDriverGroups = async (supabase: SupabaseClient) =>
+const loadRaceDriverGroups = async (supabase: SupabaseClient, raceIds: number[]) =>
   paginatedAdminLoad<RaceDriverGroupRow>("race driver groups", (from, to) =>
     supabase
       .from("race_driver_groups")
       .select("race_id,driver_id,group_number,qualifying_position")
+      .in("race_id", raceIds)
       .order("race_id", { ascending: true })
       .order("driver_id", { ascending: true })
       .range(from, to)
   );
 
-const loadAdminPicks = async (supabase: SupabaseClient) =>
+const loadAdminPicks = async (supabase: SupabaseClient, raceIds: number[]) =>
   paginatedAdminLoad<PickSummaryRow>("admin picks", (from, to) =>
     supabase
       .from("picks")
       .select(
         "user_id,race_id,average_speed,driver_group1_id,driver_group2_id,driver_group3_id,driver_group4_id,driver_group5_id,driver_group6_id,driver_group7_id,driver_group8_id"
       )
+      .in("race_id", raceIds)
       .order("race_id", { ascending: true })
       .order("user_id", { ascending: true })
       .range(from, to)
@@ -271,34 +280,18 @@ const keyForRaceUser = (raceId: number, userId: string): string => `${raceId}:${
 const pickDriverIdsForGroupCount = (
   pick: PickSummaryRow | null,
   groupCount: number
-): Array<number | null> =>
-  [
-    pick?.driver_group1_id ?? null,
-    pick?.driver_group2_id ?? null,
-    pick?.driver_group3_id ?? null,
-    pick?.driver_group4_id ?? null,
-    pick?.driver_group5_id ?? null,
-    pick?.driver_group6_id ?? null,
-    pick?.driver_group7_id ?? null,
-    pick?.driver_group8_id ?? null
-  ].slice(0, groupCount);
+): Array<number | null> => {
+  const byGroup = new Map(
+    (pick ? pickDriverEntries(pick) : []).map(([driverId, groupNumber]) => [groupNumber, driverId])
+  );
+  return Array.from({ length: groupCount }, (_, index) => byGroup.get(index + 1) ?? null);
+};
 
 const buildPickedDriverGroupByRaceDriver = (picks: PickSummaryRow[]): Map<string, number> => {
   const pickedDriverGroupByRaceDriver = new Map<string, number>();
 
   picks.forEach((pick) => {
-    const groupedDriverIds: Array<[number, number]> = [
-      [pick.driver_group1_id, 1],
-      [pick.driver_group2_id, 2],
-      [pick.driver_group3_id, 3],
-      [pick.driver_group4_id, 4],
-      [pick.driver_group5_id, 5],
-      [pick.driver_group6_id, 6],
-      [pick.driver_group7_id, 7],
-      [pick.driver_group8_id, 8]
-    ].filter((row): row is [number, number] => row[0] !== null);
-
-    groupedDriverIds.forEach(([driverId, groupNumber]) => {
+    pickDriverEntries(pick).forEach(([driverId, groupNumber]) => {
       const key = keyForRaceDriver(pick.race_id, driverId);
       if (!pickedDriverGroupByRaceDriver.has(key)) {
         pickedDriverGroupByRaceDriver.set(key, groupNumber);
@@ -335,41 +328,19 @@ const computeRaceExtremes = ({
   raceId: number;
   results: ResultRow[];
 }): { highest: number; lowest: number } => {
-  const pointsByGroup = new Map<number, number[]>();
-  for (let groupNumber = 1; groupNumber <= groupCount; groupNumber += 1) {
-    pointsByGroup.set(groupNumber, []);
-  }
-
-  results.forEach((result) => {
-    const groupNumber = resolveRaceDriverGroup(
-      raceId,
-      result.driver_id,
-      raceDriverGroupByRaceDriver,
-      pickedDriverGroupByRaceDriver,
-      currentDriverGroupById
-    );
-    if (!groupNumber || groupNumber < 1 || groupNumber > groupCount) {
-      return;
-    }
-
-    const groupPoints = pointsByGroup.get(groupNumber) ?? [];
-    groupPoints.push(asNumber(result.points));
-    pointsByGroup.set(groupNumber, groupPoints);
-  });
-
-  let highest = 0;
-  let lowest = 0;
-  for (let groupNumber = 1; groupNumber <= groupCount; groupNumber += 1) {
-    const groupPoints = pointsByGroup.get(groupNumber) ?? [];
-    if (groupPoints.length === 0) {
-      continue;
-    }
-
-    highest += Math.max(...groupPoints);
-    lowest += Math.min(...groupPoints);
-  }
-
-  return { highest, lowest };
+  return computeGroupScoreExtremes(
+    groupCount,
+    results,
+    (result) =>
+      resolveRaceDriverGroup(
+        raceId,
+        result.driver_id,
+        raceDriverGroupByRaceDriver,
+        pickedDriverGroupByRaceDriver,
+        currentDriverGroupById
+      ),
+    (result) => result.points
+  );
 };
 
 const buildScoringAudits = ({
@@ -440,7 +411,9 @@ const buildScoringAudits = ({
                 : (resultPointsByRaceDriver.get(keyForRaceDriver(race.id, driverId)) ?? 0)
           }));
           const points = pick
-            ? driverCells.reduce((sum, cell) => sum + (cell.points ?? 0), 0)
+            ? scorePickSelection(pick, groupCount, (driverId) =>
+                resultPointsByRaceDriver.get(keyForRaceDriver(race.id, driverId))
+              )
             : extremes.lowest;
 
           return {
@@ -494,69 +467,96 @@ export default async function AdminPage({ searchParams }: PageProps) {
 
   const { profile, supabase } = await requireAdmin();
 
+  const seasonsResponse = await supabase
+    .from("league_seasons")
+    .select("id,season_year,display_name,status,activated_at,completed_at")
+    .order("season_year", { ascending: false });
+  const loadedSeasons = (seasonsResponse.data ?? []) as LeagueSeasonRow[];
+  const loadedActiveSeason = loadedSeasons.find((season) => season.status === "active") ?? null;
+  const emptyResponse = { data: [], error: null };
+
   const [
     driversResponse,
     racesResponse,
-    resultsResponse,
     profilesResponse,
-    seasonsResponse,
     feedbackResponse,
-    picksResponse,
-    raceDriverGroupsResponse
+    seasonParticipantsResponse
   ] = await Promise.all([
-    supabase
+    activeTab === "drivers" || activeTab === "results" ? supabase
       .from("drivers")
       .select("id,driver_name,image_url,current_standing,group_number,is_active,championship_points")
-      .order("current_standing", { ascending: true }),
-    loadAdminRaces(supabase),
-    paginatedAdminLoad<ResultRow>("admin race results", (from, to) =>
-      supabase
-        .from("results")
-        .select("id,race_id,driver_id,points")
-        .order("race_id", { ascending: false })
-        .order("points", { ascending: false })
-        .order("id", { ascending: true })
-        .range(from, to)
-    ),
-    supabase
+      .order("current_standing", { ascending: true }) : emptyResponse,
+    activeTab === "races" || activeTab === "results" ? loadAdminRaces(supabase) : emptyResponse,
+    activeTab === "participants" || activeTab === "races" || activeTab === "results" || activeTab === "feedback" ? supabase
       .from("profiles")
       .select("id,full_name,team_name,role,is_active")
       .in("role", ["participant", "admin"])
-      .order("team_name", { ascending: true }),
-    supabase
-      .from("league_seasons")
-      .select("id,season_year,display_name,status,activated_at,completed_at")
-      .order("season_year", { ascending: false }),
-    paginatedAdminLoad<FeedbackItemRow>("participant feedback", (from, to) =>
+      .order("team_name", { ascending: true }) : emptyResponse,
+    activeTab === "feedback" ? paginatedAdminLoad<FeedbackItemRow>("participant feedback", (from, to) =>
       supabase
         .from("feedback_items")
         .select("id,user_id,feedback_type,category,details,created_at")
         .order("created_at", { ascending: false })
         .order("id", { ascending: false })
         .range(from, to)
-    ),
-    loadAdminPicks(supabase),
-    loadRaceDriverGroups(supabase)
+    ) : emptyResponse,
+    loadedActiveSeason && (activeTab === "participants" || activeTab === "races" || activeTab === "results" || activeTab === "health")
+      ? supabase
+          .from("season_participants")
+          .select("profile_id,status")
+          .eq("season_id", loadedActiveSeason.id)
+      : emptyResponse
   ]);
+
+  const loadedRaces = (racesResponse.data ?? []) as RaceRow[];
+  const resultRaceIds = loadedRaces
+    .filter((race) => race.season_id === loadedActiveSeason?.id && !race.is_archived)
+    .map((race) => race.id);
+  const [resultsResponse, picksResponse, raceDriverGroupsResponse] =
+    activeTab === "results" && resultRaceIds.length > 0
+      ? await Promise.all([
+          paginatedAdminLoad<ResultRow>("active-season race results", (from, to) =>
+            supabase
+              .from("results")
+              .select("id,race_id,driver_id,points")
+              .in("race_id", resultRaceIds)
+              .order("race_id", { ascending: false })
+              .order("points", { ascending: false })
+              .order("id", { ascending: true })
+              .range(from, to)
+          ),
+          loadAdminPicks(supabase, resultRaceIds),
+          loadRaceDriverGroups(supabase, resultRaceIds)
+        ])
+      : [emptyResponse, emptyResponse, emptyResponse];
 
   const loadError =
     driversResponse.error?.message ??
     racesResponse.error?.message ??
     resultsResponse.error?.message ??
     profilesResponse.error?.message ??
-    seasonsResponse.error?.message ??
     feedbackResponse.error?.message ??
     picksResponse.error?.message ??
-    raceDriverGroupsResponse.error?.message;
+    raceDriverGroupsResponse.error?.message ??
+    seasonParticipantsResponse.error?.message ??
+    seasonsResponse.error?.message;
 
   const drivers: DriverRow[] = (driversResponse.data ?? []) as DriverRow[];
-  const races: RaceRow[] = (racesResponse.data ?? []) as RaceRow[];
+  const races = loadedRaces;
   const activeRaces = races.filter((race) => !race.is_archived);
   const results: ResultRow[] = (resultsResponse.data ?? []) as ResultRow[];
   const winnerProfiles: WinnerProfileRow[] = (profilesResponse.data ?? []) as WinnerProfileRow[];
-  const activeParticipants = winnerProfiles.filter((participant) => participant.is_active);
-  const seasons: LeagueSeasonRow[] = (seasonsResponse.data ?? []) as LeagueSeasonRow[];
-  const activeSeason = seasons.find((season) => season.status === "active") ?? null;
+  const seasonParticipants = (seasonParticipantsResponse.data ?? []) as SeasonParticipantRow[];
+  const registeredProfileIds = new Set(
+    seasonParticipants
+      .filter((participant) => participant.status === "registered")
+      .map((participant) => participant.profile_id)
+  );
+  const activeParticipants = winnerProfiles.filter((participant) =>
+    participant.is_active && registeredProfileIds.has(participant.id)
+  );
+  const seasons = loadedSeasons;
+  const activeSeason = loadedActiveSeason;
   const feedbackItems: FeedbackItemRow[] = (feedbackResponse.data ?? []) as FeedbackItemRow[];
   const pickRows: PickSummaryRow[] = (picksResponse.data ?? []) as PickSummaryRow[];
   const raceDriverGroups: RaceDriverGroupRow[] = (
@@ -613,6 +613,62 @@ export default async function AdminPage({ searchParams }: PageProps) {
     const bRaceDate = raceById.get(b.race_id)?.race_date ?? "1970-01-01T00:00:00.000Z";
     return new Date(bRaceDate).getTime() - new Date(aRaceDate).getTime() || b.points - a.points;
   });
+
+  let healthNextRace: HealthRaceRow | null = null;
+  let healthPickCount = 0;
+  let healthPreviousResultsStatus = "No upcoming race is scheduled.";
+  let healthSchemaVersion: string | null = null;
+  let healthReminderRows: AdminReminderHealthRow[] = [];
+
+  if (activeTab === "health") {
+    const [metadataResponse, reminderResponse, nextRaceResponse] = await Promise.all([
+      supabase.from("app_metadata").select("value").eq("key", "schema_version").maybeSingle(),
+      supabase
+        .from("pick_reminders")
+        .select("delivery_status,reminder_type,attempt_count,last_error,updated_at")
+        .order("updated_at", { ascending: false })
+        .limit(10),
+      activeSeason
+        ? supabase
+            .from("races")
+            .select(
+              "id,race_name,pick_format,qualifying_start_at,race_date,results_status,season_id,round_number"
+            )
+            .eq("season_id", activeSeason.id)
+            .eq("is_archived", false)
+            .gt("race_date", new Date().toISOString())
+            .order("round_number", { ascending: true })
+            .limit(1)
+            .maybeSingle<HealthRaceRow>()
+        : Promise.resolve({ data: null, error: null })
+    ]);
+
+    if (metadataResponse.error || reminderResponse.error || nextRaceResponse.error) {
+      throw new Error(
+        metadataResponse.error?.message ??
+          reminderResponse.error?.message ??
+          nextRaceResponse.error?.message ??
+          "Failed loading system health."
+      );
+    }
+
+    healthSchemaVersion = metadataResponse.data?.value ?? null;
+    healthReminderRows = (reminderResponse.data ?? []) as AdminReminderHealthRow[];
+    healthNextRace = nextRaceResponse.data ?? null;
+
+    if (healthNextRace) {
+      const [{ count }, gate] = await Promise.all([
+        supabase
+          .from("picks")
+          .select("id", { count: "exact", head: true })
+          .eq("race_id", healthNextRace.id),
+        getPreviousRaceResultsGate(supabase, healthNextRace)
+      ]);
+      healthPickCount = count ?? 0;
+      healthPreviousResultsStatus =
+        gate.status === "ready" ? "Ready: previous results are published." : gate.shortMessage;
+    }
+  }
 
   const tabLinkClass = (tab: AdminTab): string =>
     `rounded-md px-3 py-2 text-sm font-medium ${
@@ -682,7 +738,27 @@ export default async function AdminPage({ searchParams }: PageProps) {
         <Link className={tabLinkClass("feedback")} data-testid="admin-tab-feedback" href="/admin?tab=feedback">
           Feedback
         </Link>
+        <Link className={tabLinkClass("health")} href="/admin?tab=health">
+          System Health
+        </Link>
       </nav>
+
+      {activeTab === "health" ? (
+        <AdminSystemHealth
+          activeSeasonName={activeSeason?.display_name ?? null}
+          emailEnabled={process.env.PICK_EMAILS_ENABLED?.toLowerCase() === "true"}
+          nextRace={healthNextRace ? {
+            pickCount: healthPickCount,
+            previousResultsStatus: healthPreviousResultsStatus,
+            raceName: healthNextRace.race_name,
+            roundNumber: healthNextRace.round_number
+          } : null}
+          registeredTeamCount={registeredProfileIds.size}
+          reminderRows={healthReminderRows}
+          schemaVersion={healthSchemaVersion}
+          smsEnabled={process.env.REMINDER_SMS_ENABLED?.toLowerCase() === "true"}
+        />
+      ) : null}
 
       {activeTab === "participants" ? (
         <section className="mt-6 rounded-lg border border-slate-200 bg-white p-4 sm:p-6">
@@ -690,11 +766,11 @@ export default async function AdminPage({ searchParams }: PageProps) {
             <div>
               <h2 className="text-xl font-semibold text-slate-900">Participants</h2>
               <p className="mt-1 text-sm text-slate-600">
-                Active teams appear in current standings, picks, analytics, and email reminders.
+                Registration is tracked per season. Accounts and profiles remain available year to year.
               </p>
             </div>
             <p className="text-sm font-semibold text-slate-700">
-              {winnerProfiles.filter((participant) => participant.is_active).length} active ·{" "}
+              {activeParticipants.length} registered ·{" "}
               {winnerProfiles.length} total
             </p>
           </div>
@@ -717,12 +793,12 @@ export default async function AdminPage({ searchParams }: PageProps) {
                     </div>
                     <span
                       className={`shrink-0 rounded-full border px-2 py-0.5 text-xs font-semibold ${
-                        participant.is_active
+                        registeredProfileIds.has(participant.id)
                           ? "border-emerald-200 bg-emerald-50 text-emerald-700"
                           : "border-slate-200 bg-slate-50 text-slate-600"
                       }`}
                     >
-                      {participant.is_active ? "Active" : "Inactive"}
+                      {registeredProfileIds.has(participant.id) ? "Registered" : "Not registered"}
                     </span>
                   </div>
                 </summary>
@@ -738,6 +814,7 @@ export default async function AdminPage({ searchParams }: PageProps) {
                     <input
                       className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
                       defaultValue={participant.full_name ?? ""}
+                      maxLength={100}
                       name="full_name"
                     />
                   </label>
@@ -749,12 +826,17 @@ export default async function AdminPage({ searchParams }: PageProps) {
                       required
                       className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
                       defaultValue={participant.team_name}
+                      maxLength={100}
                       name="team_name"
                     />
                   </label>
                   <label className="flex items-center gap-2 self-end rounded-md border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700">
-                    <input defaultChecked={participant.is_active} name="is_active" type="checkbox" />
-                    Active
+                    <input
+                      defaultChecked={registeredProfileIds.has(participant.id)}
+                      name="season_registered"
+                      type="checkbox"
+                    />
+                    Registered this season
                   </label>
                   <button
                     className="self-end rounded-md bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-700"
@@ -823,6 +905,7 @@ export default async function AdminPage({ searchParams }: PageProps) {
               required
               className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
               data-testid="admin-driver-create-name"
+              maxLength={100}
               name="driver_name"
               type="text"
             />
@@ -927,6 +1010,7 @@ export default async function AdminPage({ searchParams }: PageProps) {
                       required
                       className="w-full rounded-md border border-slate-300 px-2 py-2 text-sm md:col-span-3"
                       defaultValue={driver.driver_name}
+                      maxLength={100}
                       name="driver_name"
                       placeholder="Driver name"
                       type="text"
@@ -1101,6 +1185,7 @@ export default async function AdminPage({ searchParams }: PageProps) {
               required
               className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
               data-testid="admin-race-create-name"
+              maxLength={200}
               name="race_name"
               type="text"
             />
@@ -1401,6 +1486,7 @@ export default async function AdminPage({ searchParams }: PageProps) {
                     required
                     className="w-full rounded-md border border-slate-300 px-2 py-2 text-sm md:col-span-3"
                     defaultValue={race.race_name}
+                    maxLength={200}
                     name="race_name"
                     placeholder="Race name"
                     type="text"
