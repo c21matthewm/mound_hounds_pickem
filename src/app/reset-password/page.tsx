@@ -68,7 +68,8 @@ export default async function ResetPasswordPage({ searchParams }: PageProps) {
               <input
                 required
                 className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm"
-                minLength={6}
+                autoComplete="new-password"
+                minLength={10}
                 name="password"
                 type="password"
               />
@@ -79,7 +80,8 @@ export default async function ResetPasswordPage({ searchParams }: PageProps) {
               <input
                 required
                 className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm"
-                minLength={6}
+                autoComplete="new-password"
+                minLength={10}
                 name="confirm_password"
                 type="password"
               />

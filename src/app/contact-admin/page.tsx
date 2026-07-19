@@ -1,30 +1,11 @@
 import Link from "next/link";
-import { redirect } from "next/navigation";
 import { AuthenticatedPageShell } from "@/components/authenticated-page-shell";
 import { MobileBottomNav } from "@/components/mobile-bottom-nav";
 import { SignOutButton } from "@/components/sign-out-button";
-import { isProfileComplete, type ProfileRow } from "@/lib/profile";
-import { createServerSupabaseClient } from "@/lib/supabase/server";
+import { requireAppUser } from "@/lib/authenticated-user";
 
 export default async function ContactAdminPage() {
-  const supabase = await createServerSupabaseClient();
-  const {
-    data: { user }
-  } = await supabase.auth.getUser();
-
-  if (!user) {
-    redirect("/login");
-  }
-
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("id,full_name,team_name,phone_number,phone_carrier,role")
-    .eq("id", user.id)
-    .maybeSingle<ProfileRow>();
-
-  if (!profile || !isProfileComplete(profile)) {
-    redirect("/onboarding");
-  }
+  await requireAppUser({ requireSeasonDecision: true });
 
   return (
     <AuthenticatedPageShell

@@ -17,8 +17,8 @@ $$;
 -- Profiles (extends auth.users)
 create table if not exists public.profiles (
   id uuid primary key references auth.users(id) on delete cascade,
-  full_name text,
-  team_name text not null unique,
+  full_name text check (full_name is null or length(trim(full_name)) between 1 and 100),
+  team_name text not null unique check (length(trim(team_name)) between 1 and 100),
   phone_number text,
   phone_carrier text,
   role text not null default 'participant' check (role in ('admin', 'participant')),
@@ -52,6 +52,37 @@ create table if not exists public.league_seasons (
   created_at timestamptz not null default timezone('utc', now()),
   updated_at timestamptz not null default timezone('utc', now())
 );
+
+-- A profile is permanent; this table records its decision for each league season.
+create table if not exists public.season_participants (
+  season_id bigint not null references public.league_seasons(id) on delete cascade,
+  profile_id uuid not null references public.profiles(id) on delete cascade,
+  status text not null check (status in ('registered', 'declined')),
+  registered_at timestamptz,
+  decided_at timestamptz not null default timezone('utc', now()),
+  created_at timestamptz not null default timezone('utc', now()),
+  updated_at timestamptz not null default timezone('utc', now()),
+  primary key (season_id, profile_id),
+  check (
+    (status = 'registered' and registered_at is not null)
+    or (status = 'declined' and registered_at is null)
+  )
+);
+
+create table if not exists public.app_metadata (
+  key text primary key,
+  value text not null,
+  updated_at timestamptz not null default timezone('utc', now())
+);
+
+insert into public.app_metadata (key, value)
+values ('schema_version', '20260718_season_enrollment_v1')
+on conflict (key) do update
+set value = excluded.value, updated_at = timezone('utc', now());
+
+insert into public.app_metadata (key, value)
+values ('season_enrollment_legacy_backfill', 'consolidated_schema')
+on conflict (key) do nothing;
 
 -- Races
 create table if not exists public.races (
@@ -129,7 +160,7 @@ create table if not exists public.feedback_items (
   feedback_type text not null check (feedback_type in ('bug', 'improvement')),
   category text not null,
   context_page text,
-  details text not null,
+  details text not null check (length(trim(details)) between 20 and 4000),
   created_at timestamptz not null default timezone('utc', now()),
   updated_at timestamptz not null default timezone('utc', now())
 );
@@ -142,9 +173,13 @@ create table if not exists public.pick_reminders (
   reminder_type text not null check (reminder_type in ('5d_open', '2d', '4h')),
   channel text not null check (channel in ('email', 'sms')),
   recipient text not null,
-  delivery_status text not null default 'pending' check (delivery_status in ('pending', 'sent')),
+  delivery_status text not null default 'pending' check (delivery_status in ('pending', 'sent', 'failed')),
   delivery_id text,
-  sent_at timestamptz not null default timezone('utc', now()),
+  sent_at timestamptz,
+  attempt_count integer not null default 0 check (attempt_count between 0 and 10),
+  last_attempt_at timestamptz,
+  last_error text,
+  lease_expires_at timestamptz,
   created_at timestamptz not null default timezone('utc', now()),
   updated_at timestamptz not null default timezone('utc', now()),
   unique (race_id, user_id, reminder_type, channel)
@@ -183,6 +218,10 @@ create unique index if not exists idx_league_seasons_single_active
 on public.league_seasons(status)
 where status = 'active';
 create index if not exists idx_league_seasons_year on public.league_seasons(season_year desc);
+create index if not exists idx_season_participants_profile
+on public.season_participants(profile_id, season_id desc);
+create index if not exists idx_season_participants_registered
+on public.season_participants(season_id, status, profile_id);
 create index if not exists idx_races_date on public.races(race_date);
 create index if not exists idx_races_qualifying_start on public.races(qualifying_start_at);
 create index if not exists idx_races_winner_auto_eligible on public.races(winner_auto_eligible_at);
@@ -202,6 +241,8 @@ create index if not exists idx_feedback_items_created_at on public.feedback_item
 create index if not exists idx_feedback_items_user on public.feedback_items(user_id);
 create index if not exists idx_pick_reminders_race on public.pick_reminders(race_id, reminder_type, channel);
 create index if not exists idx_pick_reminders_user on public.pick_reminders(user_id, created_at desc);
+create index if not exists idx_pick_reminders_delivery_queue
+on public.pick_reminders(delivery_status, lease_expires_at, last_attempt_at);
 create index if not exists idx_hall_of_fame_seasons_year on public.hall_of_fame_seasons(season_year desc);
 create index if not exists idx_hall_of_fame_entries_season_rank
 on public.hall_of_fame_entries(season_id, final_rank, team_name);
@@ -309,6 +350,11 @@ create trigger trg_pick_reminders_updated_at
 before update on public.pick_reminders
 for each row execute function public.set_updated_at();
 
+drop trigger if exists trg_season_participants_updated_at on public.season_participants;
+create trigger trg_season_participants_updated_at
+before update on public.season_participants
+for each row execute function public.set_updated_at();
+
 drop trigger if exists trg_hall_of_fame_seasons_updated_at on public.hall_of_fame_seasons;
 create trigger trg_hall_of_fame_seasons_updated_at
 before update on public.hall_of_fame_seasons
@@ -344,6 +390,30 @@ drop trigger if exists trg_assign_race_season_and_round on public.races;
 create trigger trg_assign_race_season_and_round
 before insert on public.races
 for each row execute function public.assign_race_season_and_round();
+
+create or replace function public.is_registered_for_season(
+  p_profile_id uuid,
+  p_season_id bigint
+)
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select exists (
+    select 1
+    from public.season_participants participant
+    join public.profiles profile on profile.id = participant.profile_id
+    where participant.profile_id = p_profile_id
+      and participant.season_id = p_season_id
+      and participant.status = 'registered'
+      and profile.is_active = true
+  );
+$$;
+
+revoke all on function public.is_registered_for_season(uuid, bigint) from public, anon;
+grant execute on function public.is_registered_for_season(uuid, bigint) to authenticated, service_role;
 
 -- Enforce pick lock at the database layer
 create or replace function public.enforce_pick_deadline()
@@ -387,13 +457,8 @@ begin
     raise exception 'Picks are disabled for archived races.';
   end if;
 
-  if not exists (
-    select 1
-    from public.profiles profile
-    where profile.id = new.user_id
-      and profile.is_active = true
-  ) then
-    raise exception 'Your participant profile is inactive for the current season.';
+  if not public.is_registered_for_season(new.user_id, race_season_id) then
+    raise exception 'Register for this league season before submitting picks.';
   end if;
 
   if not exists (
@@ -1126,10 +1191,159 @@ $$;
 revoke all on function public.activate_league_season(bigint) from public, anon;
 grant execute on function public.activate_league_season(bigint) to authenticated;
 
+create or replace function public.set_active_season_participation(p_register boolean)
+returns bigint
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  active_season_id bigint;
+  current_profile public.profiles%rowtype;
+  next_status text;
+begin
+  if auth.uid() is null then
+    raise exception 'Authentication required.';
+  end if;
+
+  select * into current_profile
+  from public.profiles
+  where id = auth.uid();
+
+  if current_profile.id is null
+    or length(trim(coalesce(current_profile.full_name, ''))) = 0
+    or length(trim(coalesce(current_profile.team_name, ''))) = 0 then
+    raise exception 'Complete your profile before choosing a season.';
+  end if;
+
+  if current_profile.is_active = false then
+    raise exception 'This account is not eligible for league participation.';
+  end if;
+
+  select id into active_season_id
+  from public.league_seasons
+  where status = 'active';
+
+  if active_season_id is null then
+    raise exception 'No league season is currently open for registration.';
+  end if;
+
+  if p_register = false and exists (
+    select 1
+    from public.picks pick
+    join public.races race on race.id = pick.race_id
+    where pick.user_id = auth.uid()
+      and race.season_id = active_season_id
+  ) then
+    raise exception 'A team with submitted picks cannot leave the active season.';
+  end if;
+
+  next_status := case when p_register then 'registered' else 'declined' end;
+
+  insert into public.season_participants (
+    season_id,
+    profile_id,
+    status,
+    registered_at,
+    decided_at
+  )
+  values (
+    active_season_id,
+    auth.uid(),
+    next_status,
+    case when p_register then timezone('utc', now()) else null end,
+    timezone('utc', now())
+  )
+  on conflict (season_id, profile_id) do update
+  set
+    status = excluded.status,
+    registered_at = excluded.registered_at,
+    decided_at = excluded.decided_at;
+
+  return active_season_id;
+end;
+$$;
+
+revoke all on function public.set_active_season_participation(boolean) from public, anon;
+grant execute on function public.set_active_season_participation(boolean) to authenticated;
+
+create or replace function public.claim_pick_reminder_delivery(
+  p_race_id bigint,
+  p_user_id uuid,
+  p_reminder_type text,
+  p_channel text,
+  p_recipient text
+)
+returns bigint
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  claimed_id bigint;
+begin
+  if coalesce(auth.role(), '') <> 'service_role' then
+    raise exception 'Service role required.';
+  end if;
+
+  insert into public.pick_reminders (
+    race_id,
+    user_id,
+    reminder_type,
+    channel,
+    recipient,
+    delivery_status,
+    attempt_count,
+    last_attempt_at,
+    lease_expires_at,
+    sent_at
+  )
+  values (
+    p_race_id,
+    p_user_id,
+    p_reminder_type,
+    p_channel,
+    p_recipient,
+    'pending',
+    1,
+    timezone('utc', now()),
+    timezone('utc', now()) + interval '10 minutes',
+    null
+  )
+  on conflict (race_id, user_id, reminder_type, channel) do update
+  set
+    recipient = excluded.recipient,
+    delivery_status = 'pending',
+    attempt_count = public.pick_reminders.attempt_count + 1,
+    last_attempt_at = timezone('utc', now()),
+    last_error = null,
+    lease_expires_at = timezone('utc', now()) + interval '10 minutes'
+  where (
+      public.pick_reminders.delivery_status = 'failed'
+      and public.pick_reminders.attempt_count < 3
+      and public.pick_reminders.last_attempt_at < timezone('utc', now()) - interval '10 minutes'
+    ) or (
+      public.pick_reminders.delivery_status = 'pending'
+      and public.pick_reminders.attempt_count < 3
+      and public.pick_reminders.lease_expires_at < timezone('utc', now())
+    )
+  returning id into claimed_id;
+
+  return claimed_id;
+end;
+$$;
+
+revoke all on function public.claim_pick_reminder_delivery(bigint, uuid, text, text, text)
+from public, anon, authenticated;
+grant execute on function public.claim_pick_reminder_delivery(bigint, uuid, text, text, text)
+to service_role;
+
 -- RLS
 alter table public.profiles enable row level security;
 alter table public.drivers enable row level security;
 alter table public.league_seasons enable row level security;
+alter table public.season_participants enable row level security;
+alter table public.app_metadata enable row level security;
 alter table public.races enable row level security;
 alter table public.picks enable row level security;
 alter table public.results enable row level security;
@@ -1157,6 +1371,33 @@ for all
 to authenticated
 using (public.is_admin(auth.uid()))
 with check (public.is_admin(auth.uid()));
+
+-- season participant policies
+grant select, insert, update, delete on table public.season_participants to authenticated;
+
+drop policy if exists season_participants_read_own_or_admin on public.season_participants;
+create policy season_participants_read_own_or_admin
+on public.season_participants
+for select
+to authenticated
+using (profile_id = auth.uid() or public.is_admin(auth.uid()));
+
+drop policy if exists season_participants_admin_write on public.season_participants;
+create policy season_participants_admin_write
+on public.season_participants
+for all
+to authenticated
+using (public.is_admin(auth.uid()))
+with check (public.is_admin(auth.uid()));
+
+grant select on table public.app_metadata to authenticated;
+
+drop policy if exists app_metadata_read_authenticated on public.app_metadata;
+create policy app_metadata_read_authenticated
+on public.app_metadata
+for select
+to authenticated
+using (true);
 
 -- profiles policies
 drop policy if exists profiles_select_self_or_admin on public.profiles;

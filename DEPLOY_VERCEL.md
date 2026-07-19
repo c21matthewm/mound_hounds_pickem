@@ -151,8 +151,9 @@ Latest production hardening migration:
 supabase/migrations/20260709_harden_roles_and_result_publication.sql
 ```
 
-Apply the hardening migration before deploying the application commit that uses it. Follow
-`HARDENING_DEPLOY.md` for backup, verification, and isolated-E2E setup steps.
+Apply the hardening migration before deploying application code that uses draft/published results.
+Confirm a current Supabase backup first, and do not use the mutating Playwright suite as a
+migration check.
 
 Latest season and participant-management migration:
 
@@ -184,6 +185,41 @@ from public.profiles;
 There should be exactly one `active` season, every race should have a round number, and existing
 participant profiles should initially remain active.
 
+Latest yearly enrollment and reminder-delivery hardening migration:
+
+```text
+supabase/migrations/20260718_add_season_enrollment_and_delivery_hardening.sql
+```
+
+Apply this migration after the season migration above and before deploying the matching app code.
+It keeps auth accounts and profiles permanent, records registration per season, backfills the
+currently active field, requires active-season registration for picks, and makes failed reminder
+deliveries visible and retryable.
+
+Verify it after running:
+
+```sql
+select key, value from public.app_metadata where key = 'schema_version';
+
+select s.season_year, sp.status, count(*)
+from public.season_participants sp
+join public.league_seasons s on s.id = sp.season_id
+group by s.season_year, sp.status
+order by s.season_year desc, sp.status;
+
+select delivery_status, count(*)
+from public.pick_reminders
+group by delivery_status
+order by delivery_status;
+```
+
+The schema version should be `20260718_season_enrollment_v1`. Existing teams that were active
+before this migration should be `registered` for the current active season.
+
+For the older result-publication migration, retain known historical exceptions rather than
+reconstructing missing snapshots from current standings: Race 8 has 25 official rows and a
+27-driver snapshot; Race 2 has 25 official rows and no complete historical snapshot.
+
 ### Season turnover workflow
 
 Use this order after the final race each year:
@@ -191,12 +227,14 @@ Use this order after the final race each year:
 1. Publish the final race results and confirm the current standings.
 2. In **Admin -> Race Results**, save the final standings to the Hall of Fame.
 3. In **Admin -> Races**, create the next season and add at least its first scheduled race.
-4. In **Admin -> Participants**, mark teams active or inactive for the new season.
-5. In **Admin -> Drivers**, mark departing drivers inactive, update returning drivers and images,
+4. In **Admin -> Drivers**, mark departing drivers inactive, update returning drivers and images,
    and add new drivers. Do not delete a driver referenced by historical picks or results.
-6. Activate the new season in **Admin -> Races**. Current driver points reset to zero and the prior
+5. Activate the new season in **Admin -> Races**. Current driver points reset to zero and the prior
    finishing order remains the opening seed.
-7. If the official preseason field order needs correction, use **Preseason seed tools** before any
+6. Returning participants sign in with their existing email/password and confirm their own
+   registration for the new year. No admin approval and no new account are required.
+7. Review the registered field in **Admin -> Participants**. Admin edits are for corrections only.
+8. If the official preseason field order needs correction, use **Preseason seed tools** before any
    new-season result is published.
 
 When creating races, enter only the complete event name, such as `Acura Grand Prix of Long Beach`.
@@ -227,9 +265,9 @@ Open the production URL and test:
 
 1. Login/signup.
 2. Complete onboarding.
-3. Open dashboard.
+3. Confirm the active-season registration screen, then open the dashboard.
 4. Confirm `/picks`, `/leaderboard`, `/rules`, and `/feedback` load.
-5. Login as admin and confirm `/admin` loads.
+5. Login as admin and confirm `/admin?tab=health` reports the expected schema version.
 
 Cron health checks:
 

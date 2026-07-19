@@ -1,16 +1,14 @@
-import { redirect } from "next/navigation";
 import Link from "next/link";
 import { AuthenticatedPageShell } from "@/components/authenticated-page-shell";
 import { MobileBottomNav } from "@/components/mobile-bottom-nav";
 import { SignOutButton } from "@/components/sign-out-button";
 import { MOUND_HOUND_IMAGE_PATH } from "@/lib/branding";
+import { requireAppUser } from "@/lib/authenticated-user";
 import { getPreviousRaceResultsGate } from "@/lib/pickem-results-gate";
-import { isProfileActive, isProfileComplete, type ProfileRow } from "@/lib/profile";
 import { queryStringParam } from "@/lib/query";
 import { raceContextLabel } from "@/lib/race-label";
 import { pickLockAtForRace, type RacePickFormat } from "@/lib/race-format";
-import { loadActiveLeagueSeason } from "@/lib/seasons";
-import { createServerSupabaseClient } from "@/lib/supabase/server";
+import { isRegisteredForSeason } from "@/lib/season-participation";
 
 type PageProps = {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
@@ -33,28 +31,12 @@ export default async function DashboardPage({ searchParams }: PageProps) {
   const params = await searchParams;
   const message = queryStringParam(params.message);
 
-  const supabase = await createServerSupabaseClient();
-  const {
-    data: { user }
-  } = await supabase.auth.getUser();
-
-  if (!user) {
-    redirect("/login");
-  }
-
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("id,full_name,team_name,phone_number,phone_carrier,role,is_active")
-    .eq("id", user.id)
-    .single<ProfileRow>();
-
-  if (!profile || !isProfileComplete(profile)) {
-    redirect("/onboarding");
-  }
+  const { activeSeason, participation, profile, supabase, user } = await requireAppUser({
+    requireSeasonDecision: true
+  });
 
   const now = new Date();
   const nowIso = now.toISOString();
-  const activeSeason = await loadActiveLeagueSeason(supabase);
   let currentRace: DashboardRaceRow | null = null;
 
   if (activeSeason) {
@@ -86,12 +68,12 @@ export default async function DashboardPage({ searchParams }: PageProps) {
     : null;
   const blockedPreviousResultsGate =
     previousResultsGate?.status === "blocked" ? previousResultsGate : null;
-  const raceAction = !isProfileActive(profile)
+  const raceAction = activeSeason && !isRegisteredForSeason(participation)
     ? {
-        body: "Your team is not active for the current season. You can still view standings and league history.",
-        href: "/leaderboard",
-        label: "View leaderboard",
-        status: "Inactive",
+        body: `Your team is not registered for the ${activeSeason.seasonYear} season. Join when you are ready to make picks.`,
+        href: "/season-registration",
+        label: "Register now",
+        status: "Not Registered",
         title: "Not entered this season"
       }
     : !currentRace
@@ -206,10 +188,10 @@ export default async function DashboardPage({ searchParams }: PageProps) {
         <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
           <Link
             className="group rounded-lg bg-slate-900 px-4 py-3 text-sm font-semibold text-white hover:bg-slate-700"
-            href="/picks"
+            href={isRegisteredForSeason(participation) ? "/picks" : "/season-registration"}
           >
             <span className="flex items-center justify-between gap-3">
-              Pick&apos;em Form
+              {isRegisteredForSeason(participation) ? "Pick'em Form" : "Season Registration"}
               <span className="transition group-hover:translate-x-0.5">→</span>
             </span>
           </Link>

@@ -62,7 +62,12 @@ The email schedule is:
 - 2 days before the pick deadline: first reminder.
 - 4 hours before the pick deadline: final reminder.
 
-Only league profiles without a saved pick for that race receive a given email, and each window is deduplicated in `pick_reminders`. Standard-race deadlines are qualifying start. The Indianapolis 500 deadline remains race start because qualifying-order groups must be imported before that form is usable. If previous-race results have not been published, the form-open notice waits until those results are ready.
+Only registered teams without a saved pick for that race receive a given email. Each delivery is
+deduplicated in `pick_reminders`; failed or abandoned delivery attempts can retry up to three times
+with the same provider idempotency key. Standard-race deadlines are qualifying start. The
+Indianapolis 500 deadline remains race start because qualifying-order groups must be imported
+before that form is usable. If previous-race results have not been published, the form-open notice
+waits until those results are ready.
 
 For an 80-person league on Resend's free plan, set `REMINDER_SMS_ENABLED=false` in Vercel. One email reminder to 80 missing-pick participants fits under the 100-email daily limit. Enabling carrier-gateway SMS can double that window to 160 messages. Also avoid onboarding all 80 users on the same day as a full reminder run.
 
@@ -109,3 +114,35 @@ Use this rollover instead:
 6. Run the orphan-image dry run and inspect the output.
 
 Inactive drivers do not appear on the current pick form. Retaining their records preserves historical race and pick displays while consuming negligible database space.
+
+## Yearly participant registration
+
+Auth accounts and profiles are permanent. Do not ask returning participants to create a new email
+or password each year.
+
+1. Finalize the completed season Hall of Fame snapshot.
+2. Create the next season and at least its first race in **Admin > Races**.
+3. Activate the next season. This leaves every returning profile unregistered for the new year.
+4. On their next login, each participant is sent to **Season registration** to join or skip that
+   season. Joining is immediate and does not require admin approval.
+5. Use **Admin > Participants** to review the registered field or correct a participant decision.
+
+A participant who skips can register later from the dashboard. A participant cannot leave a season
+after submitting picks. `profiles.is_active` is reserved for account eligibility; yearly membership
+lives in `season_participants`.
+
+## System health and schema contract
+
+Open **Admin > System Health** after a migration, deployment, season rollover, or notification
+configuration change. Confirm:
+
+- schema version is `20260718_season_enrollment_v1`;
+- the expected season is active and the registered-team count is reasonable;
+- the next race and previous-results gate are correct;
+- pick email/SMS enabled states match Vercel;
+- recent reminder attempts do not show repeated failures.
+
+The matching database migration is
+`supabase/migrations/20260718_add_season_enrollment_and_delivery_hardening.sql`. Run it in Supabase
+SQL Editor before deploying the application version that reads `season_participants` or
+`app_metadata`.

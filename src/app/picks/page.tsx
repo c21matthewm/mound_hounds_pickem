@@ -1,13 +1,12 @@
 import Link from "next/link";
-import { redirect } from "next/navigation";
 import { AuthenticatedPageShell } from "@/components/authenticated-page-shell";
 import { MobileBottomNav } from "@/components/mobile-bottom-nav";
 import { PickSubmissionSnapshot } from "@/components/pick-submission-snapshot";
 import { SignOutButton } from "@/components/sign-out-button";
 import { saveWeeklyPickAction } from "@/app/picks/actions";
 import { PickemForm } from "@/components/pickem-form";
+import { requireAppUser } from "@/lib/authenticated-user";
 import { getPreviousRaceResultsGate } from "@/lib/pickem-results-gate";
-import { isProfileActive, isProfileComplete, type ProfileRow } from "@/lib/profile";
 import { queryStringParam } from "@/lib/query";
 import { raceContextLabel } from "@/lib/race-label";
 import {
@@ -17,9 +16,6 @@ import {
   pickLockAtForRace,
   type RacePickFormat
 } from "@/lib/race-format";
-import { loadActiveLeagueSeason } from "@/lib/seasons";
-import { createServerSupabaseClient } from "@/lib/supabase/server";
-import { isMissingColumnError } from "@/lib/supabase/schema-compat";
 import { formatLeagueDateTime, LEAGUE_TIME_ZONE } from "@/lib/timezone";
 
 type DriverRow = {
@@ -89,47 +85,13 @@ export default async function PicksPage({ searchParams }: PageProps) {
   const params = await searchParams;
   const error = queryStringParam(params.error);
 
-  const supabase = await createServerSupabaseClient();
-  const {
-    data: { user }
-  } = await supabase.auth.getUser();
-
-  if (!user) {
-    redirect("/login");
-  }
-
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("id,full_name,team_name,phone_number,phone_carrier,role,is_active")
-    .eq("id", user.id)
-    .maybeSingle<ProfileRow>();
-
-  if (!profile || !isProfileComplete(profile)) {
-    redirect("/onboarding");
-  }
-
-  if (!isProfileActive(profile)) {
-    return (
-      <AuthenticatedPageShell
-        actions={<SignOutButton className="static" />}
-        eyebrow="Race Picks"
-        maxWidth="max-w-4xl"
-        title="Pick'em Form"
-      >
-        <p className="mt-4 rounded-md border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
-          Your team is not active for the current season. Contact an admin if you are participating
-          this year.
-        </p>
-        <Link className="mt-4 text-sm font-semibold text-slate-900 underline" href="/leaderboard">
-          View leaderboard
-        </Link>
-      </AuthenticatedPageShell>
-    );
-  }
+  const { activeSeason, profile, supabase, user } = await requireAppUser({
+    requireRegistration: true,
+    requireSeasonDecision: true
+  });
 
   const now = new Date();
   const nowIso = now.toISOString();
-  const activeSeason = await loadActiveLeagueSeason(supabase);
 
   if (!activeSeason) {
     return (
@@ -212,46 +174,15 @@ export default async function PicksPage({ searchParams }: PageProps) {
     previousResultsGate.status === "blocked" ? previousResultsGate : null;
   const previousResultsBlocked = Boolean(blockedPreviousResultsGate);
 
-  let existingPick = existingPickResponse.data ?? null;
-  if (
-    existingPickResponse.error &&
-    (isMissingColumnError(existingPickResponse.error, "driver_group7_id") ||
-      isMissingColumnError(existingPickResponse.error, "driver_group8_id"))
-  ) {
-    const legacyPickResponse = await supabase
-      .from("picks")
-      .select(
-        "id,driver_group1_id,driver_group2_id,driver_group3_id,driver_group4_id,driver_group5_id,driver_group6_id,average_speed,updated_at"
-      )
-      .eq("race_id", upcomingRace.id)
-      .eq("user_id", user.id)
-      .maybeSingle<Omit<PickRow, "driver_group7_id" | "driver_group8_id">>();
-
-    existingPick = legacyPickResponse.data
-      ? {
-          ...legacyPickResponse.data,
-          driver_group7_id: null,
-          driver_group8_id: null
-        }
-      : null;
+  if (existingPickResponse.error) {
+    throw new Error(`Failed loading your saved picks: ${existingPickResponse.error.message}`);
   }
+  const existingPick = existingPickResponse.data ?? null;
 
-  let raceDriverGroups: RaceDriverGroupRow[] = (raceDriverGroupsResponse.data ?? []) as RaceDriverGroupRow[];
-  if (
-    raceDriverGroupsResponse.error &&
-    isMissingColumnError(raceDriverGroupsResponse.error, "qualifying_position")
-  ) {
-    const legacyRaceDriverGroupsResponse = await supabase
-      .from("race_driver_groups")
-      .select("race_id,driver_id,group_number")
-      .eq("race_id", upcomingRace.id)
-      .order("group_number", { ascending: true });
-
-    raceDriverGroups = (legacyRaceDriverGroupsResponse.data ?? []).map((row) => ({
-      ...row,
-      qualifying_position: null
-    })) as RaceDriverGroupRow[];
+  if (raceDriverGroupsResponse.error) {
+    throw new Error(`Failed loading race driver groups: ${raceDriverGroupsResponse.error.message}`);
   }
+  const raceDriverGroups = (raceDriverGroupsResponse.data ?? []) as RaceDriverGroupRow[];
 
   const activeDrivers: DriverRow[] = (driversResponse.data ?? []) as DriverRow[];
   const selectedMap = selectedByGroup(existingPick, groupNumbers);

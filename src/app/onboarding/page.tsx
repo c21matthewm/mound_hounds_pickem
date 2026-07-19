@@ -40,7 +40,7 @@ export default async function OnboardingPage({ searchParams }: PageProps) {
     .maybeSingle<ProfileRow>();
 
   if (isProfileComplete(profile)) {
-    redirect("/dashboard");
+    redirect("/season-registration");
   }
 
   return (
@@ -54,7 +54,7 @@ export default async function OnboardingPage({ searchParams }: PageProps) {
           Complete your profile
         </h1>
         <p className="mt-2 max-w-xl text-sm leading-6 text-slate-600">
-          Add your team and contact details once, then you can jump straight into race week.
+          Add your name and team once. Contact details are optional while league notifications are email-only.
         </p>
       </header>
 
@@ -80,7 +80,9 @@ export default async function OnboardingPage({ searchParams }: PageProps) {
             required
             className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm"
             defaultValue={profile?.full_name ?? ""}
+            maxLength={100}
             name="full_name"
+            autoComplete="name"
             type="text"
           />
         </label>
@@ -91,27 +93,27 @@ export default async function OnboardingPage({ searchParams }: PageProps) {
             required
             className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm"
             defaultValue={profile?.team_name ?? ""}
+            maxLength={100}
             name="team_name"
             type="text"
           />
         </label>
 
         <label className="block">
-          <span className="mb-1 block text-sm font-medium text-slate-700">Phone number</span>
+          <span className="mb-1 block text-sm font-medium text-slate-700">Phone number (optional)</span>
           <input
-            required
             className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm"
             defaultValue={profile?.phone_number ?? ""}
             name="phone_number"
+            autoComplete="tel"
             placeholder="e.g. 317-555-1212"
             type="tel"
           />
         </label>
 
         <label className="block">
-          <span className="mb-1 block text-sm font-medium text-slate-700">Phone carrier</span>
+          <span className="mb-1 block text-sm font-medium text-slate-700">Phone carrier (optional)</span>
           <select
-            required
             className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm"
             defaultValue={profile?.phone_carrier ?? ""}
             name="phone_carrier"

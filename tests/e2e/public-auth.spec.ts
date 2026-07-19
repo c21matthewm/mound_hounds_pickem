@@ -39,9 +39,9 @@ test("public signup validates mismatched passwords and supports successful accou
     await page.locator('input[name="confirm_password"]').fill(password);
     await page.getByRole("button", { name: "Create account" }).click();
 
-    await expect(page).toHaveURL(/\/onboarding|\/login/);
+    await expect(page).toHaveURL(/\/onboarding|\/season-registration|\/login/);
     await expect(page.locator("main")).toContainText(
-      /Account created\. Complete your profile to continue\.|Check your email to confirm your account\./
+      /Account created\. Complete your profile to continue\.|Season registration|Check your email to confirm your account\./
     );
 
     expect(clientIssues).toEqual([]);

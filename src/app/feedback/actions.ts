@@ -2,8 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import { isProfileComplete, type ProfileRow } from "@/lib/profile";
-import { createServerSupabaseClient } from "@/lib/supabase/server";
+import { requireAppUser } from "@/lib/authenticated-user";
 import { isFeedbackCategory, isFeedbackType } from "@/lib/feedback";
 
 const asText = (value: FormDataEntryValue | null): string =>
@@ -31,24 +30,11 @@ export async function submitFeedbackAction(formData: FormData) {
     feedbackRedirect("error", "Please provide at least 20 characters so we have enough detail.");
   }
 
-  const supabase = await createServerSupabaseClient();
-  const {
-    data: { user }
-  } = await supabase.auth.getUser();
-
-  if (!user) {
-    redirect("/login");
+  if (details.length > 4000) {
+    feedbackRedirect("error", "Feedback must be 4,000 characters or fewer.");
   }
 
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("id,full_name,team_name,phone_number,phone_carrier,role")
-    .eq("id", user.id)
-    .maybeSingle<ProfileRow>();
-
-  if (!profile || !isProfileComplete(profile)) {
-    redirect("/onboarding");
-  }
+  const { supabase, user } = await requireAppUser({ requireSeasonDecision: true });
 
   const { error } = await supabase.from("feedback_items").insert({
     category,

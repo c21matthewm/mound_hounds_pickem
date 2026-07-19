@@ -2,6 +2,8 @@ import Link from "next/link";
 import { queryStringParam } from "@/lib/query";
 import { signUpAction } from "@/app/actions/auth";
 import { MOUND_HOUND_IMAGE_PATH } from "@/lib/branding";
+import { loadActiveLeagueSeason } from "@/lib/seasons";
+import { createServiceRoleSupabaseClient } from "@/lib/supabase/service-role";
 
 type PageProps = {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
@@ -11,6 +13,7 @@ export default async function SignupPage({ searchParams }: PageProps) {
   const params = await searchParams;
   const error = queryStringParam(params.error);
   const message = queryStringParam(params.message);
+  const activeSeason = await loadActiveLeagueSeason(createServiceRoleSupabaseClient());
 
   return (
     <main className="mx-auto flex min-h-screen max-w-lg flex-col justify-center px-6 py-16">
@@ -29,7 +32,11 @@ export default async function SignupPage({ searchParams }: PageProps) {
           </h1>
         </div>
       </div>
-      <p className="mt-3 text-sm leading-6 text-slate-600">Join the Mound Hounds Pick&apos;em League.</p>
+      <p className="mt-3 text-sm leading-6 text-slate-600">
+        {activeSeason
+          ? `Create your permanent account and join the ${activeSeason.seasonYear} league season.`
+          : "Account registration will open when the next league season is active."}
+      </p>
 
       {error ? (
         <p className="mt-4 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
@@ -50,6 +57,8 @@ export default async function SignupPage({ searchParams }: PageProps) {
             required
             className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm"
             name="full_name"
+            maxLength={100}
+            autoComplete="name"
             type="text"
           />
         </label>
@@ -60,6 +69,7 @@ export default async function SignupPage({ searchParams }: PageProps) {
             required
             className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm"
             name="team_name"
+            maxLength={100}
             type="text"
           />
         </label>
@@ -70,6 +80,7 @@ export default async function SignupPage({ searchParams }: PageProps) {
             required
             className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm"
             name="email"
+            autoComplete="email"
             type="email"
           />
         </label>
@@ -79,8 +90,9 @@ export default async function SignupPage({ searchParams }: PageProps) {
           <input
             required
             className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm"
-            minLength={6}
+            minLength={10}
             name="password"
+            autoComplete="new-password"
             type="password"
           />
         </label>
@@ -90,14 +102,16 @@ export default async function SignupPage({ searchParams }: PageProps) {
           <input
             required
             className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm"
-            minLength={6}
+            minLength={10}
             name="confirm_password"
+            autoComplete="new-password"
             type="password"
           />
         </label>
 
         <button
-          className="w-full rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white hover:bg-slate-700"
+          className="w-full rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white hover:bg-slate-700 disabled:cursor-not-allowed disabled:bg-slate-400"
+          disabled={!activeSeason}
           type="submit"
         >
           Create account

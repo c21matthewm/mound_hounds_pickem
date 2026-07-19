@@ -7,7 +7,12 @@ import {
   pickGroupCountForFormat,
   type RacePickFormat
 } from "@/lib/race-format";
-import { isMissingColumnError } from "@/lib/supabase/schema-compat";
+import {
+  computeGroupScoreExtremes,
+  pickDriverEntries,
+  scorePickSelection,
+  scoringNumber
+} from "@/lib/scoring-engine";
 import { buildOrderedWeeklyRows } from "@/lib/weekly-ranking";
 
 export const AUTO_WINNER_DELAY_MINUTES = 15;
@@ -32,8 +37,11 @@ type DriverRow = {
 
 type ProfileRow = {
   id: string;
-  is_active: boolean;
   team_name: string;
+};
+
+type SeasonParticipantRow = {
+  profile_id: string;
 };
 
 type ResultRow = {
@@ -46,6 +54,7 @@ type RaceWinnerSpeedRow = {
   official_winning_average_speed: number | string | null;
   pick_format: RacePickFormat;
   results_status: "draft" | "published";
+  season_id: number;
 };
 
 type RaceDriverGroupRow = {
@@ -57,49 +66,16 @@ type PendingRaceRow = {
   id: number;
 };
 
-const toNumber = (value: number | string): number => {
-  if (typeof value === "number") {
-    return value;
-  }
-
-  const parsed = Number(value);
-  if (!Number.isNaN(parsed)) {
-    return parsed;
-  }
-
-  return 0;
-};
-
 const withOfficialSpeedMigrationHint = (message: string): string =>
   message.includes("official_winning_average_speed")
     ? `${message}. Run the latest Supabase migration to add official race average speed support.`
     : message;
 
-const pickDriverIdsByGroup = (pick: PickRow): Array<[number, number]> =>
-  [
-    [pick.driver_group1_id, 1],
-    [pick.driver_group2_id, 2],
-    [pick.driver_group3_id, 3],
-    [pick.driver_group4_id, 4],
-    [pick.driver_group5_id, 5],
-    [pick.driver_group6_id, 6],
-    [pick.driver_group7_id, 7],
-    [pick.driver_group8_id, 8]
-  ].filter((row): row is [number, number] => row[0] !== null);
-
-const scorePick = (pick: PickRow, groupCount: number, pointsByDriverId: Map<number, number>): number => {
-  const selectedDrivers = pickDriverIdsByGroup(pick)
-    .filter(([, groupNumber]) => groupNumber <= groupCount)
-    .map(([driverId]) => driverId);
-
-  return selectedDrivers.reduce((sum, driverId) => sum + (pointsByDriverId.get(driverId) ?? 0), 0);
-};
-
 const buildPickedDriverGroupByDriverId = (picks: PickRow[]): Map<number, number> => {
   const groupByDriverId = new Map<number, number>();
 
   picks.forEach((pick) => {
-    pickDriverIdsByGroup(pick).forEach(([driverId, groupNumber]) => {
+    pickDriverEntries(pick).forEach(([driverId, groupNumber]) => {
       if (!groupByDriverId.has(driverId)) {
         groupByDriverId.set(driverId, groupNumber);
       }
@@ -126,36 +102,18 @@ const computeLowestPossibleScore = (
   pickedDriverGroupByDriverId: Map<number, number>,
   currentDriverGroupById: Map<number, number>
 ): number => {
-  const pointsByGroup = new Map<number, number[]>();
-  for (let groupNumber = 1; groupNumber <= groupCount; groupNumber += 1) {
-    pointsByGroup.set(groupNumber, []);
-  }
-
-  results.forEach((result) => {
-    const groupNumber = resolveRaceDriverGroup(
-      result.driver_id,
-      raceDriverGroupByDriverId,
-      pickedDriverGroupByDriverId,
-      currentDriverGroupById
-    );
-    if (!groupNumber || groupNumber < 1 || groupNumber > groupCount) {
-      return;
-    }
-
-    const groupPoints = pointsByGroup.get(groupNumber) ?? [];
-    groupPoints.push(toNumber(result.points));
-    pointsByGroup.set(groupNumber, groupPoints);
-  });
-
-  let lowestPossibleScore = 0;
-  for (let groupNumber = 1; groupNumber <= groupCount; groupNumber += 1) {
-    const groupPoints = pointsByGroup.get(groupNumber) ?? [];
-    if (groupPoints.length > 0) {
-      lowestPossibleScore += Math.min(...groupPoints);
-    }
-  }
-
-  return lowestPossibleScore;
+  return computeGroupScoreExtremes(
+    groupCount,
+    results,
+    (result) =>
+      resolveRaceDriverGroup(
+        result.driver_id,
+        raceDriverGroupByDriverId,
+        pickedDriverGroupByDriverId,
+        currentDriverGroupById
+      ),
+    (result) => result.points
+  ).lowest;
 };
 
 export async function scheduleRaceWinnerAutoCalculation(supabase: SupabaseClient, raceId: number) {
@@ -184,7 +142,23 @@ export async function calculateRaceWinnerProfileId(
   supabase: SupabaseClient,
   raceId: number
 ): Promise<string | null> {
-  const [picksRes, resultsRes, raceRes, profilesRes, driversRes, raceDriverGroupsRes] = await Promise.all([
+  const { data: race, error: raceError } = await supabase
+    .from("races")
+    .select("id,season_id,pick_format,official_winning_average_speed,results_status")
+    .eq("id", raceId)
+    .maybeSingle<RaceWinnerSpeedRow>();
+
+  if (raceError) {
+    throw new Error(withOfficialSpeedMigrationHint(raceError.message));
+  }
+  if (!race) {
+    throw new Error("Selected race was not found.");
+  }
+  if (race.results_status !== "published") {
+    throw new Error("Publish the complete race results before calculating a fantasy winner.");
+  }
+
+  const [picksRes, resultsRes, participantRes, driversRes, raceDriverGroupsRes] = await Promise.all([
     supabase
       .from("picks")
       .select(
@@ -193,16 +167,10 @@ export async function calculateRaceWinnerProfileId(
       .eq("race_id", raceId),
     supabase.from("results").select("driver_id,points").eq("race_id", raceId),
     supabase
-      .from("races")
-      .select("id,pick_format,official_winning_average_speed,results_status")
-      .eq("id", raceId)
-      .maybeSingle(),
-    supabase
-      .from("profiles")
-      .select("id,team_name,is_active")
-      .in("role", ["participant", "admin"])
-      .eq("is_active", true)
-      .order("team_name", { ascending: true }),
+      .from("season_participants")
+      .select("profile_id")
+      .eq("season_id", race.season_id)
+      .eq("status", "registered"),
     supabase.from("drivers").select("id,group_number"),
     supabase
       .from("race_driver_groups")
@@ -210,58 +178,14 @@ export async function calculateRaceWinnerProfileId(
       .eq("race_id", raceId)
   ]);
 
-  let picksData = (picksRes.data ?? null) as PickRow[] | null;
-  let picksError = picksRes.error;
-  let raceData = (raceRes.data ?? null) as RaceWinnerSpeedRow | null;
-  let raceError = raceRes.error;
-
-  if (picksError) {
-    if (
-      isMissingColumnError(picksError, "driver_group7_id") ||
-      isMissingColumnError(picksError, "driver_group8_id")
-    ) {
-      const legacyPicksRes = await supabase
-        .from("picks")
-        .select(
-          "user_id,average_speed,driver_group1_id,driver_group2_id,driver_group3_id,driver_group4_id,driver_group5_id,driver_group6_id"
-        )
-        .eq("race_id", raceId);
-
-      picksData = (legacyPicksRes.data ?? []).map((pick) => ({
-          ...pick,
-          driver_group7_id: null,
-          driver_group8_id: null
-        })) as PickRow[];
-      picksError = legacyPicksRes.error;
-    }
-  }
-  if (raceError && isMissingColumnError(raceError, "pick_format")) {
-    const legacyRaceRes = await supabase
-      .from("races")
-      .select("id,official_winning_average_speed")
-      .eq("id", raceId)
-      .maybeSingle();
-
-    raceData = legacyRaceRes.data
-      ? ({
-          ...legacyRaceRes.data,
-          pick_format: "standard" as const,
-          results_status: "published" as const
-        } as RaceWinnerSpeedRow)
-      : null;
-    raceError = legacyRaceRes.error;
-  }
-  if (picksError) {
-    throw new Error(picksError.message);
+  if (picksRes.error) {
+    throw new Error(picksRes.error.message);
   }
   if (resultsRes.error) {
     throw new Error(resultsRes.error.message);
   }
-  if (raceError) {
-    throw new Error(withOfficialSpeedMigrationHint(raceError.message));
-  }
-  if (profilesRes.error) {
-    throw new Error(profilesRes.error.message);
+  if (participantRes.error) {
+    throw new Error(participantRes.error.message);
   }
   if (driversRes.error) {
     throw new Error(driversRes.error.message);
@@ -270,20 +194,31 @@ export async function calculateRaceWinnerProfileId(
     throw new Error(raceDriverGroupsRes.error.message);
   }
 
-  const picks = picksData ?? [];
+  const picks = (picksRes.data ?? []) as PickRow[];
   const results = (resultsRes.data ?? []) as ResultRow[];
-  const race = raceData;
-  if (!race) {
-    throw new Error("Selected race was not found.");
-  }
-  if (race.results_status !== "published") {
-    throw new Error("Publish the complete race results before calculating a fantasy winner.");
-  }
   if (results.length === 0) {
     return null;
   }
 
-  const participants = ((profilesRes.data ?? []) as ProfileRow[])
+  const registeredProfileIds = ((participantRes.data ?? []) as SeasonParticipantRow[]).map(
+    (row) => row.profile_id
+  );
+  if (registeredProfileIds.length === 0) {
+    return null;
+  }
+
+  const { data: profileData, error: profilesError } = await supabase
+    .from("profiles")
+    .select("id,team_name")
+    .in("id", registeredProfileIds)
+    .eq("is_active", true)
+    .order("team_name", { ascending: true });
+
+  if (profilesError) {
+    throw new Error(profilesError.message);
+  }
+
+  const participants = ((profileData ?? []) as ProfileRow[])
     .filter((profile) => typeof profile.team_name === "string" && profile.team_name.trim().length > 0)
     .map((profile) => ({
       id: profile.id,
@@ -295,13 +230,13 @@ export async function calculateRaceWinnerProfileId(
 
   const pointsByDriverId = new Map<number, number>();
   results.forEach((row) => {
-    pointsByDriverId.set(row.driver_id, toNumber(row.points));
+    pointsByDriverId.set(row.driver_id, scoringNumber(row.points));
   });
 
   const officialWinningAverageSpeed =
     race.official_winning_average_speed === null || race.official_winning_average_speed === undefined
       ? null
-      : toNumber(race.official_winning_average_speed);
+      : scoringNumber(race.official_winning_average_speed);
   const groupCount = pickGroupCountForFormat(normalizeRacePickFormat(race.pick_format));
   const currentDriverGroupById = new Map<number, number>();
   ((driversRes.data ?? []) as DriverRow[]).forEach((driver) => {
@@ -328,8 +263,10 @@ export async function calculateRaceWinnerProfileId(
     participants.map((participant) => {
       const pick = pickByUserId.get(participant.id);
       return {
-        averageSpeed: pick ? toNumber(pick.average_speed) : null,
-        points: pick ? scorePick(pick, groupCount, pointsByDriverId) : lowestPossibleScore,
+        averageSpeed: pick ? scoringNumber(pick.average_speed) : null,
+        points: pick
+          ? scorePickSelection(pick, groupCount, (driverId) => pointsByDriverId.get(driverId))
+          : lowestPossibleScore,
         teamName: participant.teamName,
         userId: participant.id
       };
