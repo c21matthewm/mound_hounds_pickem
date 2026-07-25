@@ -13,6 +13,8 @@ import {
   importIndy500QualifyingOrderAction,
   importIndycarResultsAction,
   publishSavedRaceResultsAction,
+  setLeagueSeasonInviteCodeAction,
+  setLeagueSeasonRulesDocumentAction,
   setRaceArchivedAction,
   setRaceWinnerAction,
   updateRaceAction,
@@ -24,10 +26,13 @@ import { AuthenticatedPageShell } from "@/components/authenticated-page-shell";
 import { AdminResultsImportForm } from "@/components/admin-results-import-form";
 import {
   AdminSystemHealth,
+  type AdminAuditHealthRow,
+  type AdminJobRunHealthRow,
   type AdminReminderHealthRow
 } from "@/components/admin-system-health";
 import { ConfirmSubmitButton } from "@/components/confirm-submit-button";
 import { SignOutButton } from "@/components/sign-out-button";
+import { SubmitButton } from "@/components/submit-button";
 import { requireAdmin } from "@/lib/admin";
 import { feedbackCategoryLabel, feedbackTypeLabel } from "@/lib/feedback";
 import { getPreviousRaceResultsGate } from "@/lib/pickem-results-gate";
@@ -62,6 +67,7 @@ type DriverRow = {
 
 type RaceRow = {
   archived_at: string | null;
+  field_frozen_at: string | null;
   id: number;
   is_archived: boolean;
   official_winning_average_speed: number | string | null;
@@ -100,8 +106,16 @@ type LeagueSeasonRow = {
   completed_at: string | null;
   display_name: string;
   id: number;
+  registration_code_configured_at: string | null;
+  roster_configured_at: string | null;
+  rules_document_url: string | null;
   season_year: number;
   status: "active" | "completed" | "upcoming";
+};
+
+type ParticipantPickCountRow = {
+  race_id: number;
+  user_id: string;
 };
 
 type ResultRow = {
@@ -232,7 +246,7 @@ const formatOptionalDecimal = (value: number | null, digits = 3): string =>
 
 const loadAdminRaces = async (supabase: SupabaseClient) => {
   const fields =
-    "id,race_name,pick_format,title_image_url,qualifying_start_at,race_date,payout,official_winning_average_speed,results_status,results_published_at,is_archived,archived_at,winner_profile_id,winner_source,winner_is_manual_override,winner_auto_eligible_at,winner_set_at,season_id,round_number";
+    "id,race_name,pick_format,title_image_url,qualifying_start_at,race_date,payout,official_winning_average_speed,results_status,results_published_at,is_archived,archived_at,winner_profile_id,winner_source,winner_is_manual_override,winner_auto_eligible_at,winner_set_at,season_id,round_number,field_frozen_at";
   return supabase.from("races").select(fields).order("race_date", { ascending: false });
 };
 
@@ -464,12 +478,16 @@ export default async function AdminPage({ searchParams }: PageProps) {
   const message = queryStringParam(params.message);
   const error = queryStringParam(params.error);
   const activeTab = parseAdminTab(queryStringParam(params.tab));
+  const participantQuery = (queryStringParam(params.participant_q) ?? "").trim().toLowerCase();
+  const participantStatus = queryStringParam(params.participant_status) ?? "all";
 
   const { profile, supabase } = await requireAdmin();
 
   const seasonsResponse = await supabase
     .from("league_seasons")
-    .select("id,season_year,display_name,status,activated_at,completed_at")
+    .select(
+      "id,season_year,display_name,status,activated_at,completed_at,registration_code_configured_at,roster_configured_at,rules_document_url"
+    )
     .order("season_year", { ascending: false });
   const loadedSeasons = (seasonsResponse.data ?? []) as LeagueSeasonRow[];
   const loadedActiveSeason = loadedSeasons.find((season) => season.status === "active") ?? null;
@@ -480,7 +498,8 @@ export default async function AdminPage({ searchParams }: PageProps) {
     racesResponse,
     profilesResponse,
     feedbackResponse,
-    seasonParticipantsResponse
+    seasonParticipantsResponse,
+    participantPicksResponse
   ] = await Promise.all([
     activeTab === "drivers" || activeTab === "results" ? supabase
       .from("drivers")
@@ -505,6 +524,17 @@ export default async function AdminPage({ searchParams }: PageProps) {
           .from("season_participants")
           .select("profile_id,status")
           .eq("season_id", loadedActiveSeason.id)
+      : emptyResponse,
+    loadedActiveSeason && activeTab === "participants"
+      ? paginatedAdminLoad<ParticipantPickCountRow>("participant pick counts", (from, to) =>
+          supabase
+            .from("picks")
+            .select("user_id,race_id,races!inner(season_id)")
+            .eq("races.season_id", loadedActiveSeason.id)
+            .order("race_id", { ascending: true })
+            .order("user_id", { ascending: true })
+            .range(from, to)
+        )
       : emptyResponse
   ]);
 
@@ -539,7 +569,12 @@ export default async function AdminPage({ searchParams }: PageProps) {
     picksResponse.error?.message ??
     raceDriverGroupsResponse.error?.message ??
     seasonParticipantsResponse.error?.message ??
+    participantPicksResponse.error?.message ??
     seasonsResponse.error?.message;
+
+  if (loadError) {
+    throw new Error(`Admin data could not be loaded safely: ${loadError}`);
+  }
 
   const drivers: DriverRow[] = (driversResponse.data ?? []) as DriverRow[];
   const races = loadedRaces;
@@ -552,9 +587,31 @@ export default async function AdminPage({ searchParams }: PageProps) {
       .filter((participant) => participant.status === "registered")
       .map((participant) => participant.profile_id)
   );
+  const participantPickCounts = new Map<string, number>();
+  ((participantPicksResponse.data ?? []) as ParticipantPickCountRow[]).forEach((pick) => {
+    participantPickCounts.set(
+      pick.user_id,
+      (participantPickCounts.get(pick.user_id) ?? 0) + 1
+    );
+  });
   const activeParticipants = winnerProfiles.filter((participant) =>
     participant.is_active && registeredProfileIds.has(participant.id)
   );
+  const visibleParticipants = winnerProfiles.filter((participant) => {
+    const matchesQuery =
+      !participantQuery ||
+      participant.team_name.toLowerCase().includes(participantQuery) ||
+      (participant.full_name ?? "").toLowerCase().includes(participantQuery);
+    const matchesStatus =
+      participantStatus === "registered"
+        ? registeredProfileIds.has(participant.id)
+        : participantStatus === "not_registered"
+          ? !registeredProfileIds.has(participant.id)
+          : participantStatus === "disabled"
+            ? !participant.is_active
+            : true;
+    return matchesQuery && matchesStatus;
+  });
   const seasons = loadedSeasons;
   const activeSeason = loadedActiveSeason;
   const feedbackItems: FeedbackItemRow[] = (feedbackResponse.data ?? []) as FeedbackItemRow[];
@@ -619,9 +676,23 @@ export default async function AdminPage({ searchParams }: PageProps) {
   let healthPreviousResultsStatus = "No upcoming race is scheduled.";
   let healthSchemaVersion: string | null = null;
   let healthReminderRows: AdminReminderHealthRow[] = [];
+  let healthJobRuns: AdminJobRunHealthRow[] = [];
+  let healthAuditRows: AdminAuditHealthRow[] = [];
+  let healthContract: {
+    healthy: boolean;
+    missing: string[];
+    version: string;
+  } | null = null;
 
   if (activeTab === "health") {
-    const [metadataResponse, reminderResponse, nextRaceResponse] = await Promise.all([
+    const [
+      metadataResponse,
+      reminderResponse,
+      nextRaceResponse,
+      jobRunsResponse,
+      auditResponse,
+      healthContractResponse
+    ] = await Promise.all([
       supabase.from("app_metadata").select("value").eq("key", "schema_version").maybeSingle(),
       supabase
         .from("pick_reminders")
@@ -641,19 +712,53 @@ export default async function AdminPage({ searchParams }: PageProps) {
             .limit(1)
             .maybeSingle<HealthRaceRow>()
         : Promise.resolve({ data: null, error: null })
+      ,
+      supabase
+        .from("job_runs")
+        .select("job_name,status,summary,error_message,started_at,completed_at")
+        .order("started_at", { ascending: false })
+        .limit(8),
+      supabase
+        .from("admin_audit_events")
+        .select("action,entity_type,summary,created_at")
+        .order("created_at", { ascending: false })
+        .limit(8),
+      supabase.rpc("get_app_health_contract")
     ]);
 
-    if (metadataResponse.error || reminderResponse.error || nextRaceResponse.error) {
+    if (
+      metadataResponse.error ||
+      reminderResponse.error ||
+      nextRaceResponse.error ||
+      jobRunsResponse.error ||
+      auditResponse.error ||
+      healthContractResponse.error
+    ) {
       throw new Error(
         metadataResponse.error?.message ??
           reminderResponse.error?.message ??
           nextRaceResponse.error?.message ??
+          jobRunsResponse.error?.message ??
+          auditResponse.error?.message ??
+          healthContractResponse.error?.message ??
           "Failed loading system health."
       );
     }
 
     healthSchemaVersion = metadataResponse.data?.value ?? null;
     healthReminderRows = (reminderResponse.data ?? []) as AdminReminderHealthRow[];
+    healthJobRuns = (jobRunsResponse.data ?? []) as AdminJobRunHealthRow[];
+    healthAuditRows = (auditResponse.data ?? []) as AdminAuditHealthRow[];
+    healthContract =
+      healthContractResponse.data &&
+      typeof healthContractResponse.data === "object" &&
+      !Array.isArray(healthContractResponse.data)
+        ? (healthContractResponse.data as {
+            healthy: boolean;
+            missing: string[];
+            version: string;
+          })
+        : null;
     healthNextRace = nextRaceResponse.data ?? null;
 
     if (healthNextRace) {
@@ -746,7 +851,10 @@ export default async function AdminPage({ searchParams }: PageProps) {
       {activeTab === "health" ? (
         <AdminSystemHealth
           activeSeasonName={activeSeason?.display_name ?? null}
+          auditRows={healthAuditRows}
           emailEnabled={process.env.PICK_EMAILS_ENABLED?.toLowerCase() === "true"}
+          healthContract={healthContract}
+          jobRuns={healthJobRuns}
           nextRace={healthNextRace ? {
             pickCount: healthPickCount,
             previousResultsStatus: healthPreviousResultsStatus,
@@ -766,7 +874,8 @@ export default async function AdminPage({ searchParams }: PageProps) {
             <div>
               <h2 className="text-xl font-semibold text-slate-900">Participants</h2>
               <p className="mt-1 text-sm text-slate-600">
-                Registration is tracked per season. Accounts and profiles remain available year to year.
+                Manage permanent account eligibility separately from registration for the active
+                season. Returning participants keep the same login each year.
               </p>
             </div>
             <p className="text-sm font-semibold text-slate-700">
@@ -775,8 +884,50 @@ export default async function AdminPage({ searchParams }: PageProps) {
             </p>
           </div>
 
+          <form
+            action="/admin"
+            className="mt-4 grid gap-2 rounded-md border border-slate-200 bg-slate-50 p-3 sm:grid-cols-[minmax(0,1fr)_auto_auto]"
+            method="get"
+          >
+            <input name="tab" type="hidden" value="participants" />
+            <label className="block">
+              <span className="sr-only">Search participants</span>
+              <input
+                className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+                defaultValue={queryStringParam(params.participant_q) ?? ""}
+                name="participant_q"
+                placeholder="Search name or team"
+                type="search"
+              />
+            </label>
+            <select
+              className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm"
+              defaultValue={participantStatus}
+              name="participant_status"
+            >
+              <option value="all">All accounts</option>
+              <option value="registered">Registered</option>
+              <option value="not_registered">Not registered</option>
+              <option value="disabled">Participation disabled</option>
+            </select>
+            <button
+              className="rounded-md bg-slate-900 px-3 py-2 text-sm font-semibold text-white hover:bg-slate-700"
+              type="submit"
+            >
+              Apply
+            </button>
+          </form>
+
+          <p className="mt-3 text-xs text-slate-500">
+            Showing {visibleParticipants.length} of {winnerProfiles.length} accounts.
+          </p>
+
           <div className="mt-5 grid gap-2">
-            {winnerProfiles.map((participant) => (
+            {visibleParticipants.length === 0 ? (
+              <p className="rounded-md border border-dashed border-slate-300 px-3 py-3 text-sm text-slate-600">
+                No participant accounts match these filters.
+              </p>
+            ) : visibleParticipants.map((participant) => (
               <details
                 className="rounded-md border border-slate-200 bg-white"
                 key={participant.id}
@@ -788,23 +939,40 @@ export default async function AdminPage({ searchParams }: PageProps) {
                         {participant.team_name}
                       </p>
                       <p className="truncate text-xs text-slate-500">
-                        {participant.full_name || "Name not set"} · {participant.role}
+                        {participant.full_name || "Name not set"} · {participant.role} ·{" "}
+                        {participantPickCounts.get(participant.id) ?? 0} submitted race
+                        {(participantPickCounts.get(participant.id) ?? 0) === 1 ? "" : "s"}
                       </p>
                     </div>
-                    <span
-                      className={`shrink-0 rounded-full border px-2 py-0.5 text-xs font-semibold ${
-                        registeredProfileIds.has(participant.id)
-                          ? "border-emerald-200 bg-emerald-50 text-emerald-700"
-                          : "border-slate-200 bg-slate-50 text-slate-600"
-                      }`}
-                    >
-                      {registeredProfileIds.has(participant.id) ? "Registered" : "Not registered"}
-                    </span>
+                    <div className="flex shrink-0 flex-wrap justify-end gap-1.5">
+                      <span
+                        className={`rounded-full border px-2 py-0.5 text-xs font-semibold ${
+                          participant.is_active
+                            ? "border-cyan-200 bg-cyan-50 text-cyan-800"
+                            : "border-red-200 bg-red-50 text-red-700"
+                        }`}
+                      >
+                        {participant.is_active
+                          ? "Participation enabled"
+                          : "Participation disabled"}
+                      </span>
+                      <span
+                        className={`rounded-full border px-2 py-0.5 text-xs font-semibold ${
+                          registeredProfileIds.has(participant.id)
+                            ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                            : "border-slate-200 bg-slate-50 text-slate-600"
+                        }`}
+                      >
+                        {registeredProfileIds.has(participant.id)
+                          ? `${activeSeason?.season_year ?? "Season"} registered`
+                          : "Not registered"}
+                      </span>
+                    </div>
                   </div>
                 </summary>
                 <form
                   action={updateParticipantAction}
-                  className="grid gap-3 border-t border-slate-200 p-3 sm:grid-cols-2 lg:grid-cols-[1fr_1fr_auto_auto]"
+                  className="grid gap-3 border-t border-slate-200 p-3 sm:grid-cols-2 lg:grid-cols-[1fr_1fr_auto_auto_auto]"
                 >
                   <input name="profile_id" type="hidden" value={participant.id} />
                   <label className="block">
@@ -812,6 +980,7 @@ export default async function AdminPage({ searchParams }: PageProps) {
                       Name
                     </span>
                     <input
+                      required
                       className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
                       defaultValue={participant.full_name ?? ""}
                       maxLength={100}
@@ -832,18 +1001,35 @@ export default async function AdminPage({ searchParams }: PageProps) {
                   </label>
                   <label className="flex items-center gap-2 self-end rounded-md border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700">
                     <input
+                      defaultChecked={participant.is_active}
+                      name="account_eligible"
+                      type="checkbox"
+                    />
+                    Participation enabled
+                  </label>
+                  <label className="flex items-center gap-2 self-end rounded-md border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700">
+                    <input
                       defaultChecked={registeredProfileIds.has(participant.id)}
                       name="season_registered"
                       type="checkbox"
                     />
-                    Registered this season
+                    Registered {activeSeason?.season_year ?? "this season"}
                   </label>
-                  <button
+                  {(participantPickCounts.get(participant.id) ?? 0) > 0 ? (
+                    <label className="flex items-center gap-2 self-end rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs font-medium text-red-800 sm:col-span-2 lg:col-span-5">
+                      <input name="force_removal" type="checkbox" />
+                      Allow forced removal from scoring despite{" "}
+                      {participantPickCounts.get(participant.id)} submitted race
+                      {participantPickCounts.get(participant.id) === 1 ? "" : "s"}. Leave this
+                      unchecked for normal profile edits.
+                    </label>
+                  ) : null}
+                  <SubmitButton
                     className="self-end rounded-md bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-700"
-                    type="submit"
+                    pendingLabel="Saving..."
                   >
                     Save
-                  </button>
+                  </SubmitButton>
                 </form>
               </details>
             ))}
@@ -874,6 +1060,30 @@ export default async function AdminPage({ searchParams }: PageProps) {
               Use before the first published race. The importer maps Rank and Driver, while the new
               season starts every driver at 0 points.
             </p>
+            <label className="mt-3 block max-w-xs">
+              <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-600">
+                Season being prepared
+              </span>
+              <select
+                required
+                className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+                defaultValue={
+                  seasons.find((season) => season.status === "upcoming")?.id ??
+                  activeSeason?.id ??
+                  ""
+                }
+                name="season_id"
+              >
+                <option value="">Select season</option>
+                {seasons
+                  .filter((season) => season.status !== "completed")
+                  .map((season) => (
+                    <option key={`roster-season-${season.id}`} value={season.id}>
+                      {season.season_year} ({season.status})
+                    </option>
+                  ))}
+              </select>
+            </label>
             <textarea
               required
               className="mt-3 h-36 w-full rounded-md border border-slate-300 px-3 py-2 font-mono text-xs"
@@ -881,13 +1091,13 @@ export default async function AdminPage({ searchParams }: PageProps) {
               name="standings_paste"
               placeholder={"1\tAlex Palou\tHonda\t711\t0\t17\t8\t6\t14\t15\t778"}
             />
-            <button
+            <SubmitButton
               className="mt-3 rounded-md bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-700"
               data-testid="admin-standings-import-submit"
-              type="submit"
+              pendingLabel="Synchronizing..."
             >
               Import opening seed
-            </button>
+            </SubmitButton>
           </form>
         </details>
 
@@ -941,13 +1151,13 @@ export default async function AdminPage({ searchParams }: PageProps) {
               <input defaultChecked name="is_active" type="checkbox" />
               Active
             </label>
-            <button
+            <SubmitButton
               className="rounded-md bg-slate-900 px-3 py-2 text-sm font-semibold text-white hover:bg-slate-700"
               data-testid="admin-driver-create-submit"
-              type="submit"
+              pendingLabel="Adding..."
             >
               Add driver
-            </button>
+            </SubmitButton>
           </div>
         </form>
         <p className="mt-2 text-xs text-slate-600">
@@ -1036,13 +1246,13 @@ export default async function AdminPage({ searchParams }: PageProps) {
                       Active
                     </label>
 
-                    <button
+                    <SubmitButton
                       className="w-full rounded-md bg-slate-900 px-2 py-2 text-sm font-semibold text-white hover:bg-slate-700 md:col-span-1"
                       data-testid={`admin-driver-save-${driver.id}`}
-                      type="submit"
+                      pendingLabel="Saving..."
                     >
                       Save
-                    </button>
+                    </SubmitButton>
                   </form>
 
                   <form action={deleteDriverAction} className="md:col-span-1 flex md:justify-end">
@@ -1090,20 +1300,113 @@ export default async function AdminPage({ searchParams }: PageProps) {
                 >
                   <div>
                     <p className="text-sm font-semibold text-slate-900">{season.display_name}</p>
-                    <p className="text-xs capitalize text-slate-500">{season.status}</p>
+                    <p className="text-xs capitalize text-slate-500">
+                      {season.status} ·{" "}
+                      {season.registration_code_configured_at
+                        ? "Invite code configured"
+                        : "Invite code required"}{" "}
+                      · {season.roster_configured_at ? "Roster configured" : "Roster required"}
+                    </p>
                   </div>
-                  {season.status === "upcoming" ? (
-                    <form action={activateLeagueSeasonAction}>
-                      <input name="season_id" type="hidden" value={season.id} />
-                      <ConfirmSubmitButton
-                        className="rounded-md bg-slate-900 px-3 py-2 text-xs font-semibold text-white hover:bg-slate-700"
-                        confirmMessage={`Activate ${season.season_year}? The current season must already be saved to the Hall of Fame. Driver points will reset to zero while final ranking order is retained for opening groups.`}
-                        type="submit"
+                  <div className="flex flex-wrap items-end justify-end gap-2">
+                    {season.status !== "completed" ? (
+                      <form
+                        action={setLeagueSeasonRulesDocumentAction}
+                        className="flex flex-wrap items-end gap-2"
                       >
-                        Activate season
-                      </ConfirmSubmitButton>
-                    </form>
-                  ) : null}
+                        <input name="season_id" type="hidden" value={season.id} />
+                        <label className="block">
+                          <span className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                            Rules PDF path / URL
+                          </span>
+                          <input
+                            className="w-52 rounded-md border border-slate-300 px-2.5 py-2 text-xs"
+                            defaultValue={season.rules_document_url ?? ""}
+                            name="rules_document_url"
+                            placeholder="/docs/2027-rules.pdf"
+                            type="text"
+                          />
+                        </label>
+                        <SubmitButton
+                          className="rounded-md border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-800 hover:bg-slate-100"
+                          pendingLabel="Saving..."
+                        >
+                          Save rules
+                        </SubmitButton>
+                      </form>
+                    ) : null}
+                    {season.status !== "completed" ? (
+                      <form
+                        action={setLeagueSeasonInviteCodeAction}
+                        className="flex flex-wrap items-end gap-2"
+                      >
+                        <input name="season_id" type="hidden" value={season.id} />
+                        <label className="block">
+                          <span className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                            {season.registration_code_configured_at
+                              ? "Replace invite code"
+                              : "Set invite code"}
+                          </span>
+                          <input
+                            required
+                            autoCapitalize="none"
+                            autoComplete="off"
+                            className="w-44 rounded-md border border-slate-300 px-2.5 py-2 text-xs"
+                            maxLength={64}
+                            minLength={8}
+                            name="invite_code"
+                            type="text"
+                          />
+                        </label>
+                        <label className="block">
+                          <span className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                            Confirm code
+                          </span>
+                          <input
+                            required
+                            autoCapitalize="none"
+                            autoComplete="off"
+                            className="w-44 rounded-md border border-slate-300 px-2.5 py-2 text-xs"
+                            maxLength={64}
+                            minLength={8}
+                            name="invite_code_confirmation"
+                            type="text"
+                          />
+                        </label>
+                        <SubmitButton
+                          className="rounded-md border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-800 hover:bg-slate-100"
+                          pendingLabel="Saving..."
+                        >
+                          Save code
+                        </SubmitButton>
+                      </form>
+                    ) : null}
+                    {season.status === "upcoming" ? (
+                      <form action={activateLeagueSeasonAction}>
+                        <input name="season_id" type="hidden" value={season.id} />
+                        <ConfirmSubmitButton
+                          className="rounded-md bg-slate-900 px-3 py-2 text-xs font-semibold text-white hover:bg-slate-700 disabled:bg-slate-400"
+                          confirmMessage={`Activate ${season.season_year}? The current season must already be saved to the Hall of Fame. Driver points will reset to zero while final ranking order is retained for opening groups.`}
+                          disabled={
+                            !season.registration_code_configured_at ||
+                            !season.roster_configured_at
+                          }
+                          pendingLabel="Activating..."
+                          type="submit"
+                        >
+                          Activate season
+                        </ConfirmSubmitButton>
+                      </form>
+                    ) : null}
+                    {!season.roster_configured_at && season.status !== "completed" ? (
+                      <Link
+                        className="rounded-md border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-800 hover:bg-slate-100"
+                        href="/admin?tab=drivers"
+                      >
+                        Configure roster
+                      </Link>
+                    ) : null}
+                  </div>
                 </div>
               ))}
             </div>
@@ -1122,13 +1425,49 @@ export default async function AdminPage({ searchParams }: PageProps) {
                   type="number"
                 />
               </label>
-              <button
+              <label className="block">
+                <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-600">
+                  Private invite code
+                </span>
+                <input
+                  required
+                  autoCapitalize="none"
+                  autoComplete="off"
+                  className="w-48 rounded-md border border-slate-300 px-3 py-2 text-sm"
+                  maxLength={64}
+                  minLength={8}
+                  name="invite_code"
+                  placeholder="8-64 characters"
+                  type="text"
+                />
+              </label>
+              <label className="block">
+                <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-600">
+                  Confirm invite code
+                </span>
+                <input
+                  required
+                  autoCapitalize="none"
+                  autoComplete="off"
+                  className="w-48 rounded-md border border-slate-300 px-3 py-2 text-sm"
+                  maxLength={64}
+                  minLength={8}
+                  name="invite_code_confirmation"
+                  placeholder="Enter code again"
+                  type="text"
+                />
+              </label>
+              <SubmitButton
                 className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-800 hover:bg-slate-100"
-                type="submit"
+                pendingLabel="Creating..."
               >
                 Create season
-              </button>
+              </SubmitButton>
             </form>
+            <p className="mt-2 text-xs text-slate-500">
+              The code is stored securely and never displayed again. Existing registered
+              participants remain registered if the code changes.
+            </p>
           </div>
         </details>
 
@@ -1273,13 +1612,13 @@ export default async function AdminPage({ searchParams }: PageProps) {
           </label>
 
           <div className="md:col-span-6">
-            <button
+            <SubmitButton
               className="rounded-md bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-700"
               data-testid="admin-race-create-submit"
-              type="submit"
+              pendingLabel="Adding..."
             >
               Add race
-            </button>
+            </SubmitButton>
           </div>
         </form>
 
@@ -1331,13 +1670,13 @@ export default async function AdminPage({ searchParams }: PageProps) {
             </label>
 
             <div className="flex items-end">
-              <button
+              <SubmitButton
                 className="w-full rounded-md bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-700"
                 data-testid="admin-race-winner-submit"
-                type="submit"
+                pendingLabel="Saving..."
               >
                 Save fantasy winner
-              </button>
+              </SubmitButton>
             </div>
             <p className="text-xs text-slate-500 md:col-span-3">
               Auto winner uses highest weekly points, then closest official average speed tiebreak, then team name.
@@ -1384,6 +1723,15 @@ export default async function AdminPage({ searchParams }: PageProps) {
                       ) : (
                         <span className="rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-xs font-semibold text-slate-600">
                           Standard
+                        </span>
+                      )}
+                      {race.field_frozen_at ? (
+                        <span className="rounded-full border border-blue-200 bg-blue-50 px-2 py-0.5 text-xs font-semibold text-blue-800">
+                          Field frozen
+                        </span>
+                      ) : (
+                        <span className="rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-xs font-semibold text-slate-600">
+                          Field editable
                         </span>
                       )}
                       {race.is_archived ? (
@@ -1462,6 +1810,7 @@ export default async function AdminPage({ searchParams }: PageProps) {
                     required
                     className="w-full rounded-md border border-slate-300 px-2 py-2 text-sm md:col-span-1"
                     defaultValue={String(race.season_id)}
+                    disabled={Boolean(race.field_frozen_at)}
                     name="season_id"
                   >
                     {seasons.map((season) => (
@@ -1475,6 +1824,7 @@ export default async function AdminPage({ searchParams }: PageProps) {
                     required
                     className="w-full rounded-md border border-slate-300 px-2 py-2 text-sm md:col-span-1"
                     defaultValue={race.round_number}
+                    disabled={Boolean(race.field_frozen_at)}
                     max={99}
                     min={1}
                     name="round_number"
@@ -1521,11 +1871,29 @@ export default async function AdminPage({ searchParams }: PageProps) {
                   <select
                     className="w-full rounded-md border border-slate-300 px-2 py-2 text-sm md:col-span-2"
                     defaultValue={normalizeRacePickFormat(race.pick_format)}
+                    disabled={Boolean(race.field_frozen_at)}
                     name="pick_format"
                   >
                     <option value="standard">Standard rules</option>
                     <option value="indy_500">Indianapolis 500 rules</option>
                   </select>
+
+                  {race.field_frozen_at ? (
+                    <>
+                      <input name="season_id" type="hidden" value={String(race.season_id)} />
+                      <input name="round_number" type="hidden" value={String(race.round_number)} />
+                      <input
+                        name="pick_format"
+                        type="hidden"
+                        value={normalizeRacePickFormat(race.pick_format)}
+                      />
+                      <label className="flex items-center gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-900 md:col-span-6">
+                        <input name="allow_schedule_correction" type="checkbox" />
+                        Confirm a qualifying/race-time correction if submitted picks already
+                        exist. Leave unchecked for name, payout, or image changes.
+                      </label>
+                    </>
+                  ) : null}
 
                   <input
                     accept="image/png,image/jpeg,image/webp,image/gif,image/avif"
@@ -1542,13 +1910,13 @@ export default async function AdminPage({ searchParams }: PageProps) {
                     type="url"
                   />
 
-                  <button
+                  <SubmitButton
                     className="rounded-md bg-slate-900 px-3 py-2 text-sm font-semibold text-white hover:bg-slate-700 md:col-span-1"
                     data-testid={`admin-race-save-${race.id}`}
-                    type="submit"
+                    pendingLabel="Saving..."
                   >
                     Save
-                  </button>
+                  </SubmitButton>
                 </form>
 
                   <div className="mt-3 flex flex-wrap justify-end gap-2">
@@ -1580,7 +1948,7 @@ export default async function AdminPage({ searchParams }: PageProps) {
                       <input name="tab" type="hidden" value="races" />
                       <ConfirmSubmitButton
                         className="rounded-md border border-red-300 px-2 py-2 text-xs font-semibold text-red-700 hover:bg-red-50"
-                        confirmMessage={`Delete ${race.race_name}? This will remove all picks and race results for this event.`}
+                        confirmMessage={`Delete ${race.race_name}? Deletion is allowed only while the race has no picks or results. Otherwise, archive it.`}
                         data-testid={`admin-race-delete-${race.id}`}
                         formNoValidate
                         type="submit"
@@ -1670,13 +2038,13 @@ export default async function AdminPage({ searchParams }: PageProps) {
                 />
               </label>
             </div>
-            <button
+            <SubmitButton
               className="mt-3 rounded-md bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-700"
               data-testid="admin-indy-qualifying-submit"
-              type="submit"
+              pendingLabel="Importing..."
             >
               Import qualifying order
-            </button>
+            </SubmitButton>
           </form>
         </details>
 
@@ -1685,7 +2053,8 @@ export default async function AdminPage({ searchParams }: PageProps) {
           activeRaces={currentSeasonRaces.map((race) => ({
             id: race.id,
             pickFormat: normalizeRacePickFormat(race.pick_format),
-            raceName: race.race_name
+            raceName: race.race_name,
+            resultsStatus: race.results_status
           }))}
           drivers={drivers.map((driver) => ({
             driverName: driver.driver_name,
@@ -1905,14 +2274,20 @@ export default async function AdminPage({ searchParams }: PageProps) {
               />
             </label>
 
+            <label className="flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-900 md:col-span-4">
+              <input className="mt-0.5" name="confirm_results_correction" type="checkbox" />
+              Check only when intentionally editing a published race. The race will return to
+              draft until the complete corrected field is republished.
+            </label>
+
             <div className="flex items-end">
-              <button
+              <SubmitButton
                 className="w-full rounded-md bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-700"
                 data-testid="admin-results-manual-submit"
-                type="submit"
+                pendingLabel="Saving draft..."
               >
                 Save draft result
-              </button>
+              </SubmitButton>
             </div>
           </form>
 
@@ -1946,6 +2321,7 @@ export default async function AdminPage({ searchParams }: PageProps) {
               <input
                 required
                 className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+                max={300}
                 min={0.001}
                 name="official_winning_average_speed"
                 step={0.001}
@@ -1953,13 +2329,17 @@ export default async function AdminPage({ searchParams }: PageProps) {
               />
             </label>
             <div className="flex items-end">
-              <button
+              <SubmitButton
                 className="w-full rounded-md bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-700"
-                type="submit"
+                pendingLabel="Publishing..."
               >
                 Publish complete draft
-              </button>
+              </SubmitButton>
             </div>
+            <label className="flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-900 md:col-span-3">
+              <input className="mt-0.5" name="confirm_results_correction" type="checkbox" />
+              Check only when intentionally republishing an already published race.
+            </label>
             <p className="text-xs text-slate-600 md:col-span-3">
               Manual publication requires one saved row per snapshotted driver; enter 0 for
               nonstarters. Bulk import adds those zero rows automatically.

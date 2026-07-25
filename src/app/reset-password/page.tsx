@@ -3,6 +3,7 @@ import { updatePasswordAction } from "@/app/actions/auth";
 import { MOUND_HOUND_IMAGE_PATH } from "@/lib/branding";
 import { queryStringParam } from "@/lib/query";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
+import { SubmitButton } from "@/components/submit-button";
 
 type PageProps = {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
@@ -87,12 +88,12 @@ export default async function ResetPasswordPage({ searchParams }: PageProps) {
               />
             </label>
 
-            <button
+            <SubmitButton
               className="w-full rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white hover:bg-slate-700"
-              type="submit"
+              pendingLabel="Updating..."
             >
               Update password
-            </button>
+            </SubmitButton>
           </form>
         </>
       )}

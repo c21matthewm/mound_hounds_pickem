@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { checkCronAuthorization } from "@/lib/cron-auth";
 import { finalizeDueRaceWinners } from "@/lib/fantasy-winner";
+import { withJobRun } from "@/lib/job-runs";
 
 async function handleCronRequest(request: Request) {
   const authCheck = checkCronAuthorization(request);
@@ -9,7 +10,7 @@ async function handleCronRequest(request: Request) {
   }
 
   try {
-    const result = await finalizeDueRaceWinners();
+    const result = await withJobRun("fantasy-winner", finalizeDueRaceWinners);
     return NextResponse.json({
       ok: true,
       ...result

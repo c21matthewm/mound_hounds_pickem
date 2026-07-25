@@ -2,6 +2,7 @@ import Link from "next/link";
 import { requestPasswordResetAction } from "@/app/actions/auth";
 import { MOUND_HOUND_IMAGE_PATH } from "@/lib/branding";
 import { queryStringParam } from "@/lib/query";
+import { SubmitButton } from "@/components/submit-button";
 
 type PageProps = {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
@@ -60,12 +61,12 @@ export default async function ForgotPasswordPage({ searchParams }: PageProps) {
           />
         </label>
 
-        <button
+        <SubmitButton
           className="w-full rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white hover:bg-slate-700"
-          type="submit"
+          pendingLabel="Sending..."
         >
           Send reset link
-        </button>
+        </SubmitButton>
       </form>
 
       <p className="mt-5 text-sm text-slate-600">

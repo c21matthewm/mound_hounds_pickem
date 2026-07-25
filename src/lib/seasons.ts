@@ -7,6 +7,9 @@ export type LeagueSeason = {
   completedAt: string | null;
   displayName: string;
   id: number;
+  registrationCodeConfiguredAt: string | null;
+  rosterConfiguredAt: string | null;
+  rulesDocumentUrl: string | null;
   seasonYear: number;
   status: LeagueSeasonStatus;
 };
@@ -16,6 +19,9 @@ type LeagueSeasonRow = {
   completed_at: string | null;
   display_name: string;
   id: number;
+  registration_code_configured_at: string | null;
+  roster_configured_at: string | null;
+  rules_document_url: string | null;
   season_year: number;
   status: LeagueSeasonStatus;
 };
@@ -25,12 +31,15 @@ const toLeagueSeason = (row: LeagueSeasonRow): LeagueSeason => ({
   completedAt: row.completed_at,
   displayName: row.display_name,
   id: row.id,
+  registrationCodeConfiguredAt: row.registration_code_configured_at,
+  rosterConfiguredAt: row.roster_configured_at,
+  rulesDocumentUrl: row.rules_document_url,
   seasonYear: row.season_year,
   status: row.status
 });
 
 const SEASON_FIELDS =
-  "id,season_year,display_name,status,activated_at,completed_at";
+  "id,season_year,display_name,status,activated_at,completed_at,registration_code_configured_at,roster_configured_at,rules_document_url";
 
 export async function loadActiveLeagueSeason(
   supabase: SupabaseClient

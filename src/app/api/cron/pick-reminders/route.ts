@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { checkCronAuthorization } from "@/lib/cron-auth";
 import { sendDuePickReminders } from "@/lib/pick-reminders";
+import { withJobRun } from "@/lib/job-runs";
 
 async function handleCronRequest(request: Request) {
   const authCheck = checkCronAuthorization(request);
@@ -9,7 +10,7 @@ async function handleCronRequest(request: Request) {
   }
 
   try {
-    const result = await sendDuePickReminders();
+    const result = await withJobRun("pick-reminders", sendDuePickReminders);
     return NextResponse.json({
       ok: true,
       ...result

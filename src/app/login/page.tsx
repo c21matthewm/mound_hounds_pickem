@@ -2,6 +2,7 @@ import Link from "next/link";
 import { queryStringParam, sanitizeNextPath } from "@/lib/query";
 import { signInAction } from "@/app/actions/auth";
 import { MOUND_HOUND_IMAGE_PATH } from "@/lib/branding";
+import { SubmitButton } from "@/components/submit-button";
 
 type PageProps = {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
@@ -11,7 +12,7 @@ export default async function LoginPage({ searchParams }: PageProps) {
   const params = await searchParams;
   const error = queryStringParam(params.error);
   const message = queryStringParam(params.message);
-  const next = sanitizeNextPath(queryStringParam(params.next));
+  const next = sanitizeNextPath(queryStringParam(params.next) ?? "/dashboard");
 
   return (
     <main className="mx-auto flex min-h-screen max-w-lg flex-col justify-center px-6 py-16">
@@ -81,12 +82,12 @@ export default async function LoginPage({ searchParams }: PageProps) {
           />
         </label>
 
-        <button
+        <SubmitButton
           className="w-full rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white hover:bg-slate-700"
-          type="submit"
+          pendingLabel="Signing in..."
         >
           Sign in
-        </button>
+        </SubmitButton>
       </form>
 
       <p className="mt-5 text-sm text-slate-600">

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 
 type SelectionMap = Record<number, number | null>;
 const LEAVE_CONFIRM_MESSAGE = "You have unsaved Pick'em changes. Leave this page without saving?";
@@ -42,6 +42,7 @@ export function PickemForm({
   const groupNumbers = useMemo(() => groups.map((group) => group.groupNumber), [groups]);
   const [draftSelection, setDraftSelection] = useState<SelectionMap>(() => ({ ...savedSelection }));
   const [draftAverageSpeed, setDraftAverageSpeed] = useState(existingAverageSpeed);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const formRef = useRef<HTMLFormElement | null>(null);
   const submitInProgressRef = useRef(false);
   const submitIntentTimeoutRef = useRef<number | null>(null);
@@ -65,6 +66,7 @@ export function PickemForm({
 
   const clearSubmitIntent = () => {
     submitInProgressRef.current = false;
+    setIsSubmitting(false);
     if (submitIntentTimeoutRef.current !== null) {
       window.clearTimeout(submitIntentTimeoutRef.current);
       submitIntentTimeoutRef.current = null;
@@ -82,7 +84,12 @@ export function PickemForm({
     }, 2000);
   };
 
-  const handleSubmit = () => {
+  const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
+    if (submitInProgressRef.current) {
+      event.preventDefault();
+      return;
+    }
+    setIsSubmitting(true);
     submitInProgressRef.current = true;
     allowNextUnloadOnce();
     if (submitIntentTimeoutRef.current !== null) {
@@ -213,7 +220,7 @@ export function PickemForm({
     <form action={action} className="mt-6 space-y-6" onSubmit={handleSubmit} ref={formRef}>
       <input name="race_id" type="hidden" value={String(raceId)} />
 
-      <fieldset className="space-y-6 disabled:opacity-80" disabled={picksLocked}>
+      <fieldset className="space-y-6 disabled:opacity-80" disabled={picksLocked || isSubmitting}>
         <section className="rounded-2xl border border-slate-200 bg-white p-5 md:p-6">
           <label className="block max-w-sm">
             <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">
@@ -226,6 +233,7 @@ export function PickemForm({
               required
               className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm"
               min={1}
+              max={300}
               name="average_speed"
               onChange={(event) => {
                 clearSubmitIntent();
@@ -345,10 +353,14 @@ export function PickemForm({
 
         <button
           className="rounded-xl bg-slate-900 px-5 py-3 text-sm font-semibold text-white hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
-          disabled={!canSubmit}
+          disabled={!canSubmit || isSubmitting}
           type="submit"
         >
-          {picksLocked ? "Picks are locked" : "Save Pick'em Form"}
+          {picksLocked
+            ? "Picks are locked"
+            : isSubmitting
+              ? "Saving picks..."
+              : "Save Pick'em Form"}
         </button>
 
         {showMobileActionBar ? (
@@ -379,10 +391,10 @@ export function PickemForm({
                 </div>
                 <button
                   className="shrink-0 rounded-md bg-slate-900 px-2.5 py-1.5 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
-                  disabled={!canSubmit}
+                  disabled={!canSubmit || isSubmitting}
                   type="submit"
                 >
-                  Save
+                  {isSubmitting ? "Saving..." : "Save"}
                 </button>
               </div>
             </div>

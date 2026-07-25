@@ -56,7 +56,7 @@ const getOrigin = async (): Promise<string> => {
 export async function signInAction(formData: FormData) {
   const email = asText(formData.get("email")).toLowerCase();
   const password = asText(formData.get("password"));
-  const next = sanitizeNextPath(asText(formData.get("next")));
+  const next = sanitizeNextPath(asText(formData.get("next")) || "/dashboard");
 
   if (!email || !password) {
     errorRedirect("/login", "Email and password are required.");
@@ -79,8 +79,9 @@ export async function signUpAction(formData: FormData) {
   const email = asText(formData.get("email")).toLowerCase();
   const password = asText(formData.get("password"));
   const confirmPassword = asText(formData.get("confirm_password"));
+  const inviteCode = asText(formData.get("invite_code"));
 
-  if (!fullName || !teamName || !email || !password || !confirmPassword) {
+  if (!fullName || !teamName || !email || !password || !confirmPassword || !inviteCode) {
     errorRedirect("/signup", "All fields are required.");
   }
 
@@ -99,6 +100,29 @@ export async function signUpAction(formData: FormData) {
   const registrationSeason = await loadActiveLeagueSeason(createServiceRoleSupabaseClient());
   if (!registrationSeason) {
     errorRedirect("/signup", "Registration is not open because no league season is active.");
+  }
+  const selectedRegistrationSeason = registrationSeason!;
+  if (!selectedRegistrationSeason.registrationCodeConfiguredAt) {
+    errorRedirect(
+      "/signup",
+      "Registration is not open yet because the season invite code has not been configured."
+    );
+  }
+
+  const serviceSupabase = createServiceRoleSupabaseClient();
+  const { data: inviteCodeValid, error: inviteCodeError } = await serviceSupabase.rpc(
+    "validate_season_invite_code",
+    {
+      p_invite_code: inviteCode,
+      p_season_id: selectedRegistrationSeason.id
+    }
+  );
+  if (inviteCodeError) {
+    console.error("[auth] invite code validation failed:", inviteCodeError.message);
+    errorRedirect("/signup", "Registration could not be verified. Please try again.");
+  }
+  if (!inviteCodeValid) {
+    errorRedirect("/signup", "The season invite code is incorrect.");
   }
 
   const supabase = await createServerSupabaseClient();
@@ -121,10 +145,34 @@ export async function signUpAction(formData: FormData) {
     errorRedirect("/signup", friendlyAuthError(error.message));
   }
 
-  if (data.session) {
-    messageRedirect("/onboarding", "Account created. Complete your profile to continue.");
+  if (!data.user) {
+    errorRedirect("/signup", "Your account could not be created. Please try again.");
+  }
+  const createdUser = data.user!;
+
+  const { error: registrationError } = await serviceSupabase.rpc(
+    "register_profile_for_season_with_code",
+    {
+      p_invite_code: inviteCode,
+      p_profile_id: createdUser.id,
+      p_season_id: selectedRegistrationSeason.id
+    }
+  );
+
+  if (registrationError) {
+    console.error("[auth] season registration after signup failed:", registrationError.message);
+    messageRedirect(
+      "/login",
+      "Your account was created. Confirm your email, then enter the season invite code after signing in."
+    );
   }
 
+  if (data.session) {
+    invalidateScoringCache();
+    messageRedirect("/onboarding", "Account created and season registration confirmed.");
+  }
+
+  invalidateScoringCache();
   messageRedirect("/login", "Check your email to confirm your account.");
 }
 
@@ -248,20 +296,15 @@ export async function saveProfileAction(formData: FormData) {
     errorRedirect("/onboarding", error.message);
   }
 
-  const { error: registrationError } = await supabase.rpc("set_active_season_participation", {
-    p_register: true
-  });
-
-  if (registrationError) {
-    errorRedirect("/season-registration", registrationError.message);
-  }
-
-  invalidateScoringCache();
-  messageRedirect("/dashboard", "Profile saved and season registration confirmed.");
+  messageRedirect(
+    "/season-registration",
+    "Profile saved. Enter the season invite code to join the active league."
+  );
 }
 
 export async function setSeasonParticipationAction(formData: FormData) {
   const decision = asText(formData.get("decision"));
+  const inviteCode = asText(formData.get("invite_code"));
   const next = sanitizeNextPath(asText(formData.get("next")) || "/dashboard");
 
   if (decision !== "register" && decision !== "decline") {
@@ -276,10 +319,33 @@ export async function setSeasonParticipationAction(formData: FormData) {
   if (!user) {
     errorRedirect("/login", "Your session expired. Please sign in again.");
   }
+  const currentUser = user!;
 
-  const { error } = await supabase.rpc("set_active_season_participation", {
-    p_register: decision === "register"
-  });
+  let error: { message: string } | null = null;
+  if (decision === "register") {
+    if (!inviteCode) {
+      errorRedirect("/season-registration", "Enter the season invite code.");
+    }
+
+    const activeSeason = await loadActiveLeagueSeason(supabase);
+    if (!activeSeason) {
+      errorRedirect("/season-registration", "No league season is currently open.");
+    }
+    const selectedActiveSeason = activeSeason!;
+
+    const serviceSupabase = createServiceRoleSupabaseClient();
+    const result = await serviceSupabase.rpc("register_profile_for_season_with_code", {
+      p_invite_code: inviteCode,
+      p_profile_id: currentUser.id,
+      p_season_id: selectedActiveSeason.id
+    });
+    error = result.error;
+  } else {
+    const result = await supabase.rpc("set_active_season_participation", {
+      p_register: false
+    });
+    error = result.error;
+  }
 
   if (error) {
     errorRedirect("/season-registration", error.message);

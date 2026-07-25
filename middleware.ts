@@ -7,6 +7,7 @@ const PROTECTED_ROUTE_PREFIXES = [
   "/dashboard",
   "/onboarding",
   "/season-registration",
+  "/race-center",
   "/picks",
   "/leaderboard",
   "/admin",
@@ -74,7 +75,7 @@ export async function middleware(request: NextRequest) {
 
   if (user && isAuthRoute) {
     const destination = request.nextUrl.clone();
-    destination.pathname = "/onboarding";
+    destination.pathname = "/dashboard";
     destination.search = "";
     return NextResponse.redirect(destination);
   }

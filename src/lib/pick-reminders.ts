@@ -468,6 +468,16 @@ export async function sendDuePickReminders(): Promise<PickReminderSummary> {
     };
   }
 
+  const { error: fieldFreezeError } = await supabase.rpc(
+    "ensure_race_pick_field_snapshot",
+    { p_race_id: upcomingRace.id }
+  );
+  if (fieldFreezeError) {
+    throw new Error(
+      `Reminder delivery stopped because the race field is not ready: ${fieldFreezeError.message}`
+    );
+  }
+
   const [registrationResponse, { data: pickRows, error: picksError }] =
     await Promise.all([
       supabase

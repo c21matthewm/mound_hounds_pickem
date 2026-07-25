@@ -6,6 +6,7 @@ import { requireAppUser } from "@/lib/authenticated-user";
 
 export default async function ContactAdminPage() {
   await requireAppUser({ requireSeasonDecision: true });
+  const adminEmail = process.env.LEAGUE_ADMIN_EMAIL ?? "indymoundhounds@gmail.com";
 
   return (
     <AuthenticatedPageShell
@@ -31,9 +32,9 @@ export default async function ContactAdminPage() {
         <p className="mt-2 text-xl font-semibold text-slate-900">
           <a
             className="underline decoration-cyan-400 underline-offset-4 hover:text-cyan-800"
-            href="mailto:indymoundhounds@gmail.com"
+            href={`mailto:${adminEmail}`}
           >
-            indymoundhounds@gmail.com
+            {adminEmail}
           </a>
         </p>
         <p className="mt-3 text-sm text-slate-600">

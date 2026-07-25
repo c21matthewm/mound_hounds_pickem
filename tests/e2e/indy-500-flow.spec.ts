@@ -122,7 +122,7 @@ const signIn = async (page: Page, email: string) => {
   await page.locator('input[name="email"]').fill(email);
   await page.locator('input[name="password"]').fill(TEST_PASSWORD);
   await page.getByRole("button", { name: "Sign in" }).click();
-  await expect(page).toHaveURL(/\/dashboard|\/admin|\/onboarding|\/season-registration/);
+  await expect(page).toHaveURL(/\/dashboard/);
   await expect(page).not.toHaveURL(/\/login\?error=/);
 };
 

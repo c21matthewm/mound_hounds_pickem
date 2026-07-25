@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { saveProfileAction } from "@/app/actions/auth";
 import { SignOutButton } from "@/components/sign-out-button";
+import { SubmitButton } from "@/components/submit-button";
 import { isProfileComplete, type ProfileRow } from "@/lib/profile";
 import { queryStringParam } from "@/lib/query";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
@@ -33,14 +34,18 @@ export default async function OnboardingPage({ searchParams }: PageProps) {
     redirect("/login");
   }
 
-  const { data: profile } = await supabase
+  const { data: profile, error: profileError } = await supabase
     .from("profiles")
     .select("id,full_name,team_name,phone_number,phone_carrier,role")
     .eq("id", user.id)
     .maybeSingle<ProfileRow>();
 
+  if (profileError) {
+    throw new Error(`Failed loading your profile: ${profileError.message}`);
+  }
+
   if (isProfileComplete(profile)) {
-    redirect("/season-registration");
+    redirect("/dashboard");
   }
 
   return (
@@ -129,12 +134,12 @@ export default async function OnboardingPage({ searchParams }: PageProps) {
           </select>
         </label>
 
-        <button
+        <SubmitButton
           className="mt-2 rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white hover:bg-slate-700"
-          type="submit"
+          pendingLabel="Saving profile..."
         >
           Save profile
-        </button>
+        </SubmitButton>
       </form>
 
     </main>

@@ -310,6 +310,8 @@ export async function finalizeRaceWinnerNow(
 }
 
 export async function finalizeDueRaceWinners(): Promise<{
+  failedRaceCount: number;
+  failures: Array<{ message: string; raceId: number }>;
   processedRaceCount: number;
   updatedRaceCount: number;
 }> {
@@ -331,12 +333,24 @@ export async function finalizeDueRaceWinners(): Promise<{
   }
 
   const pendingRaces = (races ?? []) as PendingRaceRow[];
+  const failures: Array<{ message: string; raceId: number }> = [];
+  let updatedRaceCount = 0;
   for (const race of pendingRaces) {
-    await finalizeRaceWinnerNow(supabase, race.id);
+    try {
+      await finalizeRaceWinnerNow(supabase, race.id);
+      updatedRaceCount += 1;
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Unknown fantasy winner finalization error.";
+      failures.push({ message, raceId: race.id });
+      console.error(`[fantasy-winner] Race ${race.id} failed:`, message);
+    }
   }
 
   return {
+    failedRaceCount: failures.length,
+    failures,
     processedRaceCount: pendingRaces.length,
-    updatedRaceCount: pendingRaces.length
+    updatedRaceCount
   };
 }

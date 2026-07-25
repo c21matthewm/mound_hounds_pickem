@@ -4,6 +4,7 @@ import { signUpAction } from "@/app/actions/auth";
 import { MOUND_HOUND_IMAGE_PATH } from "@/lib/branding";
 import { loadActiveLeagueSeason } from "@/lib/seasons";
 import { createServiceRoleSupabaseClient } from "@/lib/supabase/service-role";
+import { SubmitButton } from "@/components/submit-button";
 
 type PageProps = {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
@@ -14,6 +15,7 @@ export default async function SignupPage({ searchParams }: PageProps) {
   const error = queryStringParam(params.error);
   const message = queryStringParam(params.message);
   const activeSeason = await loadActiveLeagueSeason(createServiceRoleSupabaseClient());
+  const registrationOpen = Boolean(activeSeason?.registrationCodeConfiguredAt);
 
   return (
     <main className="mx-auto flex min-h-screen max-w-lg flex-col justify-center px-6 py-16">
@@ -33,9 +35,11 @@ export default async function SignupPage({ searchParams }: PageProps) {
         </div>
       </div>
       <p className="mt-3 text-sm leading-6 text-slate-600">
-        {activeSeason
+        {registrationOpen && activeSeason
           ? `Create your permanent account and join the ${activeSeason.seasonYear} league season.`
-          : "Account registration will open when the next league season is active."}
+          : activeSeason
+            ? "Registration will open when the league administrator finishes the season setup."
+            : "Account registration will open when the next league season is active."}
       </p>
 
       {error ? (
@@ -75,6 +79,26 @@ export default async function SignupPage({ searchParams }: PageProps) {
         </label>
 
         <label className="block">
+          <span className="mb-1 block text-sm font-medium text-slate-700">
+            Season invite code
+          </span>
+          <input
+            required
+            autoCapitalize="none"
+            autoComplete="off"
+            className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm"
+            disabled={!registrationOpen}
+            maxLength={64}
+            minLength={8}
+            name="invite_code"
+            type="text"
+          />
+          <span className="mt-1 block text-xs text-slate-500">
+            Get this private league code from the league administrator.
+          </span>
+        </label>
+
+        <label className="block">
           <span className="mb-1 block text-sm font-medium text-slate-700">Email</span>
           <input
             required
@@ -109,13 +133,13 @@ export default async function SignupPage({ searchParams }: PageProps) {
           />
         </label>
 
-        <button
+        <SubmitButton
           className="w-full rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white hover:bg-slate-700 disabled:cursor-not-allowed disabled:bg-slate-400"
-          disabled={!activeSeason}
-          type="submit"
+          disabled={!registrationOpen}
+          pendingLabel="Creating account..."
         >
           Create account
-        </button>
+        </SubmitButton>
       </form>
 
       <p className="mt-5 text-sm text-slate-600">
