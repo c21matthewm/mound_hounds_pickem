@@ -1,5 +1,11 @@
 export type RacePickFormat = "standard" | "indy_500";
 
+export type PickFieldDriverOrder = {
+  currentStanding: number;
+  driverName: string;
+  qualifyingPosition?: number | null;
+};
+
 export const STANDARD_PICK_GROUP_COUNT = 6;
 export const INDY_500_PICK_GROUP_COUNT = 8;
 export const INDY_500_QUALIFYING_FIELD_SIZE = 33;
@@ -22,6 +28,26 @@ export const groupNumbersForPickFormat = (format: RacePickFormat): number[] =>
 
 export const isValidAverageSpeedMph = (value: number): boolean =>
   Number.isFinite(value) && value > 0 && value <= MAX_AVERAGE_SPEED_MPH;
+
+export const comparePickFieldDriverOrder = (
+  format: RacePickFormat,
+  left: PickFieldDriverOrder,
+  right: PickFieldDriverOrder
+): number => {
+  if (format === "indy_500") {
+    const qualifyingDifference =
+      (left.qualifyingPosition ?? Number.MAX_SAFE_INTEGER) -
+      (right.qualifyingPosition ?? Number.MAX_SAFE_INTEGER);
+    if (qualifyingDifference !== 0) {
+      return qualifyingDifference;
+    }
+  }
+
+  const standingDifference = left.currentStanding - right.currentStanding;
+  return standingDifference !== 0
+    ? standingDifference
+    : left.driverName.localeCompare(right.driverName);
+};
 
 export const pickLockAtForRace = (race: {
   pick_format?: string | null;

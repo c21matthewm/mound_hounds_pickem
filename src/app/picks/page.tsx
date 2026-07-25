@@ -10,6 +10,7 @@ import { getPreviousRaceResultsGate } from "@/lib/pickem-results-gate";
 import { queryStringParam } from "@/lib/query";
 import { raceContextLabel } from "@/lib/race-label";
 import {
+  comparePickFieldDriverOrder,
   groupNumbersForCount,
   normalizeRacePickFormat,
   pickGroupCountForFormat,
@@ -239,6 +240,25 @@ export default async function PicksPage({ searchParams }: PageProps) {
       driversByGroup.set(driver.group_number, existing);
     });
   }
+
+  driversByGroup.forEach((drivers, groupNumber) => {
+    drivers.sort((left, right) =>
+      comparePickFieldDriverOrder(
+        racePickFormat,
+        {
+          currentStanding: left.current_standing,
+          driverName: left.driver_name,
+          qualifyingPosition: left.qualifyingPosition
+        },
+        {
+          currentStanding: right.current_standing,
+          driverName: right.driver_name,
+          qualifyingPosition: right.qualifyingPosition
+        }
+      )
+    );
+    driversByGroup.set(groupNumber, drivers);
+  });
 
   const missingGroups = groupNumbers.filter(
     (groupNumber) => (driversByGroup.get(groupNumber) ?? []).length === 0

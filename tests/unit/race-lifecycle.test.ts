@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  comparePickFieldDriverOrder,
   groupNumbersForPickFormat,
   indy500GroupForQualifyingPosition,
   isValidAverageSpeedMph,
@@ -42,6 +43,32 @@ describe("race lifecycle contracts", () => {
     expect(isValidAverageSpeedMph(0)).toBe(false);
     expect(isValidAverageSpeedMph(300.001)).toBe(false);
     expect(isValidAverageSpeedMph(Number.NaN)).toBe(false);
+  });
+
+  it("orders standard fields by standing and Indy fields by qualifying position", () => {
+    const field = [
+      {
+        currentStanding: 1,
+        driverName: "Championship Leader",
+        qualifyingPosition: 4
+      },
+      {
+        currentStanding: 4,
+        driverName: "Fourth in Points",
+        qualifyingPosition: 1
+      }
+    ];
+
+    expect(
+      [...field].sort((left, right) =>
+        comparePickFieldDriverOrder("standard", left, right)
+      ).map((driver) => driver.driverName)
+    ).toEqual(["Championship Leader", "Fourth in Points"]);
+    expect(
+      [...field].sort((left, right) =>
+        comparePickFieldDriverOrder("indy_500", left, right)
+      ).map((driver) => driver.driverName)
+    ).toEqual(["Fourth in Points", "Championship Leader"]);
   });
 
   it("treats only the registered state as active season participation", () => {
