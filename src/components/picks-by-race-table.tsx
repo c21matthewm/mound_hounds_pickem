@@ -59,6 +59,7 @@ const defaultSortDirection = (key: SortKey): SortDirection => {
 
 const formatAverageSpeed = (value: number | null): string =>
   value !== null ? value.toFixed(3) : "-";
+const PAGE_SIZE = 25;
 
 export function PicksByRaceTable({ officialWinningAverageSpeed, resultsPosted, rows }: Props) {
   const groupCount = Math.max(6, ...rows.map((row) => row.drivers.length));
@@ -71,10 +72,12 @@ export function PicksByRaceTable({ officialWinningAverageSpeed, resultsPosted, r
     defaultSortDirection(resultsPosted ? "rank" : "teamName")
   );
   const [selectedRow, setSelectedRow] = useState<PicksByRaceTableRow | null>(null);
+  const [currentPage, setCurrentPage] = useState(1);
   const dialogRef = useRef<HTMLElement | null>(null);
   const lastDialogTriggerRef = useRef<HTMLButtonElement | null>(null);
 
   const onSort = (key: SortKey) => {
+    setCurrentPage(1);
     if (sortKey === key) {
       setSortDirection((previous) => (previous === "asc" ? "desc" : "asc"));
       return;
@@ -164,6 +167,12 @@ export function PicksByRaceTable({ officialWinningAverageSpeed, resultsPosted, r
     });
 
   }, [rows, sortDirection, sortKey]);
+  const totalPages = Math.max(1, Math.ceil(sortedRows.length / PAGE_SIZE));
+  const visiblePage = Math.min(currentPage, totalPages);
+  const paginatedRows = useMemo(
+    () => sortedRows.slice((visiblePage - 1) * PAGE_SIZE, visiblePage * PAGE_SIZE),
+    [sortedRows, visiblePage]
+  );
 
   const tieBreakRows = useMemo(() => {
     if (!resultsPosted || !selectedRow || selectedRow.totalPoints === null) {
@@ -220,7 +229,7 @@ export function PicksByRaceTable({ officialWinningAverageSpeed, resultsPosted, r
           {sortedRows.length === 0 ? (
             <p className="px-4 py-4 text-sm text-slate-600">No team picks are available.</p>
           ) : (
-            sortedRows.map((row) => (
+            paginatedRows.map((row) => (
               <article key={`mobile-picks-${row.userId}`} className="px-4 py-3">
                 <div className="flex items-start justify-between gap-3">
                   <button
@@ -250,7 +259,7 @@ export function PicksByRaceTable({ officialWinningAverageSpeed, resultsPosted, r
                 </div>
                 <div className="mt-3 flex flex-wrap gap-1.5">
                   <span className="rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-xs font-medium text-slate-700">
-                    Avg {formatAverageSpeed(row.averageSpeed)}
+                    Avg {formatAverageSpeed(row.averageSpeed)} MPH
                   </span>
                   {row.drivers.slice(0, 4).map((driver, index) => (
                     <span
@@ -306,7 +315,7 @@ export function PicksByRaceTable({ officialWinningAverageSpeed, resultsPosted, r
                   onClick={() => onSort("averageSpeed")}
                   type="button"
                 >
-                  Average Speed {sortIndicator("averageSpeed", sortKey, sortDirection)}
+                  Average Speed (MPH) {sortIndicator("averageSpeed", sortKey, sortDirection)}
                 </button>
               </th>
               {groupNumbers.map((groupNumber) => (
@@ -343,7 +352,7 @@ export function PicksByRaceTable({ officialWinningAverageSpeed, resultsPosted, r
                 </td>
               </tr>
             ) : (
-              sortedRows.map((row) => (
+              paginatedRows.map((row) => (
                 <tr key={row.userId} className="border-t border-slate-200">
                   <td className="px-3 py-2 font-semibold">
                     {resultsPosted ? (row.rank ?? "-") : "-"}
@@ -391,6 +400,36 @@ export function PicksByRaceTable({ officialWinningAverageSpeed, resultsPosted, r
           </tbody>
         </table>
         </div>
+
+        {sortedRows.length > PAGE_SIZE ? (
+          <div className="flex items-center justify-between gap-3 border-t border-slate-200 px-4 py-3">
+            <p className="text-xs text-slate-500">
+              Teams {(visiblePage - 1) * PAGE_SIZE + 1}-
+              {Math.min(visiblePage * PAGE_SIZE, sortedRows.length)} of {sortedRows.length}
+            </p>
+            <div className="flex items-center gap-2">
+              <button
+                className="rounded-md border border-slate-300 px-2.5 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-40"
+                disabled={visiblePage <= 1}
+                onClick={() => setCurrentPage(Math.max(1, visiblePage - 1))}
+                type="button"
+              >
+                Previous
+              </button>
+              <span className="text-xs font-semibold text-slate-600">
+                {visiblePage}/{totalPages}
+              </span>
+              <button
+                className="rounded-md border border-slate-300 px-2.5 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-40"
+                disabled={visiblePage >= totalPages}
+                onClick={() => setCurrentPage(Math.min(totalPages, visiblePage + 1))}
+                type="button"
+              >
+                Next
+              </button>
+            </div>
+          </div>
+        ) : null}
       </section>
 
       {selectedRow ? (
@@ -438,7 +477,7 @@ export function PicksByRaceTable({ officialWinningAverageSpeed, resultsPosted, r
               </div>
               <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2">
                 <dt className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
-                  Average Speed
+                  Average Speed (MPH)
                 </dt>
                 <dd className="mt-0.5 font-medium text-slate-900">
                   {formatAverageSpeed(selectedRow.averageSpeed)}

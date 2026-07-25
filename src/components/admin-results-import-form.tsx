@@ -8,11 +8,13 @@ import {
   pickGroupCountForFormat,
   type RacePickFormat
 } from "@/lib/race-format";
+import { SubmitButton } from "@/components/submit-button";
 
 type RaceOption = {
   id: number;
   pickFormat: RacePickFormat;
   raceName: string;
+  resultsStatus: "draft" | "published";
 };
 
 type DriverOption = {
@@ -121,6 +123,8 @@ export function AdminResultsImportForm({
     return byId;
   }, [drivers]);
 
+  const selectedRace =
+    activeRaces.find((race) => String(race.id) === raceId) ?? null;
   const currentInputKey = buildInputKey(raceId, rawPaste);
   const previewIsStale = previewState ? previewState.inputKey !== currentInputKey : false;
   const canPublish =
@@ -139,7 +143,6 @@ export function AdminResultsImportForm({
     previewState.missingScoreGroups.length === 0;
 
   const runPreview = () => {
-    const selectedRace = activeRaces.find((race) => String(race.id) === raceId) ?? null;
     if (!selectedRace) {
       setPreviewError("Select a race before previewing.");
       setPreviewState(null);
@@ -421,14 +424,14 @@ export function AdminResultsImportForm({
         >
           Preview mapping
         </button>
-        <button
+        <SubmitButton
           className="rounded-md bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
           data-testid="admin-results-import-submit"
           disabled={!canPublish}
-          type="submit"
+          pendingLabel="Publishing..."
         >
           Publish results
-        </button>
+        </SubmitButton>
         {previewState ? (
           <p className="text-xs text-slate-600">
             {previewIsStale
@@ -439,6 +442,14 @@ export function AdminResultsImportForm({
           </p>
         ) : null}
       </div>
+
+      {selectedRace?.resultsStatus === "published" ? (
+        <label className="mt-3 flex items-start gap-2 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs font-medium text-red-800">
+          <input className="mt-0.5" name="confirm_results_correction" required type="checkbox" />
+          Confirm that this is an intentional correction replacing already published results.
+          Standings will be recalculated immediately.
+        </label>
+      ) : null}
 
       {previewError ? (
         <p className="mt-3 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">

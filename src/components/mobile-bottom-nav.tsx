@@ -10,9 +10,10 @@ type NavItem = {
 };
 
 const NAV_ITEMS: NavItem[] = [
-  { href: "/dashboard", label: "Dashboard" },
+  { href: "/dashboard", label: "Home" },
+  { href: "/race-center", label: "Race" },
   { href: "/picks", label: "Pick'em" },
-  { href: "/leaderboard", label: "Leaderboard" }
+  { href: "/leaderboard", label: "Standings" }
 ];
 
 const noopSubscribe = () => () => {};
@@ -39,7 +40,7 @@ export function MobileBottomNav() {
 
   return (
     <nav className="fixed inset-x-0 bottom-3 z-40 px-3 md:hidden">
-      <ul className="mx-auto grid max-w-sm grid-cols-3 rounded-full border border-slate-200 bg-white/90 p-1 shadow-[0_18px_50px_-28px_rgba(15,23,42,0.85)] backdrop-blur">
+      <ul className="mx-auto grid max-w-md grid-cols-4 rounded-full border border-slate-200 bg-white/90 p-1 shadow-[0_18px_50px_-28px_rgba(15,23,42,0.85)] backdrop-blur">
         {NAV_ITEMS.map((item) => {
           const active = isActiveRoute(pathname, item.href);
           return (

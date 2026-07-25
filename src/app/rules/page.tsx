@@ -4,10 +4,13 @@ import { MobileBottomNav } from "@/components/mobile-bottom-nav";
 import { SignOutButton } from "@/components/sign-out-button";
 import { requireAppUser } from "@/lib/authenticated-user";
 
-const RULES_PDF_PATH = "/docs/2026-mound-hounds-rules-and-regulations.pdf";
-
 export default async function RulesPage() {
-  await requireAppUser({ requireSeasonDecision: true });
+  const { activeSeason } = await requireAppUser({ requireSeasonDecision: true });
+  const rulesPdfPath =
+    activeSeason?.rulesDocumentUrl ??
+    (activeSeason?.seasonYear === 2026
+      ? "/docs/2026-mound-hounds-rules-and-regulations.pdf"
+      : null);
 
   return (
     <AuthenticatedPageShell
@@ -22,13 +25,16 @@ export default async function RulesPage() {
           <SignOutButton className="static" />
         </>
       }
-      description="Official Mound Hounds Pick'em league rules for this season."
+      description={`Official Mound Hounds Pick'em league rules${
+        activeSeason ? ` for ${activeSeason.seasonYear}` : ""
+      }.`}
       eyebrow="League Docs"
       maxWidth="max-w-[1200px]"
       title="Rules & Regulations"
     >
 
-      <section className="mt-6 rounded-2xl border border-slate-200 bg-white p-6">
+      {rulesPdfPath ? (
+        <section className="mt-6 rounded-2xl border border-slate-200 bg-white p-6">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <p className="text-sm text-slate-700">
             The PDF is shown inline below. If your browser blocks inline PDF display, open it
@@ -36,7 +42,7 @@ export default async function RulesPage() {
           </p>
           <a
             className="rounded-md bg-slate-900 px-3 py-2 text-sm font-semibold text-white hover:bg-slate-700"
-            href={RULES_PDF_PATH}
+            href={rulesPdfPath}
             rel="noreferrer"
             target="_blank"
           >
@@ -47,11 +53,16 @@ export default async function RulesPage() {
         <div className="mt-4 h-[70vh] overflow-hidden rounded-2xl border border-slate-200 bg-slate-50">
           <iframe
             className="h-full w-full"
-            src={`${RULES_PDF_PATH}#view=FitH`}
+            src={`${rulesPdfPath}#view=FitH`}
             title="Mound Hounds Pick'em Rules and Regulations"
           />
         </div>
-      </section>
+        </section>
+      ) : (
+        <p className="mt-6 rounded-md border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
+          The rules document for this season has not been posted yet.
+        </p>
+      )}
       <MobileBottomNav />
     </AuthenticatedPageShell>
   );

@@ -74,6 +74,7 @@ RESEND_FROM_EMAIL
 RESEND_REPLY_TO
 PICK_EMAILS_ENABLED
 REMINDER_SMS_ENABLED
+LEAGUE_ADMIN_EMAIL
 ```
 
 Keep `PICK_EMAILS_ENABLED` set to `false` until the Resend domain, API key, and reminder migration
@@ -128,7 +129,9 @@ For a new project, run:
 supabase/schema.sql
 ```
 
-For an existing project, apply any missing files in `supabase/migrations/` in filename order.
+Then apply `supabase/migrations/20260725_harden_race_and_season_operations.sql`, which is the
+canonical operations-v2 lifecycle contract. For an existing project, apply any missing files in
+`supabase/migrations/` in filename order.
 
 Most recent scoring safety migration:
 
@@ -216,6 +219,36 @@ order by delivery_status;
 The schema version should be `20260718_season_enrollment_v1`. Existing teams that were active
 before this migration should be `registered` for the current active season.
 
+Latest race/season operations hardening migration:
+
+```text
+supabase/migrations/20260725_harden_race_and_season_operations.sql
+```
+
+Apply this migration after the yearly enrollment migration and before deploying the matching app
+code. It adds hashed private season invite codes, atomic participant and driver-roster changes,
+transactional Indy qualifying replacement, frozen race fields, correction safeguards, admin audit
+history, and scheduled-job heartbeats.
+
+Verify it after running:
+
+```sql
+select key, value
+from public.app_metadata
+where key = 'schema_version';
+
+select public.get_app_health_contract();
+
+select season_year, status, registration_code_configured_at
+from public.league_seasons
+order by season_year desc;
+```
+
+The schema version must be `20260725_operations_v2`, and the health contract must report
+`"healthy": true`. Existing 2026 participants remain registered. Open **Admin -> Races -> Season
+management** and set the private 2026 invite code; only new or not-yet-registered participants will
+be asked for it.
+
 For the older result-publication migration, retain known historical exceptions rather than
 reconstructing missing snapshots from current standings: Race 8 has 25 official rows and a
 27-driver snapshot; Race 2 has 25 official rows and no complete historical snapshot.
@@ -226,10 +259,12 @@ Use this order after the final race each year:
 
 1. Publish the final race results and confirm the current standings.
 2. In **Admin -> Race Results**, save the final standings to the Hall of Fame.
-3. In **Admin -> Races**, create the next season and add at least its first scheduled race.
-4. In **Admin -> Drivers**, mark departing drivers inactive, update returning drivers and images,
-   and add new drivers. Do not delete a driver referenced by historical picks or results.
-5. Activate the new season in **Admin -> Races**. Current driver points reset to zero and the prior
+3. In **Admin -> Races**, create the next season with its private invite code, rules PDF, and at
+   least its first scheduled race.
+4. Use **Admin -> Drivers -> Preseason seed tools** to select the upcoming season and import the
+   complete official opening roster. Omitted drivers become inactive automatically.
+5. Activate the new season in **Admin -> Races**. Activation requires both the private invite code
+   and opening roster. Current driver points reset to zero and the prior
    finishing order remains the opening seed.
 6. Returning participants sign in with their existing email/password and confirm their own
    registration for the new year. No admin approval and no new account are required.

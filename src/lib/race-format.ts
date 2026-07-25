@@ -3,6 +3,7 @@ export type RacePickFormat = "standard" | "indy_500";
 export const STANDARD_PICK_GROUP_COUNT = 6;
 export const INDY_500_PICK_GROUP_COUNT = 8;
 export const INDY_500_QUALIFYING_FIELD_SIZE = 33;
+export const MAX_AVERAGE_SPEED_MPH = 300;
 
 export const isRacePickFormat = (value: string): value is RacePickFormat =>
   value === "standard" || value === "indy_500";
@@ -18,6 +19,9 @@ export const groupNumbersForCount = (count: number): number[] =>
 
 export const groupNumbersForPickFormat = (format: RacePickFormat): number[] =>
   groupNumbersForCount(pickGroupCountForFormat(format));
+
+export const isValidAverageSpeedMph = (value: number): boolean =>
+  Number.isFinite(value) && value > 0 && value <= MAX_AVERAGE_SPEED_MPH;
 
 export const pickLockAtForRace = (race: {
   pick_format?: string | null;

@@ -19,6 +19,9 @@ test("public signup validates mismatched passwords and supports successful accou
   const teamName = `${TEST_PREFIX} Team ${unique}`;
   const email = `pw-auth-${unique}@example.com`;
   const password = "Pw-Auth-Flow-2026!";
+  const inviteCode = process.env.PW_SEASON_INVITE_CODE?.trim();
+
+  test.skip(!inviteCode, "PW_SEASON_INVITE_CODE is required for isolated signup testing.");
 
   try {
     await page.goto("/signup");
@@ -26,6 +29,7 @@ test("public signup validates mismatched passwords and supports successful accou
 
     await page.locator('input[name="full_name"]').fill(fullName);
     await page.locator('input[name="team_name"]').fill(teamName);
+    await page.locator('input[name="invite_code"]').fill(inviteCode!);
     await page.locator('input[name="email"]').fill(email);
     await page.locator('input[name="password"]').fill(password);
     await page.locator('input[name="confirm_password"]').fill(`${password}-mismatch`);
@@ -34,6 +38,7 @@ test("public signup validates mismatched passwords and supports successful accou
 
     await page.locator('input[name="full_name"]').fill(fullName);
     await page.locator('input[name="team_name"]').fill(teamName);
+    await page.locator('input[name="invite_code"]').fill(inviteCode!);
     await page.locator('input[name="email"]').fill(email);
     await page.locator('input[name="password"]').fill(password);
     await page.locator('input[name="confirm_password"]').fill(password);
@@ -41,7 +46,7 @@ test("public signup validates mismatched passwords and supports successful accou
 
     await expect(page).toHaveURL(/\/onboarding|\/season-registration|\/login/);
     await expect(page.locator("main")).toContainText(
-      /Account created\. Complete your profile to continue\.|Season registration|Check your email to confirm your account\./
+      /Account created and season registration confirmed\.|Season registration|Check your email to confirm your account\./
     );
 
     expect(clientIssues).toEqual([]);

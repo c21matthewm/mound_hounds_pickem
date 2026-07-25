@@ -40,7 +40,7 @@ export default async function DashboardPage({ searchParams }: PageProps) {
   let currentRace: DashboardRaceRow | null = null;
 
   if (activeSeason) {
-    const { data } = await supabase
+    const { data, error: raceError } = await supabase
       .from("races")
       .select(DASHBOARD_RACE_SELECT_FIELDS)
       .eq("is_archived", false)
@@ -50,17 +50,24 @@ export default async function DashboardPage({ searchParams }: PageProps) {
       .limit(1)
       .maybeSingle<DashboardRaceRow>();
 
+    if (raceError) {
+      throw new Error(`Failed loading the next race: ${raceError.message}`);
+    }
     currentRace = data ?? null;
   }
 
-  const { data: currentPick } = currentRace
+  const currentPickResponse = currentRace
     ? await supabase
         .from("picks")
         .select("id")
         .eq("race_id", currentRace.id)
         .eq("user_id", user.id)
         .maybeSingle<{ id: number }>()
-    : { data: null };
+    : { data: null, error: null };
+  if (currentPickResponse.error) {
+    throw new Error(`Failed loading your saved pick status: ${currentPickResponse.error.message}`);
+  }
+  const currentPick = currentPickResponse.data;
   const pickLockAt = currentRace ? pickLockAtForRace(currentRace) : null;
   const picksLocked = pickLockAt ? Date.parse(pickLockAt) <= now.getTime() : false;
   const previousResultsGate = currentRace
@@ -186,6 +193,15 @@ export default async function DashboardPage({ searchParams }: PageProps) {
         </div>
 
         <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          <Link
+            className="group rounded-lg bg-cyan-700 px-4 py-3 text-sm font-semibold text-white hover:bg-cyan-800"
+            href="/race-center"
+          >
+            <span className="flex items-center justify-between gap-3">
+              Race Center
+              <span className="transition group-hover:translate-x-0.5">→</span>
+            </span>
+          </Link>
           <Link
             className="group rounded-lg bg-slate-900 px-4 py-3 text-sm font-semibold text-white hover:bg-slate-700"
             href={isRegisteredForSeason(participation) ? "/picks" : "/season-registration"}

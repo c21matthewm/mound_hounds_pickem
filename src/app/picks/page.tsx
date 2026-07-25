@@ -111,7 +111,7 @@ export default async function PicksPage({ searchParams }: PageProps) {
     );
   }
 
-  const { data: upcomingRace } = await supabase
+  const { data: upcomingRace, error: upcomingRaceError } = await supabase
     .from("races")
     .select(PICKEM_RACE_SELECT_FIELDS)
     .eq("is_archived", false)
@@ -120,6 +120,10 @@ export default async function PicksPage({ searchParams }: PageProps) {
     .order("round_number", { ascending: true })
     .limit(1)
     .maybeSingle<RaceRow>();
+
+  if (upcomingRaceError) {
+    throw new Error(`Failed loading the next race: ${upcomingRaceError.message}`);
+  }
 
   if (!upcomingRace) {
     return (
@@ -130,8 +134,10 @@ export default async function PicksPage({ searchParams }: PageProps) {
         title="Pick'em Form"
       >
         <p className="mt-4 rounded-md border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
-          No future race is scheduled yet for the {activeSeason.seasonYear} season. Add a race in
-          admin with a start date in the future.
+          No future race is scheduled yet for the {activeSeason.seasonYear} season.
+          {profile.role === "admin"
+            ? " Add the next race from the admin dashboard."
+            : " The league administrator will post the next race when it is ready."}
         </p>
         <Link className="mt-4 text-sm font-semibold text-slate-900 underline" href="/dashboard">
           Back to dashboard
@@ -152,7 +158,6 @@ export default async function PicksPage({ searchParams }: PageProps) {
       supabase
         .from("drivers")
         .select("id,driver_name,image_url,championship_points,current_standing,group_number,is_active")
-        .eq("is_active", true)
         .order("group_number", { ascending: true })
         .order("current_standing", { ascending: true }),
       supabase
@@ -177,6 +182,9 @@ export default async function PicksPage({ searchParams }: PageProps) {
   if (existingPickResponse.error) {
     throw new Error(`Failed loading your saved picks: ${existingPickResponse.error.message}`);
   }
+  if (driversResponse.error) {
+    throw new Error(`Failed loading the race driver field: ${driversResponse.error.message}`);
+  }
   const existingPick = existingPickResponse.data ?? null;
 
   if (raceDriverGroupsResponse.error) {
@@ -184,12 +192,13 @@ export default async function PicksPage({ searchParams }: PageProps) {
   }
   const raceDriverGroups = (raceDriverGroupsResponse.data ?? []) as RaceDriverGroupRow[];
 
-  const activeDrivers: DriverRow[] = (driversResponse.data ?? []) as DriverRow[];
+  const allDrivers: DriverRow[] = (driversResponse.data ?? []) as DriverRow[];
+  const activeDrivers = allDrivers.filter((driver) => driver.is_active);
   const selectedMap = selectedByGroup(existingPick, groupNumbers);
   const picksLocked = Date.parse(pickLockAt) <= now.getTime();
   const driverNameById = new Map<number, string>();
   const driverById = new Map<number, DriverRow>();
-  activeDrivers.forEach((driver) => {
+  allDrivers.forEach((driver) => {
     driverNameById.set(driver.id, driver.driver_name);
     driverById.set(driver.id, driver);
   });
@@ -209,7 +218,7 @@ export default async function PicksPage({ searchParams }: PageProps) {
 
   const driversByGroup = new Map<number, Array<DriverRow & { qualifyingPosition?: number | null }>>();
   groupNumbers.forEach((groupNumber) => driversByGroup.set(groupNumber, []));
-  if (isIndy500Pickem) {
+  if (raceDriverGroups.length > 0) {
     raceDriverGroups.forEach((raceGroup) => {
       const driver = driverById.get(raceGroup.driver_id);
       if (!driver || raceGroup.group_number < 1 || raceGroup.group_number > groupCount) {

@@ -107,11 +107,14 @@ Do not delete driver records that are referenced by historical picks or results 
 Use this rollover instead:
 
 1. Finalize the completed season in **Admin > Results**.
-2. In **Admin > Drivers**, mark drivers who are not returning as inactive.
-3. Clear an inactive driver's image to remove its managed storage object while retaining the small historical database row.
-4. For returning drivers, reuse the existing record, upload the new photo, update points, and mark it active.
-5. Add new drivers normally.
-6. Run the orphan-image dry run and inspect the output.
+2. Create the upcoming season with its invite code and first race.
+3. In **Admin > Drivers > Preseason seed tools**, select that upcoming season, then preview and import the complete official opening
+   standings. The import is transactional: listed drivers become active, returning records and
+   images are retained, new drivers are created, and omitted drivers become inactive.
+4. Replace returning driver photos and add any missing photos after the roster sync.
+5. Activate the season only after the admin shows both its invite code and roster as configured.
+6. Do not run the opening-roster import after picks exist; the app intentionally locks it.
+7. Run the orphan-image dry run and inspect the output.
 
 Inactive drivers do not appear on the current pick form. Retaining their records preserves historical race and pick displays while consuming negligible database space.
 
@@ -121,28 +124,45 @@ Auth accounts and profiles are permanent. Do not ask returning participants to c
 or password each year.
 
 1. Finalize the completed season Hall of Fame snapshot.
-2. Create the next season and at least its first race in **Admin > Races**.
-3. Activate the next season. This leaves every returning profile unregistered for the new year.
-4. On their next login, each participant is sent to **Season registration** to join or skip that
-   season. Joining is immediate and does not require admin approval.
-5. Use **Admin > Participants** to review the registered field or correct a participant decision.
+2. In **Admin > Races > Season management**, create the next season. Set its private invite code
+   in the same form. Codes must be 8-64 characters and are stored as one-way hashes.
+3. Add the season rules PDF path/URL and at least its first race.
+4. Import the complete opening driver roster for that upcoming season.
+5. Activate the next season. Activation is blocked until both an invite code and opening roster are configured. This leaves
+   every returning profile unregistered for the new year.
+6. On their next login, each participant is sent to **Season registration** to enter the private
+   code and join or skip that season. Joining is immediate and does not require admin approval.
+7. Use **Admin > Participants** to review the registered field or correct a participant decision.
 
 A participant who skips can register later from the dashboard. A participant cannot leave a season
 after submitting picks. `profiles.is_active` is reserved for account eligibility; yearly membership
 lives in `season_participants`.
+
+Changing an invite code does not affect participants already registered for that season. For the
+already-running 2026 season, apply the operations migration, then use **Admin > Races > Season
+management** to set the desired 2026 code. Do not put the code in source control or Vercel
+environment variables.
+
+The participant editor has separate **Participation enabled** and **Registered [year]** controls.
+Disabling participation blocks picks and removes the participant from current scoring/reminders
+without deleting their login or history. If the participant already has current-season picks, the
+admin must explicitly authorize forced removal; normal profile edits do not remove them.
 
 ## System health and schema contract
 
 Open **Admin > System Health** after a migration, deployment, season rollover, or notification
 configuration change. Confirm:
 
-- schema version is `20260718_season_enrollment_v1`;
+- schema version is `20260725_operations_v2` and the database contract reports healthy;
 - the expected season is active and the registered-team count is reasonable;
 - the next race and previous-results gate are correct;
 - pick email/SMS enabled states match Vercel;
 - recent reminder attempts do not show repeated failures.
+- both scheduled jobs show recent heartbeat rows, even when no email or winner was due;
+- recent admin audit entries match intentional participant, race, result, and season changes.
 
-The matching database migration is
-`supabase/migrations/20260718_add_season_enrollment_and_delivery_hardening.sql`. Run it in Supabase
-SQL Editor before deploying the application version that reads `season_participants` or
-`app_metadata`.
+The latest matching database migration is
+`supabase/migrations/20260725_harden_race_and_season_operations.sql`. Run it in Supabase SQL Editor
+before deploying this application version. It is additive and keeps existing 2026 registrations
+intact. After it succeeds, set the 2026 invite code in the admin interface before accepting any new
+2026 participants.

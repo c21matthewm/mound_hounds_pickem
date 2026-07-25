@@ -1,6 +1,6 @@
 # Mound Hounds Pick'em Project Context
 
-Last reviewed: 2026-07-18
+Last reviewed: 2026-07-25
 
 This is the working-memory companion to `README.md`. Keep the README focused on setup and user-facing operation; keep this file updated whenever routes, schema, scoring, admin workflows, auth behavior, or testing strategy changes.
 
@@ -24,11 +24,12 @@ Mound Hounds Pick'em is a private INDYCAR fantasy league app. Participants submi
 - `/login`, `/signup`, `/forgot-password`, `/reset-password`, and `/auth/callback` implement Supabase email/password, signup confirmation, and password recovery.
 - `/onboarding` requires full name and team name. Phone and carrier are optional while delivery is email-only.
 - `/season-registration` lets a returning account join or skip the current season without admin approval.
+- `/race-center` is the compact race-week home for next action, saved picks, latest result, and admin readiness.
 - `/dashboard` is the participant hub with links to picks, leaderboard, rules, feedback, contact admin, and admin dashboard when applicable.
 - `/picks` shows the active race, pick lock state, saved submission snapshot, driver groups, average-speed input, and an unsaved-change guard. Standard races show six groups; Indy 500 races show eight groups after qualifying order import.
 - `/leaderboard` has tabs for current season standings, picks by race, personal analytics, and finalized Hall of Fame seasons.
 - `/feedback` records participant bug/improvement submissions.
-- `/rules` serves the rules PDF from `public/docs/2026-mound-hounds-rules-and-regulations.pdf`.
+- `/rules` serves the active season's configured rules PDF, with the bundled 2026 PDF as the 2026 fallback.
 - `/admin` is admin-only and has tabs for participants, drivers, races, race results, feedback, and system health.
 - `/api/cron/fantasy-winner` finalizes due race winners.
 - `/api/cron/pick-reminders` sends due pick reminders.
@@ -36,7 +37,9 @@ Mound Hounds Pick'em is a private INDYCAR fantasy league app. Participants submi
 ## Auth And Access Control
 
 - `middleware.ts` protects `/dashboard`, `/onboarding`, `/season-registration`, `/picks`, `/leaderboard`, `/admin`, and `/feedback`.
-- Authenticated users visiting `/login` or `/signup` are redirected to `/onboarding`.
+- Authenticated users visiting `/login` or `/signup` are redirected to `/dashboard`, whose
+  centralized account loader sends only incomplete profiles to onboarding and only undecided
+  profiles to active-season registration.
 - `src/lib/profile.ts` defines a complete profile as having full name and team name.
 - `src/lib/authenticated-user.ts` centralizes auth, profile completion, active season, and yearly registration routing.
 - Profiles persist across years. `season_participants` stores each profile's `registered` or `declined` decision for a season. A newly activated season therefore prompts returning users at their next login.
@@ -46,11 +49,12 @@ Mound Hounds Pick'em is a private INDYCAR fantasy league app. Participants submi
 ## Data Model
 
 The consolidated database definition is `supabase/schema.sql`; migrations for existing projects are in `supabase/migrations/`.
-Indy 500 features require `supabase/migrations/20260528_add_indy_500_pick_format.sql`. Role protection and atomic draft/published results require `supabase/migrations/20260709_harden_roles_and_result_publication.sql`. Explicit seasons require `supabase/migrations/20260718_add_league_seasons_and_active_participants.sql`; yearly enrollment and resilient reminder delivery require `supabase/migrations/20260718_add_season_enrollment_and_delivery_hardening.sql`.
+Indy 500 features require `supabase/migrations/20260528_add_indy_500_pick_format.sql`. Role protection and atomic draft/published results require `supabase/migrations/20260709_harden_roles_and_result_publication.sql`. Explicit seasons require `supabase/migrations/20260718_add_league_seasons_and_active_participants.sql`; yearly enrollment and resilient reminder delivery require `supabase/migrations/20260718_add_season_enrollment_and_delivery_hardening.sql`; invite-code, race-field, audit, and job-heartbeat hardening requires `supabase/migrations/20260725_harden_race_and_season_operations.sql`.
 
 - `profiles`: permanent Supabase auth identities with full name, unique team name, optional phone/carrier, role, and account eligibility.
 - `league_seasons`: explicit upcoming/active/completed seasons. Only one can be active.
 - `season_participants`: per-season self-registration decisions, independent from permanent profiles.
+- `season_registration_secrets`: one-way hashes for per-season private invite codes; authenticated clients cannot read this table.
 - `drivers`: active/inactive INDYCAR drivers with image URL, championship points, current standing, and current group number.
 - `races`: race metadata, `results_status` (`draft` or `published`), publication time, `pick_format` (`standard` or `indy_500`), qualifying/race start, payout, official speed, winner fields, and archive status.
 - `picks`: one row per user/race with average speed, six required standard driver IDs, and two nullable Indy-only driver IDs.
@@ -59,13 +63,14 @@ Indy 500 features require `supabase/migrations/20260528_add_indy_500_pick_format
 - `feedback_items`: participant feedback submissions.
 - `pick_reminders`: delivery queue/dedupe log with attempts, failure details, lease expiry, and provider ID.
 - `app_metadata`: small deployment contract table; the admin health page checks its schema version.
+- `admin_audit_events` and `job_runs`: admin mutation history and scheduled-job heartbeat/failure records.
 - `hall_of_fame_seasons` and `hall_of_fame_entries`: immutable final standings snapshots independent of live profiles, races, and picks.
 
 Key database triggers:
 
 - `enforce_pick_deadline()` requires active-season registration and blocks insert/update after the race-specific deadline, for archived races, and while previous race results remain unpublished.
 - `protect_profile_role()` prevents a participant from assigning or changing profile roles.
-- `validate_pick_groups()` ensures each selected driver is active, in the matching group, and distinct. Standard validates current driver groups 1-6; Indy validates race-specific qualifying groups 1-8.
+- `validate_pick_groups()` freezes and validates against the race-specific driver field so later driver changes cannot invalidate saved picks.
 - `handle_new_user()` auto-creates a profile when a Supabase auth user is created.
 - `ensure_race_driver_groups_snapshot_from_results()` snapshots active standard driver groups before result rows are inserted or moved to a race. Indy 500 results require qualifying order to already exist.
 
@@ -96,9 +101,9 @@ Key database triggers:
 - Race winner can be manually overridden or auto-calculated with `src/lib/fantasy-winner.ts`.
 - Auto-calculation ranks the full participant/admin field using the same weekly scoring model shown on the leaderboard, including lowest-possible-score fallback rows for teams without submitted picks.
 - Admin feedback tab lists participant feedback and includes cleanup tooling for automated test artifacts.
-- Participant management edits profile labels and corrects current-season registration; routine registration is self-service.
+- Participant management edits profile labels, account eligibility, and current-season registration atomically; routine registration is self-service through the season invite code.
 - Admin data loading is tab-scoped, and Results queries are limited to active-season race IDs.
-- System Health reports schema version, active season, registration count, next-race gate, delivery toggles, and recent reminder attempts.
+- System Health reports the schema contract, active season, registration count, next-race gate, delivery toggles, reminder attempts, cron heartbeats, and admin audit history.
 
 ## Cron And Notifications
 

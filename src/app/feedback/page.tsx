@@ -2,6 +2,7 @@ import Link from "next/link";
 import { AuthenticatedPageShell } from "@/components/authenticated-page-shell";
 import { MobileBottomNav } from "@/components/mobile-bottom-nav";
 import { SignOutButton } from "@/components/sign-out-button";
+import { SubmitButton } from "@/components/submit-button";
 import { submitFeedbackAction } from "@/app/feedback/actions";
 import {
   FEEDBACK_CATEGORY_OPTIONS,
@@ -43,12 +44,16 @@ export default async function FeedbackPage({ searchParams }: PageProps) {
 
   const { supabase, user } = await requireAppUser({ requireSeasonDecision: true });
 
-  const { data: myFeedbackRows } = await supabase
+  const { data: myFeedbackRows, error: feedbackLoadError } = await supabase
     .from("feedback_items")
     .select("id,feedback_type,category,details,created_at")
     .eq("user_id", user.id)
     .order("created_at", { ascending: false })
     .limit(8);
+
+  if (feedbackLoadError) {
+    throw new Error(`Failed loading your feedback history: ${feedbackLoadError.message}`);
+  }
 
   const myFeedback: FeedbackItemRow[] = (myFeedbackRows ?? []) as FeedbackItemRow[];
 
@@ -147,12 +152,12 @@ export default async function FeedbackPage({ searchParams }: PageProps) {
             <p className="text-xs text-slate-500">
               Your submission is visible to league admins and will help prioritize fixes.
             </p>
-            <button
+            <SubmitButton
               className="rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white hover:bg-slate-700"
-              type="submit"
+              pendingLabel="Submitting..."
             >
               Submit feedback
-            </button>
+            </SubmitButton>
           </div>
         </form>
       </section>

@@ -6,6 +6,7 @@ import { requireAppUser } from "@/lib/authenticated-user";
 import { getPreviousRaceResultsGate } from "@/lib/pickem-results-gate";
 import {
   groupNumbersForCount,
+  isValidAverageSpeedMph,
   normalizeRacePickFormat,
   pickGroupCountForFormat,
   pickLockAtForRace
@@ -46,8 +47,10 @@ export async function saveWeeklyPickAction(formData: FormData) {
   const raceId = parsePositiveInt(asText(formData.get("race_id")));
   const averageSpeed = parsePositiveDecimal(asText(formData.get("average_speed")));
 
-  if (!raceId || !averageSpeed) {
-    picksErrorRedirect("A race, average speed, and one driver from each group are required.");
+  if (!raceId || !averageSpeed || !isValidAverageSpeedMph(averageSpeed)) {
+    picksErrorRedirect(
+      "A race, an average speed between 0 and 300 MPH, and one driver from each group are required."
+    );
   }
 
   const raceIdValue = raceId as number;
