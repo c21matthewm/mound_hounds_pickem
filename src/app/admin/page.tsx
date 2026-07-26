@@ -16,6 +16,7 @@ import {
   setLeagueSeasonInviteCodeAction,
   setLeagueSeasonRulesDocumentAction,
   setRaceArchivedAction,
+  setRacePickWindowAction,
   setRaceWinnerAction,
   updateRaceAction,
   updateDriverAction,
@@ -36,6 +37,11 @@ import { SubmitButton } from "@/components/submit-button";
 import { requireAdmin } from "@/lib/admin";
 import { feedbackCategoryLabel, feedbackTypeLabel } from "@/lib/feedback";
 import { getPreviousRaceResultsGate } from "@/lib/pickem-results-gate";
+import {
+  nextPickWindow,
+  pickWindowDisplayName,
+  pickWindowRoundLabel
+} from "@/lib/pick-windows";
 import { queryStringParam } from "@/lib/query";
 import {
   computeGroupScoreExtremes,
@@ -72,6 +78,7 @@ type RaceRow = {
   is_archived: boolean;
   official_winning_average_speed: number | string | null;
   pick_format: RacePickFormat;
+  pick_window_key: string;
   payout: number | string;
   qualifying_start_at: string;
   race_date: string;
@@ -158,6 +165,7 @@ type FeedbackItemRow = {
 type HealthRaceRow = {
   id: number;
   pick_format: RacePickFormat;
+  pick_window_key: string;
   qualifying_start_at: string;
   race_date: string;
   race_name: string;
@@ -246,7 +254,7 @@ const formatOptionalDecimal = (value: number | null, digits = 3): string =>
 
 const loadAdminRaces = async (supabase: SupabaseClient) => {
   const fields =
-    "id,race_name,pick_format,title_image_url,qualifying_start_at,race_date,payout,official_winning_average_speed,results_status,results_published_at,is_archived,archived_at,winner_profile_id,winner_source,winner_is_manual_override,winner_auto_eligible_at,winner_set_at,season_id,round_number,field_frozen_at";
+    "id,race_name,pick_format,pick_window_key,title_image_url,qualifying_start_at,race_date,payout,official_winning_average_speed,results_status,results_published_at,is_archived,archived_at,winner_profile_id,winner_source,winner_is_manual_override,winner_auto_eligible_at,winner_set_at,season_id,round_number,field_frozen_at";
   return supabase.from("races").select(fields).order("race_date", { ascending: false });
 };
 
@@ -662,6 +670,20 @@ export default async function AdminPage({ searchParams }: PageProps) {
   const driverNameById = new Map(drivers.map((driver) => [driver.id, driver.driver_name]));
   const teamNameByProfileId = new Map(winnerProfiles.map((profile) => [profile.id, profile.team_name]));
   const raceById = new Map(races.map((race) => [race.id, race]));
+  const racesByPickWindow = new Map<string, RaceRow[]>();
+  races.forEach((race) => {
+    const windowRaces = racesByPickWindow.get(race.pick_window_key) ?? [];
+    windowRaces.push(race);
+    racesByPickWindow.set(race.pick_window_key, windowRaces);
+  });
+  const pickWindowPartnerByRaceId = new Map<number, RaceRow>();
+  racesByPickWindow.forEach((windowRaces) => {
+    if (windowRaces.length !== 2) {
+      return;
+    }
+    pickWindowPartnerByRaceId.set(windowRaces[0].id, windowRaces[1]);
+    pickWindowPartnerByRaceId.set(windowRaces[1].id, windowRaces[0]);
+  });
   const seasonById = new Map(seasons.map((season) => [season.id, season]));
 
   const currentSeasonRaceIds = new Set(currentSeasonRaces.map((race) => race.id));
@@ -672,6 +694,7 @@ export default async function AdminPage({ searchParams }: PageProps) {
   });
 
   let healthNextRace: HealthRaceRow | null = null;
+  let healthNextRaces: HealthRaceRow[] = [];
   let healthPickCount = 0;
   let healthPreviousResultsStatus = "No upcoming race is scheduled.";
   let healthSchemaVersion: string | null = null;
@@ -703,15 +726,13 @@ export default async function AdminPage({ searchParams }: PageProps) {
         ? supabase
             .from("races")
             .select(
-              "id,race_name,pick_format,qualifying_start_at,race_date,results_status,season_id,round_number"
+              "id,race_name,pick_format,pick_window_key,qualifying_start_at,race_date,results_status,season_id,round_number"
             )
             .eq("season_id", activeSeason.id)
             .eq("is_archived", false)
-            .gt("race_date", new Date().toISOString())
             .order("round_number", { ascending: true })
-            .limit(1)
-            .maybeSingle<HealthRaceRow>()
-        : Promise.resolve({ data: null, error: null })
+            .returns<HealthRaceRow[]>()
+        : Promise.resolve({ data: [], error: null })
       ,
       supabase
         .from("job_runs")
@@ -759,14 +780,15 @@ export default async function AdminPage({ searchParams }: PageProps) {
             version: string;
           })
         : null;
-    healthNextRace = nextRaceResponse.data ?? null;
+    healthNextRaces = nextPickWindow(nextRaceResponse.data ?? [], new Date());
+    healthNextRace = healthNextRaces[0] ?? null;
 
     if (healthNextRace) {
       const [{ count }, gate] = await Promise.all([
         supabase
           .from("picks")
           .select("id", { count: "exact", head: true })
-          .eq("race_id", healthNextRace.id),
+          .in("race_id", healthNextRaces.map((race) => race.id)),
         getPreviousRaceResultsGate(supabase, healthNextRace)
       ]);
       healthPickCount = count ?? 0;
@@ -856,9 +878,11 @@ export default async function AdminPage({ searchParams }: PageProps) {
           healthContract={healthContract}
           jobRuns={healthJobRuns}
           nextRace={healthNextRace ? {
+            expectedPickCount: registeredProfileIds.size * healthNextRaces.length,
             pickCount: healthPickCount,
             previousResultsStatus: healthPreviousResultsStatus,
-            raceName: healthNextRace.race_name,
+            raceName: pickWindowDisplayName(healthNextRaces, healthNextRace.race_name),
+            roundLabel: pickWindowRoundLabel(healthNextRaces),
             roundNumber: healthNextRace.round_number
           } : null}
           registeredTeamCount={registeredProfileIds.size}
@@ -1586,6 +1610,37 @@ export default async function AdminPage({ searchParams }: PageProps) {
             </select>
           </label>
 
+          <label className="block md:col-span-2">
+            <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-600">
+              Shared pick deadline (optional)
+            </span>
+            <select
+              className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+              defaultValue=""
+              name="pick_window_partner_id"
+            >
+              <option value="">Standalone race</option>
+              {races
+                .filter(
+                  (race) =>
+                    !race.is_archived &&
+                    !race.field_frozen_at &&
+                    normalizeRacePickFormat(race.pick_format) === "standard" &&
+                    (racesByPickWindow.get(race.pick_window_key)?.length ?? 0) === 1
+                )
+                .map((race) => (
+                  <option key={race.id} value={race.id}>
+                    {seasonById.get(race.season_id)?.season_year ?? "-"} · R{race.round_number} ·{" "}
+                    {race.race_name}
+                  </option>
+                ))}
+            </select>
+            <span className="mt-1 block text-xs text-slate-500">
+              For a doubleheader, select the consecutive race that already exists. Its qualifying
+              time becomes the shared deadline for both forms.
+            </span>
+          </label>
+
           <label className="block">
             <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-600">
               Title image upload
@@ -1725,6 +1780,14 @@ export default async function AdminPage({ searchParams }: PageProps) {
                           Standard
                         </span>
                       )}
+                      {pickWindowPartnerByRaceId.has(race.id) ? (
+                        <span
+                          className="rounded-full border border-cyan-300 bg-cyan-50 px-2 py-0.5 text-xs font-semibold text-cyan-800"
+                          title={`Shares a pick deadline with ${pickWindowPartnerByRaceId.get(race.id)?.race_name ?? "another race"}`}
+                        >
+                          Shared deadline
+                        </span>
+                      ) : null}
                       {race.field_frozen_at ? (
                         <span className="rounded-full border border-blue-200 bg-blue-50 px-2 py-0.5 text-xs font-semibold text-blue-800">
                           Field frozen
@@ -1810,7 +1873,9 @@ export default async function AdminPage({ searchParams }: PageProps) {
                     required
                     className="w-full rounded-md border border-slate-300 px-2 py-2 text-sm md:col-span-1"
                     defaultValue={String(race.season_id)}
-                    disabled={Boolean(race.field_frozen_at)}
+                    disabled={Boolean(
+                      race.field_frozen_at || pickWindowPartnerByRaceId.has(race.id)
+                    )}
                     name="season_id"
                   >
                     {seasons.map((season) => (
@@ -1824,7 +1889,9 @@ export default async function AdminPage({ searchParams }: PageProps) {
                     required
                     className="w-full rounded-md border border-slate-300 px-2 py-2 text-sm md:col-span-1"
                     defaultValue={race.round_number}
-                    disabled={Boolean(race.field_frozen_at)}
+                    disabled={Boolean(
+                      race.field_frozen_at || pickWindowPartnerByRaceId.has(race.id)
+                    )}
                     max={99}
                     min={1}
                     name="round_number"
@@ -1846,6 +1913,7 @@ export default async function AdminPage({ searchParams }: PageProps) {
                     required
                     className="w-full rounded-md border border-slate-300 px-2 py-2 text-sm md:col-span-2"
                     defaultValue={formatDateTimeLocalInput(race.qualifying_start_at)}
+                    disabled={pickWindowPartnerByRaceId.has(race.id)}
                     name="qualifying_start_at"
                     type="datetime-local"
                   />
@@ -1871,27 +1939,43 @@ export default async function AdminPage({ searchParams }: PageProps) {
                   <select
                     className="w-full rounded-md border border-slate-300 px-2 py-2 text-sm md:col-span-2"
                     defaultValue={normalizeRacePickFormat(race.pick_format)}
-                    disabled={Boolean(race.field_frozen_at)}
+                    disabled={Boolean(
+                      race.field_frozen_at || pickWindowPartnerByRaceId.has(race.id)
+                    )}
                     name="pick_format"
                   >
                     <option value="standard">Standard rules</option>
                     <option value="indy_500">Indianapolis 500 rules</option>
                   </select>
 
-                  {race.field_frozen_at ? (
+                  {race.field_frozen_at || pickWindowPartnerByRaceId.has(race.id) ? (
                     <>
                       <input name="season_id" type="hidden" value={String(race.season_id)} />
                       <input name="round_number" type="hidden" value={String(race.round_number)} />
+                      {pickWindowPartnerByRaceId.has(race.id) ? (
+                        <input
+                          name="qualifying_start_at"
+                          type="hidden"
+                          value={formatDateTimeLocalInput(race.qualifying_start_at)}
+                        />
+                      ) : null}
                       <input
                         name="pick_format"
                         type="hidden"
                         value={normalizeRacePickFormat(race.pick_format)}
                       />
-                      <label className="flex items-center gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-900 md:col-span-6">
-                        <input name="allow_schedule_correction" type="checkbox" />
-                        Confirm a qualifying/race-time correction if submitted picks already
-                        exist. Leave unchecked for name, payout, or image changes.
-                      </label>
+                      {race.field_frozen_at ? (
+                        <label className="flex items-center gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-900 md:col-span-6">
+                          <input name="allow_schedule_correction" type="checkbox" />
+                          Confirm a qualifying/race-time correction if submitted picks already
+                          exist. Leave unchecked for name, payout, or image changes.
+                        </label>
+                      ) : (
+                        <p className="rounded-md border border-cyan-200 bg-cyan-50 px-3 py-2 text-xs text-cyan-900 md:col-span-6">
+                          Qualifying time and race identity are controlled by the shared deadline
+                          link below. Unlink before changing them.
+                        </p>
+                      )}
                     </>
                   ) : null}
 
@@ -1919,6 +2003,67 @@ export default async function AdminPage({ searchParams }: PageProps) {
                   </SubmitButton>
                 </form>
 
+                  {normalizeRacePickFormat(race.pick_format) === "standard" &&
+                  !race.field_frozen_at &&
+                  !race.is_archived ? (
+                    <form
+                      action={setRacePickWindowAction}
+                      className="mt-3 flex flex-wrap items-end gap-2 border-t border-slate-200 pt-3"
+                    >
+                      <input name="race_id" type="hidden" value={race.id} />
+                      <label className="min-w-0 flex-1">
+                        <span className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                          Shared pick deadline
+                        </span>
+                        <select
+                          className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+                          defaultValue={
+                            pickWindowPartnerByRaceId.get(race.id)?.id
+                              ? String(pickWindowPartnerByRaceId.get(race.id)?.id)
+                              : ""
+                          }
+                          name="pick_window_partner_id"
+                        >
+                          <option value="">Standalone race</option>
+                          {races
+                            .filter(
+                              (candidate) =>
+                                candidate.id !== race.id &&
+                                candidate.season_id === race.season_id &&
+                                Math.abs(candidate.round_number - race.round_number) === 1 &&
+                                !candidate.is_archived &&
+                                !candidate.field_frozen_at &&
+                                normalizeRacePickFormat(candidate.pick_format) === "standard" &&
+                                ((racesByPickWindow.get(candidate.pick_window_key)?.length ?? 0) ===
+                                  1 ||
+                                  candidate.id ===
+                                    pickWindowPartnerByRaceId.get(race.id)?.id)
+                            )
+                            .map((candidate) => (
+                              <option key={candidate.id} value={candidate.id}>
+                                R{candidate.round_number} · {candidate.race_name}
+                              </option>
+                            ))}
+                        </select>
+                      </label>
+                      <SubmitButton
+                        className="rounded-md border border-cyan-700 bg-white px-3 py-2 text-sm font-semibold text-cyan-800 hover:bg-cyan-50"
+                        pendingLabel="Saving..."
+                      >
+                        Save deadline link
+                      </SubmitButton>
+                      <p className="w-full text-xs text-slate-500">
+                        Linking copies the selected race&apos;s qualifying time. Both forms then
+                        freeze and lock together while remaining separately scored.
+                      </p>
+                    </form>
+                  ) : pickWindowPartnerByRaceId.has(race.id) ? (
+                    <p className="mt-3 border-t border-slate-200 pt-3 text-xs text-slate-600">
+                      Shared with {pickWindowPartnerByRaceId.get(race.id)?.race_name}. This link is
+                      locked because the race field has frozen.
+                    </p>
+                  ) : null}
+
                   <div className="mt-3 flex flex-wrap justify-end gap-2">
                     <form action={setRaceArchivedAction}>
                       <input name="race_id" type="hidden" value={String(race.id)} />
@@ -1932,14 +2077,24 @@ export default async function AdminPage({ searchParams }: PageProps) {
                         }`}
                         confirmMessage={
                           race.is_archived
-                            ? `Unarchive ${race.race_name}? It will return to active pick/result workflows.`
-                            : `Archive ${race.race_name}? This keeps data but removes it from active pick/result workflows.`
+                            ? pickWindowPartnerByRaceId.has(race.id)
+                              ? `Unarchive both ${race.race_name} and ${pickWindowPartnerByRaceId.get(race.id)?.race_name}? They will return to active pick/result workflows together.`
+                              : `Unarchive ${race.race_name}? It will return to active pick/result workflows.`
+                            : pickWindowPartnerByRaceId.has(race.id)
+                              ? `Archive both ${race.race_name} and ${pickWindowPartnerByRaceId.get(race.id)?.race_name}? Their data remains, but both leave active pick/result workflows.`
+                              : `Archive ${race.race_name}? This keeps data but removes it from active pick/result workflows.`
                         }
                         data-testid={`admin-race-archive-toggle-${race.id}`}
                         formNoValidate
                         type="submit"
                       >
-                        {race.is_archived ? "Unarchive race" : "Archive race"}
+                        {pickWindowPartnerByRaceId.has(race.id)
+                          ? race.is_archived
+                            ? "Unarchive doubleheader"
+                            : "Archive doubleheader"
+                          : race.is_archived
+                            ? "Unarchive race"
+                            : "Archive race"}
                       </ConfirmSubmitButton>
                     </form>
 

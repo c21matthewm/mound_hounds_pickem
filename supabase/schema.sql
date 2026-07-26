@@ -95,6 +95,7 @@ create table if not exists public.races (
   season_id bigint not null references public.league_seasons(id) on delete restrict,
   round_number smallint not null check (round_number between 1 and 99),
   pick_format text not null default 'standard' check (pick_format in ('standard', 'indy_500')),
+  pick_window_key uuid not null default extensions.gen_random_uuid(),
   title_image_url text,
   qualifying_start_at timestamptz not null,
   race_date timestamptz not null,
@@ -274,6 +275,8 @@ create index if not exists idx_races_results_status_date on public.races(results
 create index if not exists idx_races_season_round on public.races(season_id, round_number);
 create index if not exists idx_races_season_status
 on public.races(season_id, is_archived, results_status, round_number);
+create index if not exists idx_races_pick_window
+on public.races(season_id, pick_window_key, round_number);
 create index if not exists idx_picks_race on public.picks(race_id);
 create index if not exists idx_picks_user on public.picks(user_id);
 create index if not exists idx_results_race on public.results(race_id);
@@ -1783,5 +1786,7 @@ to authenticated;
 
 -- The operations-v2 transactional functions and lifecycle trigger overrides are maintained in:
 -- supabase/migrations/20260725_harden_race_and_season_operations.sql
--- Apply that migration after this consolidated baseline. Keeping the deployment migration as the
--- canonical copy prevents invite-code and race-field security logic from diverging between paths.
+-- Shared doubleheader pick-window validation and lifecycle overrides are maintained in:
+-- supabase/migrations/20260726_add_shared_pick_windows.sql
+-- Apply both migrations after this consolidated baseline in filename order. Keeping deployment
+-- migrations canonical prevents security and pick-window logic from diverging between paths.

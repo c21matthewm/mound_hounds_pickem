@@ -4,6 +4,7 @@ import { MobileBottomNav } from "@/components/mobile-bottom-nav";
 import { SignOutButton } from "@/components/sign-out-button";
 import { requireAppUser } from "@/lib/authenticated-user";
 import { getPreviousRaceResultsGate } from "@/lib/pickem-results-gate";
+import { nextPickWindow, pickWindowRoundLabel } from "@/lib/pick-windows";
 import {
   groupNumbersForCount,
   normalizeRacePickFormat,
@@ -23,6 +24,7 @@ type RaceCenterRace = {
   field_frozen_at: string | null;
   id: number;
   pick_format: RacePickFormat;
+  pick_window_key: string;
   qualifying_start_at: string;
   race_date: string;
   race_name: string;
@@ -41,11 +43,13 @@ type RaceCenterPick = {
   driver_group6_id: number;
   driver_group7_id: number | null;
   driver_group8_id: number | null;
+  id: number;
+  race_id: number;
   updated_at: string;
 };
 
 const RACE_FIELDS =
-  "id,race_name,pick_format,qualifying_start_at,race_date,results_status,season_id,round_number,field_frozen_at";
+  "id,race_name,pick_format,pick_window_key,qualifying_start_at,race_date,results_status,season_id,round_number,field_frozen_at";
 
 const formatDateTime = (value: string): string =>
   formatLeagueDateTime(value, { dateStyle: "medium", timeStyle: "short" });
@@ -91,29 +95,37 @@ export default async function RaceCenterPage() {
   }
 
   const races = (raceRows ?? []) as RaceCenterRace[];
-  const nextRace =
-    races.find((race) => Date.parse(race.race_date) > now.getTime()) ?? null;
+  const nextRaceWindow = nextPickWindow(races, now);
   const latestPublishedRace =
     [...races]
       .filter((race) => race.results_status === "published")
       .sort((a, b) => b.round_number - a.round_number)[0] ?? null;
 
-  const currentPickResponse = nextRace
+  const currentPickResponse = nextRaceWindow.length > 0
     ? await supabase
         .from("picks")
         .select(
-          "average_speed,driver_group1_id,driver_group2_id,driver_group3_id,driver_group4_id,driver_group5_id,driver_group6_id,driver_group7_id,driver_group8_id,updated_at"
+          "id,race_id,average_speed,driver_group1_id,driver_group2_id,driver_group3_id,driver_group4_id,driver_group5_id,driver_group6_id,driver_group7_id,driver_group8_id,updated_at"
         )
-        .eq("race_id", nextRace.id)
+        .in("race_id", nextRaceWindow.map((race) => race.id))
         .eq("user_id", user.id)
-        .maybeSingle<RaceCenterPick>()
-    : { data: null, error: null };
+        .returns<RaceCenterPick[]>()
+    : { data: [], error: null };
 
   if (currentPickResponse.error) {
     throw new Error(`Failed loading Race Center pick status: ${currentPickResponse.error.message}`);
   }
 
-  const currentPick = currentPickResponse.data ?? null;
+  const pickByRaceId = new Map(
+    (currentPickResponse.data ?? []).map((pick) => [pick.race_id, pick])
+  );
+  const missingRace = nextRaceWindow.find((race) => !pickByRaceId.has(race.id)) ?? null;
+  const nextRace = missingRace ?? nextRaceWindow[0] ?? null;
+  const currentPick = nextRace ? pickByRaceId.get(nextRace.id) ?? null : null;
+  const savedRaceCount = pickByRaceId.size;
+  const windowComplete =
+    nextRaceWindow.length > 0 && savedRaceCount === nextRaceWindow.length;
+  const isDoubleheader = nextRaceWindow.length > 1;
   const currentPickFormat = normalizeRacePickFormat(nextRace?.pick_format);
   const currentGroupCount = pickGroupCountForFormat(currentPickFormat);
   const selectedDriverIds = currentPick
@@ -171,34 +183,42 @@ export default async function RaceCenterPage() {
         }
       : previousResultsBlocked
         ? {
-            body: `${previousResultsGate.previousRace.raceName} results must be published before the next field opens.`,
+            body: `${previousResultsGate.shortMessage} The next driver field opens after publication.`,
             href: profile.role === "admin" ? "/admin?tab=results" : "/leaderboard",
             label: profile.role === "admin" ? "Publish results" : "View standings",
             status: "Waiting on results",
-            title: nextRace.race_name
+            title: isDoubleheader ? "Doubleheader weekend" : nextRace.race_name
           }
         : picksLocked
           ? {
-              body: currentPick
-                ? "Your picks are saved and locked. Results will appear here after publication."
+              body: windowComplete
+                ? `${isDoubleheader ? "Both race submissions are" : "Your picks are"} saved and locked. Results will appear here after publication.`
                 : "The pick deadline has passed. Follow the race and return for results.",
-              href: currentPick
+              href: windowComplete
                 ? `/leaderboard?tab=picks&race_id=${nextRace.id}`
                 : "/leaderboard",
-              label: currentPick ? "View locked picks" : "View standings",
+              label: windowComplete ? "View locked picks" : "View standings",
               status: "Locked",
-              title: nextRace.race_name
+              title: isDoubleheader ? "Doubleheader weekend" : nextRace.race_name
             }
           : {
-              body: currentPick
-                ? "No action needed. Your complete submission is saved for this race."
-                : `Select one driver from each group before ${formatDateTime(
-                    pickLockAtForRace(nextRace)
-                  )}.`,
-              href: "/picks",
-              label: currentPick ? "Review picks" : "Make picks",
-              status: currentPick ? "Picks saved" : "Form open",
-              title: nextRace.race_name
+              body: windowComplete
+                ? `No action needed. ${isDoubleheader ? "Both race submissions are" : "Your submission is"} saved.`
+                : isDoubleheader
+                  ? `${savedRaceCount}/${nextRaceWindow.length} race submissions saved. Complete both before ${formatDateTime(
+                      pickLockAtForRace(nextRace)
+                    )}.`
+                  : `Select one driver from each group before ${formatDateTime(
+                      pickLockAtForRace(nextRace)
+                    )}.`,
+              href: `/picks?race_id=${nextRace.id}`,
+              label: windowComplete ? "Review picks" : "Make picks",
+              status: windowComplete
+                ? "Picks saved"
+                : isDoubleheader
+                  ? `${savedRaceCount}/${nextRaceWindow.length} saved`
+                  : "Form open",
+              title: isDoubleheader ? "Doubleheader weekend" : nextRace.race_name
             };
 
   let registeredTeamCount = 0;
@@ -214,11 +234,11 @@ export default async function RaceCenterPage() {
       supabase
         .from("picks")
         .select("id", { count: "exact", head: true })
-        .eq("race_id", nextRace.id),
+        .in("race_id", nextRaceWindow.map((race) => race.id)),
       supabase
         .from("race_driver_groups")
         .select("driver_id", { count: "exact", head: true })
-        .eq("race_id", nextRace.id)
+        .in("race_id", nextRaceWindow.map((race) => race.id))
     ]);
 
     const adminReadError =
@@ -256,10 +276,12 @@ export default async function RaceCenterPage() {
             <div>
               {nextRace ? (
                 <p className="text-xs font-semibold uppercase tracking-wide text-cyan-300">
-                  {raceContextLabel({
-                    roundNumber: nextRace.round_number,
-                    seasonYear: activeSeason.seasonYear
-                  })}
+                  {isDoubleheader
+                    ? `${activeSeason.seasonYear} · ${pickWindowRoundLabel(nextRaceWindow)}`
+                    : raceContextLabel({
+                        roundNumber: nextRace.round_number,
+                        seasonYear: activeSeason.seasonYear
+                      })}
                 </p>
               ) : null}
               <h2 className="mt-1 text-xl font-semibold">{action.title}</h2>
@@ -289,7 +311,7 @@ export default async function RaceCenterPage() {
             </div>
             <div className="bg-white px-4 py-3">
               <dt className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
-                Race start
+                {isDoubleheader ? "Selected race start" : "Race start"}
               </dt>
               <dd className="mt-1 text-sm font-semibold text-slate-900">
                 {formatDateTime(nextRace.race_date)}
@@ -300,10 +322,45 @@ export default async function RaceCenterPage() {
                 Submission
               </dt>
               <dd className="mt-1 text-sm font-semibold text-slate-900">
-                {currentPick ? `${currentGroupCount}/${currentGroupCount} groups saved` : "Not submitted"}
+                {isDoubleheader
+                  ? `${savedRaceCount}/${nextRaceWindow.length} race forms saved`
+                  : currentPick
+                    ? `${currentGroupCount}/${currentGroupCount} groups saved`
+                    : "Not submitted"}
               </dd>
             </div>
           </dl>
+        ) : null}
+
+        {isDoubleheader ? (
+          <div className="border-t border-slate-200 bg-white px-4 py-3 sm:px-6">
+            <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+              Weekend submissions
+            </p>
+            <div className="mt-2 grid gap-2 sm:grid-cols-2">
+              {nextRaceWindow.map((race) => {
+                const isSaved = pickByRaceId.has(race.id);
+                return (
+                  <Link
+                    className="flex min-w-0 items-center justify-between gap-3 rounded-md border border-slate-200 px-3 py-2 hover:bg-slate-50"
+                    href={`/picks?race_id=${race.id}`}
+                    key={race.id}
+                  >
+                    <span className="min-w-0 truncate text-sm font-semibold text-slate-900">
+                      R{race.round_number} · {race.race_name}
+                    </span>
+                    <span
+                      className={`shrink-0 text-xs font-semibold ${
+                        isSaved ? "text-emerald-700" : "text-amber-700"
+                      }`}
+                    >
+                      {isSaved ? "Saved" : "Needs picks"}
+                    </span>
+                  </Link>
+                );
+              })}
+            </div>
+          </div>
         ) : null}
       </section>
 
@@ -311,14 +368,19 @@ export default async function RaceCenterPage() {
         <section className="mt-5 border-y border-slate-200 py-4">
           <div className="flex flex-wrap items-end justify-between gap-2">
             <div>
-              <h2 className="font-semibold text-slate-900">Saved submission</h2>
+              <h2 className="font-semibold text-slate-900">
+                Saved submission{isDoubleheader && nextRace ? ` · R${nextRace.round_number}` : ""}
+              </h2>
               <p className="mt-1 text-xs text-slate-500">
                 Updated {formatDateTime(currentPick.updated_at)} · Avg Speed{" "}
                 {Number(currentPick.average_speed).toFixed(3)} MPH
               </p>
             </div>
             {!picksLocked ? (
-              <Link className="text-sm font-semibold text-slate-900 underline" href="/picks">
+              <Link
+                className="text-sm font-semibold text-slate-900 underline"
+                href={`/picks?race_id=${nextRace?.id ?? ""}`}
+              >
                 Edit
               </Link>
             ) : null}
@@ -428,21 +490,22 @@ export default async function RaceCenterPage() {
             <div className="rounded-md border border-slate-200 px-3 py-2">
               <dt className="text-xs text-slate-500">Race field</dt>
               <dd className="mt-0.5 text-sm font-semibold text-slate-900">
-                {nextRace.field_frozen_at
-                  ? `${fieldDriverCount} drivers frozen`
+                {nextRaceWindow.every((race) => race.field_frozen_at)
+                  ? `${fieldDriverCount} driver slots frozen`
                   : "Not frozen yet"}
               </dd>
             </div>
             <div className="rounded-md border border-slate-200 px-3 py-2">
               <dt className="text-xs text-slate-500">Submissions</dt>
               <dd className="mt-0.5 text-sm font-semibold text-slate-900">
-                {nextRacePickCount}/{registeredTeamCount} teams
+                {nextRacePickCount}/{registeredTeamCount * nextRaceWindow.length} submissions
               </dd>
             </div>
             <div className="rounded-md border border-slate-200 px-3 py-2">
               <dt className="text-xs text-slate-500">Results</dt>
               <dd className="mt-0.5 text-sm font-semibold capitalize text-slate-900">
-                {nextRace.results_status}
+                {nextRaceWindow.filter((race) => race.results_status === "published").length}/
+                {nextRaceWindow.length} published
               </dd>
             </div>
           </dl>

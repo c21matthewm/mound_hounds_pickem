@@ -6,6 +6,12 @@ import {
   isValidAverageSpeedMph,
   pickLockAtForRace
 } from "../../src/lib/race-format";
+import {
+  nextPickWindow,
+  pickWindowDisplayName,
+  pickWindowRoundLabel,
+  racesInPickWindow
+} from "../../src/lib/pick-windows";
 import { isRegisteredForSeason } from "../../src/lib/season-participation";
 
 describe("race lifecycle contracts", () => {
@@ -91,5 +97,41 @@ describe("race lifecycle contracts", () => {
       })
     ).toBe(false);
     expect(isRegisteredForSeason(null)).toBe(false);
+  });
+
+  it("keeps adjacent doubleheader races in one pick window", () => {
+    const races = [
+      {
+        id: 14,
+        pick_window_key: "doubleheader",
+        race_date: "2027-07-24T20:00:00.000Z",
+        round_number: 14
+      },
+      {
+        id: 15,
+        pick_window_key: "doubleheader",
+        race_date: "2027-07-25T20:00:00.000Z",
+        round_number: 15
+      },
+      {
+        id: 16,
+        pick_window_key: "next-race",
+        race_date: "2027-08-01T20:00:00.000Z",
+        round_number: 16
+      }
+    ];
+
+    expect(racesInPickWindow(races, races[1]).map((race) => race.id)).toEqual([14, 15]);
+    expect(nextPickWindow(races, new Date("2027-07-20T00:00:00.000Z")).map((race) => race.id))
+      .toEqual([14, 15]);
+    expect(nextPickWindow(races, new Date("2027-07-24T21:00:00.000Z")).map((race) => race.id))
+      .toEqual([14, 15]);
+    expect(nextPickWindow(races, new Date("2027-07-25T21:00:00.000Z")).map((race) => race.id))
+      .toEqual([16]);
+    expect(pickWindowRoundLabel(races.slice(0, 2))).toBe("R14-R15");
+    expect(pickWindowDisplayName(races.slice(0, 2), "Saturday race")).toBe(
+      "Doubleheader weekend"
+    );
+    expect(pickWindowDisplayName(races.slice(2), "Next race")).toBe("Next race");
   });
 });

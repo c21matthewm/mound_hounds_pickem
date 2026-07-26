@@ -33,8 +33,11 @@ const parsePositiveDecimal = (value: string): number | null => {
   return parsed;
 };
 
-const picksErrorRedirect = (message: string): never => {
+const picksErrorRedirect = (message: string, raceId?: number): never => {
   const params = new URLSearchParams({ error: message });
+  if (raceId) {
+    params.set("race_id", String(raceId));
+  }
   redirect(`/picks?${params.toString()}`);
 };
 
@@ -58,17 +61,17 @@ export async function saveWeeklyPickAction(formData: FormData) {
   const { data: race, error: raceError } = await supabase
     .from("races")
     .select(
-      "id,race_name,race_date,qualifying_start_at,is_archived,pick_format,season_id,round_number"
+      "id,race_name,race_date,qualifying_start_at,is_archived,pick_format,pick_window_key,season_id,round_number"
     )
     .eq("id", raceIdValue)
     .maybeSingle();
 
   if (raceError || !race) {
-    picksErrorRedirect("Selected race not found.");
+    picksErrorRedirect("Selected race not found.", raceIdValue);
   }
   const raceIsArchived = (race as { is_archived: boolean }).is_archived;
   if (raceIsArchived) {
-    picksErrorRedirect("This race has been archived and no longer accepts picks.");
+    picksErrorRedirect("This race has been archived and no longer accepts picks.", raceIdValue);
   }
 
   const previousResultsGate = await getPreviousRaceResultsGate(
@@ -76,6 +79,7 @@ export async function saveWeeklyPickAction(formData: FormData) {
     race as {
       id: number;
       pick_format?: string | null;
+      pick_window_key: string;
       race_date: string;
       race_name: string;
       round_number: number;
@@ -83,7 +87,7 @@ export async function saveWeeklyPickAction(formData: FormData) {
     }
   );
   if (previousResultsGate.status === "blocked") {
-    picksErrorRedirect(previousResultsGate.message);
+    picksErrorRedirect(previousResultsGate.message, raceIdValue);
   }
 
   const pickFormat = normalizeRacePickFormat((race as { pick_format?: string | null }).pick_format);
@@ -94,14 +98,18 @@ export async function saveWeeklyPickAction(formData: FormData) {
 
   if (groupSelections.some((value) => value === null)) {
     picksErrorRedirect(
-      `A race, average speed, and one driver from each of ${groupCount} groups are required.`
+      `A race, average speed, and one driver from each of ${groupCount} groups are required.`,
+      raceIdValue
     );
   }
 
   const selectedDriverIds = groupSelections as number[];
   const uniqueCount = new Set(selectedDriverIds).size;
   if (uniqueCount !== groupCount) {
-    picksErrorRedirect(`You must select ${groupCount} different drivers (one per group).`);
+    picksErrorRedirect(
+      `You must select ${groupCount} different drivers (one per group).`,
+      raceIdValue
+    );
   }
 
   const pickLockAt = pickLockAtForRace(
@@ -112,7 +120,8 @@ export async function saveWeeklyPickAction(formData: FormData) {
     picksErrorRedirect(
       pickFormat === "indy_500"
         ? "Picks are locked because the race has already started."
-        : "Picks are locked because qualifying has already started."
+        : "Picks are locked because qualifying has already started.",
+      raceIdValue
     );
   }
 
@@ -134,9 +143,55 @@ export async function saveWeeklyPickAction(formData: FormData) {
   );
 
   if (upsertError) {
-    picksErrorRedirect(upsertError.message);
+    picksErrorRedirect(upsertError.message, raceIdValue);
   }
 
+  const racePickWindowKey = (race as { pick_window_key: string }).pick_window_key;
+  const { data: windowRaces, error: windowRacesError } = await supabase
+    .from("races")
+    .select("id,race_name,round_number")
+    .eq("is_archived", false)
+    .eq("pick_window_key", racePickWindowKey)
+    .order("round_number", { ascending: true });
+
+  if (windowRacesError) {
+    picksErrorRedirect(
+      `Your picks were saved, but the next form could not be loaded: ${windowRacesError.message}`,
+      raceIdValue
+    );
+  }
+
+  const windowRaceIds = (windowRaces ?? []).map((windowRace) => windowRace.id);
+  const { data: savedRows, error: savedRowsError } = await supabase
+    .from("picks")
+    .select("race_id")
+    .eq("user_id", user.id)
+    .in("race_id", windowRaceIds);
+
+  if (savedRowsError) {
+    picksErrorRedirect(
+      `Your picks were saved, but submission progress could not be loaded: ${savedRowsError.message}`,
+      raceIdValue
+    );
+  }
+
+  const savedRaceIds = new Set((savedRows ?? []).map((savedRow) => savedRow.race_id));
+  const missingRace = (windowRaces ?? []).find(
+    (windowRace) => !savedRaceIds.has(windowRace.id)
+  );
+  const params = new URLSearchParams();
+  params.set("race_id", String(missingRace?.id ?? raceIdValue));
+  params.set(
+    "message",
+    missingRace
+      ? `${(race as { race_name: string }).race_name} picks saved. Complete ${missingRace.race_name} next.`
+      : windowRaceIds.length > 1
+        ? "Both doubleheader race submissions are saved."
+        : "Your picks are saved."
+  );
+
   revalidatePath("/picks");
-  redirect("/picks");
+  revalidatePath("/dashboard");
+  revalidatePath("/race-center");
+  redirect(`/picks?${params.toString()}`);
 }

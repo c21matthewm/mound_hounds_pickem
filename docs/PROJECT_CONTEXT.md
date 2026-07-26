@@ -49,14 +49,14 @@ Mound Hounds Pick'em is a private INDYCAR fantasy league app. Participants submi
 ## Data Model
 
 The consolidated database definition is `supabase/schema.sql`; migrations for existing projects are in `supabase/migrations/`.
-Indy 500 features require `supabase/migrations/20260528_add_indy_500_pick_format.sql`. Role protection and atomic draft/published results require `supabase/migrations/20260709_harden_roles_and_result_publication.sql`. Explicit seasons require `supabase/migrations/20260718_add_league_seasons_and_active_participants.sql`; yearly enrollment and resilient reminder delivery require `supabase/migrations/20260718_add_season_enrollment_and_delivery_hardening.sql`; invite-code, race-field, audit, and job-heartbeat hardening requires `supabase/migrations/20260725_harden_race_and_season_operations.sql`.
+Indy 500 features require `supabase/migrations/20260528_add_indy_500_pick_format.sql`. Role protection and atomic draft/published results require `supabase/migrations/20260709_harden_roles_and_result_publication.sql`. Explicit seasons require `supabase/migrations/20260718_add_league_seasons_and_active_participants.sql`; yearly enrollment and resilient reminder delivery require `supabase/migrations/20260718_add_season_enrollment_and_delivery_hardening.sql`; invite-code, race-field, audit, and job-heartbeat hardening requires `supabase/migrations/20260725_harden_race_and_season_operations.sql`; shared doubleheader pick deadlines require `supabase/migrations/20260726_add_shared_pick_windows.sql`.
 
 - `profiles`: permanent Supabase auth identities with full name, unique team name, optional phone/carrier, role, and account eligibility.
 - `league_seasons`: explicit upcoming/active/completed seasons. Only one can be active.
 - `season_participants`: per-season self-registration decisions, independent from permanent profiles.
 - `season_registration_secrets`: one-way hashes for per-season private invite codes; authenticated clients cannot read this table.
 - `drivers`: active/inactive INDYCAR drivers with image URL, championship points, current standing, and current group number.
-- `races`: race metadata, `results_status` (`draft` or `published`), publication time, `pick_format` (`standard` or `indy_500`), qualifying/race start, payout, official speed, winner fields, and archive status.
+- `races`: race metadata, `results_status` (`draft` or `published`), publication time, `pick_format` (`standard` or `indy_500`), `pick_window_key`, qualifying/race start, payout, official speed, winner fields, and archive status. Two consecutive standard races may share a pick-window key and qualifying deadline while remaining independently scored.
 - `picks`: one row per user/race with average speed, six required standard driver IDs, and two nullable Indy-only driver IDs.
 - `results`: official driver points per race.
 - `race_driver_groups`: race-specific group snapshot used to keep scoring stable after standings/groups refresh; for Indy 500 it stores qualifying position and groups 1-8.
@@ -68,7 +68,7 @@ Indy 500 features require `supabase/migrations/20260528_add_indy_500_pick_format
 
 Key database triggers:
 
-- `enforce_pick_deadline()` requires active-season registration and blocks insert/update after the race-specific deadline, for archived races, and while previous race results remain unpublished.
+- `enforce_pick_deadline()` requires active-season registration and blocks insert/update after the race-specific deadline, for archived races, and while every race in the previous pick window is not yet published.
 - `protect_profile_role()` prevents a participant from assigning or changing profile roles.
 - `validate_pick_groups()` freezes and validates against the race-specific driver field so later driver changes cannot invalidate saved picks.
 - `handle_new_user()` auto-creates a profile when a Supabase auth user is created.
@@ -93,7 +93,7 @@ Key database triggers:
 
 - Drivers can be manually created/updated/deleted, marked inactive, given image uploads, or seeded from pasted INDYCAR championship standings.
 - Importing standings uses `src/lib/championship-standings.ts`, updates/creates drivers by normalized name, then refreshes standings/groups.
-- Races can be created/updated/deleted/archived with standard or Indy 500 pick rules, qualifying start, race start, payout, and optional title image upload.
+- Races can be created/updated/deleted/archived with standard or Indy 500 pick rules, qualifying start, race start, payout, and optional title image upload. Consecutive standard races can be linked to one shared deadline from the race editor.
 - The Race Results tab has an Indianapolis 500 qualifying-order importer that expects positions 1-33, maps drivers by normalized name, and writes `race_driver_groups.qualifying_position` plus derived groups.
 - Manual entries save draft rows and temporarily remove a corrected race from published scoring. Draft publication requires every snapshotted driver plus official winning average speed.
 - Bulk import uses `publish_race_results()` to publish a unique, contiguous official finishing order atomically. Standard-race drivers in the pickable snapshot but absent from that order are stored as zero-point nonstarters; Indianapolis still requires all 33 drivers. The server validates field membership even if client preview is bypassed.
@@ -110,7 +110,7 @@ Key database triggers:
 - Cron auth is checked in `src/lib/cron-auth.ts`. In production, `CRON_SECRET` is required and accepted via `Authorization: Bearer <secret>` or `x-cron-secret`.
 - Fantasy winner cron calls `finalizeDueRaceWinners()` and finalizes races whose `winner_auto_eligible_at` has passed and are not manual overrides.
 - Pick reminder cron calls `sendDuePickReminders()` in `src/lib/pick-reminders.ts`.
-- Reminder windows are a form-open notice 5 days before the race-specific pick deadline, a reminder 2 days before, and a final reminder 4 hours before. The deadline is qualifying start for standard races and race start for the Indy 500. Only registered profiles without picks receive each deduplicated email. Failed delivery attempts retry with a lease and deterministic Resend idempotency key. Carrier-gateway SMS remains disabled unless explicitly enabled.
+- Reminder windows are a form-open notice 5 days before the race-specific pick deadline, a reminder 2 days before, and a final reminder 4 hours before. The deadline is qualifying start for standard races and race start for the Indy 500. A shared doubleheader sends one deduplicated weekend email listing only missing race forms. Only registered profiles without all required picks receive it. Failed delivery attempts retry with a lease and deterministic Resend idempotency key. Carrier-gateway SMS remains disabled unless explicitly enabled.
 - Reminder delivery depends on `PICK_EMAILS_ENABLED=true`, plus Resend env vars `RESEND_API_KEY`, `RESEND_FROM_EMAIL`, and optional `RESEND_REPLY_TO`. Carrier-gateway SMS is disabled unless `REMINDER_SMS_ENABLED=true`.
 
 ## Storage And Assets
@@ -125,7 +125,8 @@ Key database triggers:
 - League timezone is `America/Indiana/Indianapolis` in `src/lib/timezone.ts`.
 - Admin datetime-local inputs are interpreted in league time and stored as ISO timestamps.
 - Season filtering uses the league-local calendar year.
-- Pick page race selection uses the next upcoming race, first within the current league season and then as fallback across all races.
+- Pick page race selection uses the next active-season pick window. Shared doubleheaders show one
+  race form at a time and default to the first missing submission.
 
 ## Testing
 
@@ -153,6 +154,8 @@ Key database triggers:
 
 - Do not score races from mutable current groups when a race-specific snapshot exists.
 - Do not allow pick submissions after the race-specific pick deadline or for archived races.
+- Do not merge doubleheader picks, results, speed tie-breakers, or scoring rows; only the qualifying
+  deadline and field-freeze window are shared.
 - Do not expose draft results or use them for standings, reminders, next-race groups, or winners.
 - Do not use `profiles.is_active` as yearly enrollment; use `season_participants`.
 - Do not include unregistered profiles in current standings, analytics, winners, or reminders.
