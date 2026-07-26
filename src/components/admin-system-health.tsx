@@ -33,9 +33,11 @@ type AdminSystemHealthProps = {
   } | null;
   jobRuns: AdminJobRunHealthRow[];
   nextRace: {
+    expectedPickCount: number;
     pickCount: number;
     previousResultsStatus: string;
     raceName: string;
+    roundLabel: string;
     roundNumber: number;
   } | null;
   registeredTeamCount: number;
@@ -44,7 +46,7 @@ type AdminSystemHealthProps = {
   smsEnabled: boolean;
 };
 
-const EXPECTED_SCHEMA_VERSION = "20260725_operations_v2";
+const EXPECTED_SCHEMA_VERSION = "20260726_shared_pick_windows";
 
 export function AdminSystemHealth({
   activeSeasonName,
@@ -113,11 +115,14 @@ export function AdminSystemHealth({
         <div className="border-t border-slate-200 pt-4">
           <h3 className="font-semibold text-slate-900">Next race</h3>
           <p className="mt-2 text-sm text-slate-700">
-            {nextRace ? `R${nextRace.roundNumber} / ${nextRace.raceName}` : "No upcoming race is scheduled."}
+            {nextRace
+              ? `${nextRace.roundLabel || `R${nextRace.roundNumber}`} / ${nextRace.raceName}`
+              : "No upcoming race is scheduled."}
           </p>
           {nextRace ? (
             <p className="mt-1 text-xs text-slate-500">
-              {nextRace.pickCount} submitted team{nextRace.pickCount === 1 ? "" : "s"} / {nextRace.previousResultsStatus}
+              {nextRace.pickCount}/{nextRace.expectedPickCount} submissions /{" "}
+              {nextRace.previousResultsStatus}
             </p>
           ) : null}
         </div>

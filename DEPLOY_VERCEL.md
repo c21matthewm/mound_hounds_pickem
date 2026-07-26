@@ -129,9 +129,9 @@ For a new project, run:
 supabase/schema.sql
 ```
 
-Then apply `supabase/migrations/20260725_harden_race_and_season_operations.sql`, which is the
-canonical operations-v2 lifecycle contract. For an existing project, apply any missing files in
-`supabase/migrations/` in filename order.
+Then apply `supabase/migrations/20260725_harden_race_and_season_operations.sql` and
+`supabase/migrations/20260726_add_shared_pick_windows.sql` in that order. For an existing project,
+apply any missing files in `supabase/migrations/` in filename order.
 
 Most recent scoring safety migration:
 
@@ -244,10 +244,42 @@ from public.league_seasons
 order by season_year desc;
 ```
 
-The schema version must be `20260725_operations_v2`, and the health contract must report
-`"healthy": true`. Existing 2026 participants remain registered. Open **Admin -> Races -> Season
-management** and set the private 2026 invite code; only new or not-yet-registered participants will
-be asked for it.
+Latest shared doubleheader pick-window migration:
+
+```text
+supabase/migrations/20260726_add_shared_pick_windows.sql
+```
+
+Apply it after the operations hardening migration and before deploying the matching application
+code. It gives every race a pick-window identifier. Normal races retain independent identifiers;
+two consecutive standard races can share one qualifying deadline while keeping separate picks,
+results, scoring, speed tie-breakers, and leaderboard rows.
+
+Verify it after running:
+
+```sql
+select season_id, pick_window_key, count(*) as race_count,
+       min(round_number) as first_round, max(round_number) as last_round,
+       count(distinct qualifying_start_at) as deadline_count
+from public.races
+group by season_id, pick_window_key
+order by season_id desc, first_round;
+
+select key, value
+from public.app_metadata
+where key = 'schema_version';
+
+select public.get_app_health_contract();
+```
+
+Existing races should each show `race_count = 1`. A configured doubleheader shows `race_count = 2`,
+consecutive rounds, and `deadline_count = 1`. The schema version must be
+`20260726_shared_pick_windows`, and the health contract must report `"healthy": true`.
+
+After the operations migration but before this newest migration, the older expected schema version
+is `20260725_operations_v2`. Existing 2026 participants remain registered. Open **Admin -> Races ->
+Season management** and set the private 2026 invite code; only new or not-yet-registered
+participants will be asked for it.
 
 For the older result-publication migration, retain known historical exceptions rather than
 reconstructing missing snapshots from current standings: Race 8 has 25 official rows and a

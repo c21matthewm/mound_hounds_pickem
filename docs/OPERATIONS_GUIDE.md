@@ -153,7 +153,7 @@ admin must explicitly authorize forced removal; normal profile edits do not remo
 Open **Admin > System Health** after a migration, deployment, season rollover, or notification
 configuration change. Confirm:
 
-- schema version is `20260725_operations_v2` and the database contract reports healthy;
+- schema version is `20260726_shared_pick_windows` and the database contract reports healthy;
 - the expected season is active and the registered-team count is reasonable;
 - the next race and previous-results gate are correct;
 - pick email/SMS enabled states match Vercel;
@@ -161,8 +161,24 @@ configuration change. Confirm:
 - both scheduled jobs show recent heartbeat rows, even when no email or winner was due;
 - recent admin audit entries match intentional participant, race, result, and season changes.
 
-The latest matching database migration is
-`supabase/migrations/20260725_harden_race_and_season_operations.sql`. Run it in Supabase SQL Editor
-before deploying this application version. It is additive and keeps existing 2026 registrations
-intact. After it succeeds, set the 2026 invite code in the admin interface before accepting any new
-2026 participants.
+The latest matching database migrations are
+`supabase/migrations/20260725_harden_race_and_season_operations.sql` and
+`supabase/migrations/20260726_add_shared_pick_windows.sql`. Run them in filename order in Supabase
+SQL Editor before deploying this application version. They are additive and keep existing 2026
+registrations intact. After they succeed, set the 2026 invite code in the admin interface before
+accepting any new 2026 participants.
+
+## Doubleheader Setup
+
+1. Create the first standard-format race with its qualifying time, race start, and round.
+2. Create the consecutive second race and select the first race under **Shared pick deadline**.
+3. Confirm both race rows show **Shared deadline** and the same qualifying time.
+4. Before picks open, verify Race Center shows `0/2` submissions for a participant and Admin
+   readiness counts two expected submissions per registered team.
+5. Do not unlink the races after fields freeze or picks exist. Results and scoring are still
+   published separately for each race.
+
+The participant form displays one race at a time with a two-race switcher. Saving the first missing
+form advances to the other. Reminder emails are deduplicated per weekend and list only the forms
+that participant still needs. The race after a doubleheader remains closed until both results are
+published.

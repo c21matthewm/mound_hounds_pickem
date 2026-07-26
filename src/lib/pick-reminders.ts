@@ -1,6 +1,7 @@
 import "server-only";
 
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { pickWindowDisplayName, racesInPickWindow } from "@/lib/pick-windows";
 import { pickLockAtForRace } from "@/lib/race-format";
 import { getPreviousRaceResultsGate } from "@/lib/pickem-results-gate";
 import {
@@ -17,6 +18,7 @@ type ReminderChannel = "email" | "sms";
 type UpcomingRace = {
   id: number;
   pick_format: string | null;
+  pick_window_key: string;
   qualifying_start_at: string;
   race_date: string;
   race_name: string;
@@ -33,6 +35,7 @@ type ProfileForReminder = {
 };
 
 type PickUserRow = {
+  race_id: number;
   user_id: string;
 };
 
@@ -167,9 +170,11 @@ const loadAuthEmailsByUserId = async (
 };
 
 const buildReminderMessage = (
-  race: UpcomingRace,
+  races: UpcomingRace[],
+  missingRaces: UpcomingRace[],
   reminderWindow: ReminderWindow
 ): { smsText: string; subject: string; text: string } => {
+  const race = races[0];
   const pickLockAt = pickLockAtForRace(race);
   const pickDeadlineText = formatLeagueDateTime(pickLockAt, {
     dateStyle: "full",
@@ -180,11 +185,19 @@ const buildReminderMessage = (
 
   const isFormOpenNotice = reminderWindow.key === "5d_open";
   const isFinalReminder = reminderWindow.key === "4h";
+  const weekendName = pickWindowDisplayName(races, race.race_name);
+  const missingRaceLines = missingRaces.map(
+    (missingRace) => `- R${missingRace.round_number}: ${missingRace.race_name}`
+  );
+  const missingSummary =
+    missingRaces.length === races.length
+      ? `You need to submit ${races.length === 1 ? "the race form" : "both race forms"}.`
+      : `You still need to submit ${missingRaces[0].race_name}.`;
   const subject = isFormOpenNotice
-    ? `[Mound Hounds Pick'em] Picks are open: ${race.race_name}`
+    ? `[Mound Hounds Pick'em] Picks are open: ${weekendName}`
     : isFinalReminder
-      ? `[Mound Hounds Pick'em] Final reminder: ${race.race_name}`
-      : `[Mound Hounds Pick'em] 2-day reminder: ${race.race_name}`;
+      ? `[Mound Hounds Pick'em] Final reminder: ${weekendName}`
+      : `[Mound Hounds Pick'em] 2-day reminder: ${weekendName}`;
   const text = [
     isFormOpenNotice
       ? "The pick form is open and ready for the next race."
@@ -192,12 +205,12 @@ const buildReminderMessage = (
         ? "Final reminder from the Mound Hounds Pick'em League."
         : "Reminder from the Mound Hounds Pick'em League.",
     "",
-    `Race: ${race.race_name}`,
+    races.length > 1 ? "Doubleheader races:" : `Race: ${race.race_name}`,
+    ...(races.length > 1 ? missingRaceLines : []),
     `Pick deadline: ${pickDeadlineText} (${LEAGUE_TIME_ZONE})`,
     "",
-    isFormOpenNotice
-      ? "The form is available now for your race selections."
-      : "You have not submitted picks yet for this race.",
+    missingSummary,
+    isFormOpenNotice ? "The form is available now for your race selections." : "",
     `Submit your picks here: ${picksUrl}`,
     "",
     isFormOpenNotice
@@ -209,7 +222,10 @@ const buildReminderMessage = (
     isFormOpenNotice
       ? "Mound Hounds Pick'em: picks are open."
       : `Mound Hounds Pick'em reminder (${reminderWindow.label}):`,
-    `${race.race_name}`,
+    weekendName,
+    missingRaces.length > 1
+      ? "Both race forms are needed."
+      : `Missing: ${missingRaces[0].race_name}.`,
     `Pick deadline: ${pickDeadlineText} (${LEAGUE_TIME_ZONE})`,
     `Submit picks: ${picksUrl}`
   ].join(" ");
@@ -385,7 +401,9 @@ export async function sendDuePickReminders(): Promise<PickReminderSummary> {
   const { data: upcomingRaces, error: raceError } = activeSeason
     ? await supabase
         .from("races")
-        .select("id,race_name,pick_format,qualifying_start_at,race_date,season_id,round_number")
+        .select(
+          "id,race_name,pick_format,pick_window_key,qualifying_start_at,race_date,season_id,round_number"
+        )
         .eq("is_archived", false)
         .eq("season_id", activeSeason.id)
         .gt("race_date", now.toISOString())
@@ -404,6 +422,12 @@ export async function sendDuePickReminders(): Promise<PickReminderSummary> {
         (a, b) =>
           Date.parse(pickLockAtForRace(a)) - Date.parse(pickLockAtForRace(b))
       )[0] ?? null;
+  const upcomingRaceWindow = upcomingRace
+    ? racesInPickWindow((upcomingRaces ?? []) as UpcomingRace[], upcomingRace)
+    : [];
+  const upcomingRaceName = upcomingRace
+    ? pickWindowDisplayName(upcomingRaceWindow, upcomingRace.race_name)
+    : null;
 
   if (!upcomingRace) {
     return {
@@ -435,7 +459,7 @@ export async function sendDuePickReminders(): Promise<PickReminderSummary> {
       emailSkippedNoAddress: 0,
       pendingParticipants: 0,
       raceId: upcomingRace.id,
-      raceName: upcomingRace.race_name,
+      raceName: upcomingRaceName,
       reason: "waiting_previous_results",
       reminderType: null,
       smsDeliveryEnabled,
@@ -457,7 +481,7 @@ export async function sendDuePickReminders(): Promise<PickReminderSummary> {
       emailSkippedNoAddress: 0,
       pendingParticipants: 0,
       raceId: upcomingRace.id,
-      raceName: upcomingRace.race_name,
+      raceName: upcomingRaceName,
       reason: "no_window_due",
       reminderType: null,
       smsDeliveryEnabled,
@@ -485,7 +509,10 @@ export async function sendDuePickReminders(): Promise<PickReminderSummary> {
         .select("profile_id")
         .eq("season_id", upcomingRace.season_id)
         .eq("status", "registered"),
-      supabase.from("picks").select("user_id").eq("race_id", upcomingRace.id)
+      supabase
+        .from("picks")
+        .select("race_id,user_id")
+        .in("race_id", upcomingRaceWindow.map((race) => race.id))
     ]);
 
   if (registrationResponse.error) {
@@ -512,9 +539,15 @@ export async function sendDuePickReminders(): Promise<PickReminderSummary> {
     throw new Error(`Failed loading participant profiles for reminders: ${participantsError.message}`);
   }
 
-  const pickedUserIds = new Set(((pickRows ?? []) as PickUserRow[]).map((row) => row.user_id));
+  const pickedRaceIdsByUser = new Map<string, Set<number>>();
+  ((pickRows ?? []) as PickUserRow[]).forEach((row) => {
+    const raceIds = pickedRaceIdsByUser.get(row.user_id) ?? new Set<number>();
+    raceIds.add(row.race_id);
+    pickedRaceIdsByUser.set(row.user_id, raceIds);
+  });
   const participantsMissingPicks = ((participants ?? []) as ProfileForReminder[]).filter(
-    (participant) => !pickedUserIds.has(participant.id)
+    (participant) =>
+      (pickedRaceIdsByUser.get(participant.id)?.size ?? 0) < upcomingRaceWindow.length
   );
 
   if (participantsMissingPicks.length === 0) {
@@ -526,7 +559,7 @@ export async function sendDuePickReminders(): Promise<PickReminderSummary> {
       emailSkippedNoAddress: 0,
       pendingParticipants: 0,
       raceId: upcomingRace.id,
-      raceName: upcomingRace.race_name,
+      raceName: upcomingRaceName,
       reason: "no_missing_participants",
       reminderType: reminderWindow.key,
       smsDeliveryEnabled,
@@ -541,8 +574,6 @@ export async function sendDuePickReminders(): Promise<PickReminderSummary> {
     supabase,
     participantsMissingPicks.map((participant) => participant.id)
   );
-  const message = buildReminderMessage(upcomingRace, reminderWindow);
-
   const deliveryResults = await mapWithConcurrency(
     participantsMissingPicks,
     5,
@@ -557,6 +588,13 @@ export async function sendDuePickReminders(): Promise<PickReminderSummary> {
         smsSkippedAlreadySent: 0,
         smsSkippedNoGatewayAddress: 0
       };
+      const pickedRaceIds = pickedRaceIdsByUser.get(participant.id) ?? new Set<number>();
+      const missingRaces = upcomingRaceWindow.filter((race) => !pickedRaceIds.has(race.id));
+      const message = buildReminderMessage(
+        upcomingRaceWindow,
+        missingRaces,
+        reminderWindow
+      );
       const recipientEmail = emailByUserId.get(participant.id) ?? null;
 
       if (!recipientEmail) {
@@ -675,7 +713,7 @@ export async function sendDuePickReminders(): Promise<PickReminderSummary> {
     ...totals,
     pendingParticipants: participantsMissingPicks.length,
     raceId: upcomingRace.id,
-    raceName: upcomingRace.race_name,
+    raceName: upcomingRaceName,
     reason: "reminders_sent",
     reminderType: reminderWindow.key,
     smsDeliveryEnabled

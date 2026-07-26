@@ -5,6 +5,7 @@ import { SignOutButton } from "@/components/sign-out-button";
 import { MOUND_HOUND_IMAGE_PATH } from "@/lib/branding";
 import { requireAppUser } from "@/lib/authenticated-user";
 import { getPreviousRaceResultsGate } from "@/lib/pickem-results-gate";
+import { nextPickWindow, pickWindowRoundLabel } from "@/lib/pick-windows";
 import { queryStringParam } from "@/lib/query";
 import { raceContextLabel } from "@/lib/race-label";
 import { pickLockAtForRace, type RacePickFormat } from "@/lib/race-format";
@@ -17,6 +18,7 @@ type PageProps = {
 type DashboardRaceRow = {
   id: number;
   pick_format?: RacePickFormat | null;
+  pick_window_key: string;
   qualifying_start_at: string;
   race_date: string;
   race_name: string;
@@ -25,7 +27,7 @@ type DashboardRaceRow = {
 };
 
 const DASHBOARD_RACE_SELECT_FIELDS =
-  "id,race_name,pick_format,qualifying_start_at,race_date,season_id,round_number";
+  "id,race_name,pick_format,pick_window_key,qualifying_start_at,race_date,season_id,round_number";
 
 export default async function DashboardPage({ searchParams }: PageProps) {
   const params = await searchParams;
@@ -36,8 +38,8 @@ export default async function DashboardPage({ searchParams }: PageProps) {
   });
 
   const now = new Date();
-  const nowIso = now.toISOString();
   let currentRace: DashboardRaceRow | null = null;
+  let currentPickWindow: DashboardRaceRow[] = [];
 
   if (activeSeason) {
     const { data, error: raceError } = await supabase
@@ -45,29 +47,33 @@ export default async function DashboardPage({ searchParams }: PageProps) {
       .select(DASHBOARD_RACE_SELECT_FIELDS)
       .eq("is_archived", false)
       .eq("season_id", activeSeason.id)
-      .gt("race_date", nowIso)
       .order("round_number", { ascending: true })
-      .limit(1)
-      .maybeSingle<DashboardRaceRow>();
+      .returns<DashboardRaceRow[]>();
 
     if (raceError) {
       throw new Error(`Failed loading the next race: ${raceError.message}`);
     }
-    currentRace = data ?? null;
+    currentPickWindow = nextPickWindow(data ?? [], now);
   }
 
-  const currentPickResponse = currentRace
+  const currentPickResponse = currentPickWindow.length > 0
     ? await supabase
         .from("picks")
-        .select("id")
-        .eq("race_id", currentRace.id)
+        .select("id,race_id")
+        .in("race_id", currentPickWindow.map((race) => race.id))
         .eq("user_id", user.id)
-        .maybeSingle<{ id: number }>()
-    : { data: null, error: null };
+        .returns<Array<{ id: number; race_id: number }>>()
+    : { data: [], error: null };
   if (currentPickResponse.error) {
     throw new Error(`Failed loading your saved pick status: ${currentPickResponse.error.message}`);
   }
-  const currentPick = currentPickResponse.data;
+  const pickedRaceIds = new Set((currentPickResponse.data ?? []).map((pick) => pick.race_id));
+  const missingRace = currentPickWindow.find((race) => !pickedRaceIds.has(race.id)) ?? null;
+  currentRace = missingRace ?? currentPickWindow[0] ?? null;
+  const savedRaceCount = pickedRaceIds.size;
+  const windowIsComplete =
+    currentPickWindow.length > 0 && savedRaceCount === currentPickWindow.length;
+  const isDoubleheader = currentPickWindow.length > 1;
   const pickLockAt = currentRace ? pickLockAtForRace(currentRace) : null;
   const picksLocked = pickLockAt ? Date.parse(pickLockAt) <= now.getTime() : false;
   const previousResultsGate = currentRace
@@ -95,7 +101,7 @@ export default async function DashboardPage({ searchParams }: PageProps) {
       }
     : blockedPreviousResultsGate
       ? {
-          body: `${blockedPreviousResultsGate.previousRace.raceName} results need to be uploaded before ${currentRace.race_name} picks open. This keeps driver standings and groups current.`,
+          body: `${blockedPreviousResultsGate.shortMessage} Driver standings and pick groups will refresh before this form opens.`,
           href: profile.role === "admin" ? "/admin?tab=results" : "/leaderboard",
           label: profile.role === "admin" ? "Upload Results" : "View Leaderboard",
           status: "Results Needed",
@@ -103,22 +109,34 @@ export default async function DashboardPage({ searchParams }: PageProps) {
         }
     : picksLocked
       ? {
-          body: currentPick
-            ? `${currentRace.race_name} is locked. Review picks and standings as results come in.`
+          body: windowIsComplete
+            ? `${isDoubleheader ? "Both doubleheader submissions are" : "Your submission is"} saved and locked.`
             : `${currentRace.race_name} is locked. Check the leaderboard once results are posted.`,
-          href: currentPick ? `/leaderboard?tab=picks&race_id=${currentRace.id}` : "/leaderboard",
-          label: currentPick ? "View locked picks" : "View leaderboard",
+          href: windowIsComplete
+            ? `/leaderboard?tab=picks&race_id=${currentRace.id}`
+            : "/leaderboard",
+          label: windowIsComplete ? "View locked picks" : "View leaderboard",
           status: "Locked",
-          title: currentPick ? "Picks saved and locked" : "Race is locked"
+          title: windowIsComplete ? "Picks saved and locked" : "Race is locked"
         }
       : {
-          body: currentPick
-            ? `No action needed. Your picks are already in for ${currentRace.race_name}.`
-            : `${currentRace.race_name} is open. Submit your picks before lock.`,
-          href: "/picks",
-          label: currentPick ? "Review Picks" : "Make Picks",
-          status: currentPick ? "Picks Saved" : "Form Open",
-          title: currentPick ? "Picks Are In" : "Make Your Picks"
+          body: windowIsComplete
+            ? `No action needed. ${isDoubleheader ? "Both doubleheader submissions are" : "Your picks are"} already in.`
+            : isDoubleheader
+              ? `${savedRaceCount}/${currentPickWindow.length} race submissions saved. Complete each before the shared deadline.`
+              : `${currentRace.race_name} is open. Submit your picks before lock.`,
+          href: `/picks?race_id=${currentRace.id}`,
+          label: windowIsComplete ? "Review Picks" : "Make Picks",
+          status: windowIsComplete
+            ? "Picks Saved"
+            : isDoubleheader
+              ? `${savedRaceCount}/${currentPickWindow.length} Saved`
+              : "Form Open",
+          title: windowIsComplete
+            ? "Picks Are In"
+            : isDoubleheader && savedRaceCount > 0
+              ? "Complete Your Picks"
+              : "Make Your Picks"
         };
 
   return (
@@ -165,10 +183,12 @@ export default async function DashboardPage({ searchParams }: PageProps) {
               </div>
               {currentRace && activeSeason ? (
                 <p className="mt-1 text-xs font-semibold uppercase tracking-wide text-slate-500">
-                  {raceContextLabel({
-                    roundNumber: currentRace.round_number,
-                    seasonYear: activeSeason.seasonYear
-                  })}
+                  {isDoubleheader
+                    ? `${activeSeason.seasonYear} · ${pickWindowRoundLabel(currentPickWindow)} · Doubleheader`
+                    : raceContextLabel({
+                        roundNumber: currentRace.round_number,
+                        seasonYear: activeSeason.seasonYear
+                      })}
                 </p>
               ) : null}
               <p className="mt-1 text-sm text-slate-600">{raceAction.body}</p>

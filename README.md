@@ -144,6 +144,13 @@ supabase/migrations/20260718_add_league_seasons_and_active_participants.sql
 supabase/migrations/20260718_add_season_enrollment_and_delivery_hardening.sql
 ```
 
+The current operations and shared doubleheader pick-window migrations are:
+
+```text
+supabase/migrations/20260725_harden_race_and_season_operations.sql
+supabase/migrations/20260726_add_shared_pick_windows.sql
+```
+
 Apply all pending migrations in filename order before deploying application code that depends on
 them. The deployment and verification sequence is maintained in `DEPLOY_VERCEL.md`.
 
@@ -163,6 +170,8 @@ where p.id = u.id
    drivers manually.
 2. Add races with a separate season and round, full event name, race start, qualifying start,
    payout, and optional title image.
+   For a doubleheader, create the first race normally, then create the consecutive second race
+   with the first race selected under **Shared pick deadline**.
 3. For the Indianapolis 500, mark the race with Indy 500 pick rules and import its 33-car
    qualifying order.
 4. Participants submit picks before the race-specific pick deadline.

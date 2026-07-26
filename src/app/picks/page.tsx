@@ -7,6 +7,7 @@ import { saveWeeklyPickAction } from "@/app/picks/actions";
 import { PickemForm } from "@/components/pickem-form";
 import { requireAppUser } from "@/lib/authenticated-user";
 import { getPreviousRaceResultsGate } from "@/lib/pickem-results-gate";
+import { nextPickWindow, pickWindowRoundLabel } from "@/lib/pick-windows";
 import { queryStringParam } from "@/lib/query";
 import { raceContextLabel } from "@/lib/race-label";
 import {
@@ -32,6 +33,7 @@ type DriverRow = {
 type RaceRow = {
   id: number;
   pick_format?: RacePickFormat | null;
+  pick_window_key: string;
   payout: number | string;
   qualifying_start_at: string;
   race_date: string;
@@ -52,6 +54,7 @@ type PickRow = {
   driver_group7_id: number | null;
   driver_group8_id: number | null;
   id: number;
+  race_id: number;
   updated_at: string;
 };
 
@@ -67,10 +70,15 @@ type PageProps = {
 };
 
 const PICKEM_RACE_SELECT_FIELDS =
-  "id,race_name,pick_format,title_image_url,qualifying_start_at,race_date,payout,season_id,round_number";
+  "id,race_name,pick_format,pick_window_key,title_image_url,qualifying_start_at,race_date,payout,season_id,round_number";
 
 const formatRaceDate = (value: string): string =>
   formatLeagueDateTime(value, { dateStyle: "full", timeStyle: "short" });
+
+const parseRaceId = (value: string | undefined): number | null => {
+  const parsed = Number(value);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
+};
 
 const selectedByGroup = (pick: PickRow | null, groupNumbers: number[]): Record<number, number | null> => {
   const selected: Record<number, number | null> = {};
@@ -85,6 +93,8 @@ const selectedByGroup = (pick: PickRow | null, groupNumbers: number[]): Record<n
 export default async function PicksPage({ searchParams }: PageProps) {
   const params = await searchParams;
   const error = queryStringParam(params.error);
+  const message = queryStringParam(params.message);
+  const requestedRaceId = parseRaceId(queryStringParam(params.race_id));
 
   const { activeSeason, profile, supabase, user } = await requireAppUser({
     requireRegistration: true,
@@ -92,7 +102,6 @@ export default async function PicksPage({ searchParams }: PageProps) {
   });
 
   const now = new Date();
-  const nowIso = now.toISOString();
 
   if (!activeSeason) {
     return (
@@ -112,21 +121,21 @@ export default async function PicksPage({ searchParams }: PageProps) {
     );
   }
 
-  const { data: upcomingRace, error: upcomingRaceError } = await supabase
+  const { data: raceRows, error: upcomingRaceError } = await supabase
     .from("races")
     .select(PICKEM_RACE_SELECT_FIELDS)
     .eq("is_archived", false)
     .eq("season_id", activeSeason.id)
-    .gt("race_date", nowIso)
     .order("round_number", { ascending: true })
-    .limit(1)
-    .maybeSingle<RaceRow>();
+    .returns<RaceRow[]>();
 
   if (upcomingRaceError) {
     throw new Error(`Failed loading the next race: ${upcomingRaceError.message}`);
   }
 
-  if (!upcomingRace) {
+  const pickWindow = nextPickWindow(raceRows ?? [], now);
+
+  if (pickWindow.length === 0) {
     return (
       <AuthenticatedPageShell
         actions={<SignOutButton className="static" />}
@@ -147,32 +156,45 @@ export default async function PicksPage({ searchParams }: PageProps) {
     );
   }
 
-  const racePickFormat = normalizeRacePickFormat(upcomingRace.pick_format);
+  const pickWindowIds = pickWindow.map((race) => race.id);
+  const { data: windowPickRows, error: windowPicksError } = await supabase
+    .from("picks")
+    .select(
+      "id,race_id,driver_group1_id,driver_group2_id,driver_group3_id,driver_group4_id,driver_group5_id,driver_group6_id,driver_group7_id,driver_group8_id,average_speed,updated_at"
+    )
+    .eq("user_id", user.id)
+    .in("race_id", pickWindowIds)
+    .returns<PickRow[]>();
+
+  if (windowPicksError) {
+    throw new Error(`Failed loading your saved picks: ${windowPicksError.message}`);
+  }
+
+  const pickByRaceId = new Map((windowPickRows ?? []).map((pick) => [pick.race_id, pick]));
+  const selectedRace =
+    pickWindow.find((race) => race.id === requestedRaceId) ??
+    pickWindow.find((race) => !pickByRaceId.has(race.id)) ??
+    pickWindow[0];
+  const existingPick = pickByRaceId.get(selectedRace.id) ?? null;
+  const savedRaceCount = pickWindow.filter((race) => pickByRaceId.has(race.id)).length;
+  const racePickFormat = normalizeRacePickFormat(selectedRace.pick_format);
   const groupCount = pickGroupCountForFormat(racePickFormat);
   const groupNumbers = groupNumbersForCount(groupCount);
-  const pickLockAt = pickLockAtForRace(upcomingRace);
+  const pickLockAt = pickLockAtForRace(selectedRace);
   const isIndy500Pickem = racePickFormat === "indy_500";
 
-  const [previousResultsGate, driversResponse, existingPickResponse, raceDriverGroupsResponse] =
+  const [previousResultsGate, driversResponse, raceDriverGroupsResponse] =
     await Promise.all([
-      getPreviousRaceResultsGate(supabase, upcomingRace),
+      getPreviousRaceResultsGate(supabase, selectedRace),
       supabase
         .from("drivers")
         .select("id,driver_name,image_url,championship_points,current_standing,group_number,is_active")
         .order("group_number", { ascending: true })
         .order("current_standing", { ascending: true }),
       supabase
-        .from("picks")
-        .select(
-          "id,driver_group1_id,driver_group2_id,driver_group3_id,driver_group4_id,driver_group5_id,driver_group6_id,driver_group7_id,driver_group8_id,average_speed,updated_at"
-        )
-        .eq("race_id", upcomingRace.id)
-        .eq("user_id", user.id)
-        .maybeSingle<PickRow>(),
-      supabase
         .from("race_driver_groups")
         .select("race_id,driver_id,group_number,qualifying_position")
-        .eq("race_id", upcomingRace.id)
+        .eq("race_id", selectedRace.id)
         .order("group_number", { ascending: true })
         .order("qualifying_position", { ascending: true })
     ]);
@@ -180,13 +202,9 @@ export default async function PicksPage({ searchParams }: PageProps) {
     previousResultsGate.status === "blocked" ? previousResultsGate : null;
   const previousResultsBlocked = Boolean(blockedPreviousResultsGate);
 
-  if (existingPickResponse.error) {
-    throw new Error(`Failed loading your saved picks: ${existingPickResponse.error.message}`);
-  }
   if (driversResponse.error) {
     throw new Error(`Failed loading the race driver field: ${driversResponse.error.message}`);
   }
-  const existingPick = existingPickResponse.data ?? null;
 
   if (raceDriverGroupsResponse.error) {
     throw new Error(`Failed loading race driver groups: ${raceDriverGroupsResponse.error.message}`);
@@ -323,14 +341,76 @@ export default async function PicksPage({ searchParams }: PageProps) {
       maxWidth="max-w-6xl"
       title="Pick'em Form"
     >
+      {pickWindow.length > 1 ? (
+        <section className="mt-6 border-y border-slate-200 bg-white py-4">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-wide text-cyan-700">
+                {pickWindowRoundLabel(pickWindow)} · Doubleheader
+              </p>
+              <h2 className="mt-1 text-base font-semibold text-slate-950">
+                Two separate race submissions
+              </h2>
+            </div>
+            <span className="text-sm font-semibold text-slate-700">
+              {savedRaceCount}/{pickWindow.length} saved
+            </span>
+          </div>
+          <nav
+            aria-label="Doubleheader race forms"
+            className="mt-3 grid gap-2 sm:grid-cols-2"
+          >
+            {pickWindow.map((race) => {
+              const isSelected = race.id === selectedRace.id;
+              const isSaved = pickByRaceId.has(race.id);
+
+              return (
+                <Link
+                  aria-current={isSelected ? "page" : undefined}
+                  className={`flex min-w-0 items-center justify-between gap-3 rounded-md border px-3 py-2.5 text-left transition ${
+                    isSelected
+                      ? "border-cyan-700 bg-cyan-50"
+                      : "border-slate-200 bg-white hover:border-slate-400 hover:bg-slate-50"
+                  }`}
+                  href={`/picks?race_id=${race.id}`}
+                  key={race.id}
+                >
+                  <span className="min-w-0">
+                    <span className="block text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                      R{race.round_number} ·{" "}
+                      {formatLeagueDateTime(race.race_date, { weekday: "long" })}
+                    </span>
+                    <span className="mt-0.5 block truncate text-sm font-semibold text-slate-950">
+                      {race.race_name}
+                    </span>
+                  </span>
+                  <span
+                    className={`shrink-0 rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${
+                      isSaved
+                        ? "border-emerald-200 bg-emerald-50 text-emerald-800"
+                        : "border-amber-200 bg-amber-50 text-amber-800"
+                    }`}
+                  >
+                    {isSaved ? "Saved" : "Needs picks"}
+                  </span>
+                </Link>
+              );
+            })}
+          </nav>
+          <p className="mt-2 text-xs text-slate-500">
+            Each race has its own drivers and speed tie-breaker. Both forms lock at{" "}
+            {formatRaceDate(pickLockAt)}.
+          </p>
+        </section>
+      ) : null}
 
       <section className="mt-6 overflow-hidden rounded-3xl border border-slate-200 bg-white">
-        {upcomingRace.title_image_url ? (
+        {selectedRace.title_image_url ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img
-            alt={`${upcomingRace.race_name} banner`}
+            alt={`${selectedRace.race_name} banner`}
             className="h-44 w-full object-cover md:h-64"
-            src={upcomingRace.title_image_url}
+            src={selectedRace.title_image_url}
           />
         ) : null}
 
@@ -339,11 +419,11 @@ export default async function PicksPage({ searchParams }: PageProps) {
             <div>
               <p className="text-xs font-semibold uppercase tracking-[0.2em] text-cyan-200">
                 {raceContextLabel({
-                  roundNumber: upcomingRace.round_number,
+                  roundNumber: selectedRace.round_number,
                   seasonYear: activeSeason.seasonYear
                 })}
               </p>
-              <h2 className="mt-2 text-3xl font-semibold tracking-tight">{upcomingRace.race_name}</h2>
+              <h2 className="mt-2 text-3xl font-semibold tracking-tight">{selectedRace.race_name}</h2>
             </div>
             <span
               className={`rounded-full border px-3 py-1 text-xs font-semibold uppercase tracking-wide ${raceStatusClass}`}
@@ -360,11 +440,11 @@ export default async function PicksPage({ searchParams }: PageProps) {
             </div>
             <div className="rounded-xl border border-white/15 bg-white/10 p-3">
               <p className="text-xs font-semibold uppercase tracking-wide text-slate-300">Race Start</p>
-              <p className="mt-1 font-medium">{formatRaceDate(upcomingRace.race_date)}</p>
+              <p className="mt-1 font-medium">{formatRaceDate(selectedRace.race_date)}</p>
             </div>
             <div className="rounded-xl border border-white/15 bg-white/10 p-3">
               <p className="text-xs font-semibold uppercase tracking-wide text-slate-300">Payout</p>
-              <p className="mt-1 font-medium">${Number(upcomingRace.payout).toFixed(2)}</p>
+              <p className="mt-1 font-medium">${Number(selectedRace.payout).toFixed(2)}</p>
             </div>
             <div className="rounded-xl border border-white/15 bg-white/10 p-3">
               <p className="text-xs font-semibold uppercase tracking-wide text-slate-300">
@@ -394,6 +474,12 @@ export default async function PicksPage({ searchParams }: PageProps) {
           ) : null}
         </div>
       </section>
+
+      {message ? (
+        <p className="mt-6 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-800">
+          {message}
+        </p>
+      ) : null}
 
       {error ? (
         <p className="mt-6 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
@@ -452,7 +538,7 @@ export default async function PicksPage({ searchParams }: PageProps) {
           existingAverageSpeed={existingPick ? String(existingPick.average_speed) : ""}
           groups={pickGroups}
           picksLocked={picksLocked}
-          raceId={upcomingRace.id}
+          raceId={selectedRace.id}
           savedSelection={selectedMap}
         />
       ) : null}
