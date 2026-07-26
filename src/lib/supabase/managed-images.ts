@@ -13,10 +13,10 @@ type OptimizeOptions = {
 export async function optimizeUploadedImage(
   file: File,
   options: OptimizeOptions
-): Promise<Buffer> {
+): Promise<Uint8Array<ArrayBuffer>> {
   try {
     const source = Buffer.from(await file.arrayBuffer());
-    return await sharp(source, { failOn: "error" })
+    const { data } = await sharp(source, { failOn: "error" })
       .rotate()
       .resize({
         fit: "inside",
@@ -25,7 +25,10 @@ export async function optimizeUploadedImage(
         withoutEnlargement: true
       })
       .webp({ effort: 4, quality: options.quality })
-      .toBuffer();
+      .toUint8Array();
+
+    // Supabase's fetch path rejects SharedArrayBuffer-backed views in some server runtimes.
+    return Uint8Array.from(data);
   } catch {
     throw new Error("The uploaded image could not be processed. Use a valid JPG, PNG, WebP, GIF, or AVIF file.");
   }
