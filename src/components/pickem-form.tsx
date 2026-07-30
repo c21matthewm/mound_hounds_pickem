@@ -1,6 +1,19 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type FormEvent
+} from "react";
+import {
+  parsePickDraft,
+  pickDraftStorageKey,
+  shouldOfferPickDraftRecovery,
+  type PickDraft
+} from "@/lib/pick-draft";
 
 type SelectionMap = Record<number, number | null>;
 const LEAVE_CONFIRM_MESSAGE = "You have unsaved Pick'em changes. Leave this page without saving?";
@@ -23,7 +36,9 @@ type DriverGroup = {
 type Props = {
   action: (formData: FormData) => void | Promise<void>;
   canSubmit: boolean;
+  draftOwnerId: string;
   existingAverageSpeed: string;
+  existingSavedAt: string | null;
   groups: DriverGroup[];
   picksLocked: boolean;
   raceId: number;
@@ -33,7 +48,9 @@ type Props = {
 export function PickemForm({
   action,
   canSubmit,
+  draftOwnerId,
   existingAverageSpeed,
+  existingSavedAt,
   groups,
   picksLocked,
   raceId,
@@ -43,11 +60,17 @@ export function PickemForm({
   const [draftSelection, setDraftSelection] = useState<SelectionMap>(() => ({ ...savedSelection }));
   const [draftAverageSpeed, setDraftAverageSpeed] = useState(existingAverageSpeed);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [recoveryDraft, setRecoveryDraft] = useState<PickDraft | null>(null);
+  const [draftStorageReady, setDraftStorageReady] = useState(false);
   const formRef = useRef<HTMLFormElement | null>(null);
   const submitInProgressRef = useRef(false);
   const submitIntentTimeoutRef = useRef<number | null>(null);
   const allowNextUnloadRef = useRef(false);
   const allowNextUnloadTimeoutRef = useRef<number | null>(null);
+  const storageKey = useMemo(
+    () => pickDraftStorageKey(draftOwnerId, raceId),
+    [draftOwnerId, raceId]
+  );
 
   const hasUnsavedChanges = useMemo(() => {
     const averageSpeedChanged = draftAverageSpeed.trim() !== existingAverageSpeed.trim();
@@ -63,6 +86,20 @@ export function PickemForm({
     (groupNumber) => draftSelection[groupNumber] === null || draftSelection[groupNumber] === undefined
   );
   const showMobileActionBar = !picksLocked && (hasUnsavedChanges || missingGroupNumbers.length > 0);
+
+  const storeCurrentDraft = useCallback(() => {
+    try {
+      const draft: PickDraft = {
+        averageSpeed: draftAverageSpeed,
+        savedAt: new Date().toISOString(),
+        selections: draftSelection,
+        version: 1
+      };
+      window.localStorage.setItem(storageKey, JSON.stringify(draft));
+    } catch {
+      // Storage can be unavailable in private browsing; the form remains fully usable.
+    }
+  }, [draftAverageSpeed, draftSelection, storageKey]);
 
   const clearSubmitIntent = () => {
     submitInProgressRef.current = false;
@@ -89,6 +126,9 @@ export function PickemForm({
       event.preventDefault();
       return;
     }
+    if (hasUnsavedChanges) {
+      storeCurrentDraft();
+    }
     setIsSubmitting(true);
     submitInProgressRef.current = true;
     allowNextUnloadOnce();
@@ -112,6 +152,74 @@ export function PickemForm({
     },
     []
   );
+
+  useEffect(() => {
+    try {
+      if (picksLocked) {
+        window.localStorage.removeItem(storageKey);
+        setRecoveryDraft(null);
+        setDraftStorageReady(true);
+        return;
+      }
+
+      const storedDraft = parsePickDraft(window.localStorage.getItem(storageKey));
+      if (
+        storedDraft &&
+        shouldOfferPickDraftRecovery(
+          storedDraft,
+          {
+            averageSpeed: existingAverageSpeed,
+            savedAt: existingSavedAt,
+            selections: savedSelection
+          },
+          groupNumbers
+        )
+      ) {
+        setRecoveryDraft(storedDraft);
+      } else {
+        window.localStorage.removeItem(storageKey);
+        setRecoveryDraft(null);
+      }
+    } catch {
+      setRecoveryDraft(null);
+    } finally {
+      setDraftStorageReady(true);
+    }
+  }, [
+    existingAverageSpeed,
+    existingSavedAt,
+    groupNumbers,
+    picksLocked,
+    savedSelection,
+    storageKey
+  ]);
+
+  useEffect(() => {
+    if (!draftStorageReady) {
+      return;
+    }
+
+    if (hasUnsavedChanges) {
+      storeCurrentDraft();
+      return;
+    }
+
+    if (!recoveryDraft) {
+      try {
+        window.localStorage.removeItem(storageKey);
+      } catch {
+        // Storage cleanup is best effort.
+      }
+    }
+  }, [
+    draftAverageSpeed,
+    draftSelection,
+    draftStorageReady,
+    hasUnsavedChanges,
+    recoveryDraft,
+    storeCurrentDraft,
+    storageKey
+  ]);
 
   useEffect(() => {
     if (!hasUnsavedChanges || picksLocked) {
@@ -220,8 +328,50 @@ export function PickemForm({
     <form action={action} className="mt-6 space-y-6" onSubmit={handleSubmit} ref={formRef}>
       <input name="race_id" type="hidden" value={String(raceId)} />
 
+      {recoveryDraft ? (
+        <div
+          className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-cyan-200 bg-cyan-50 px-3 py-2.5 text-sm text-cyan-950"
+          role="status"
+        >
+          <div>
+            <p className="font-semibold">Unsaved picks found on this device</p>
+            <p className="mt-0.5 text-xs text-cyan-800">
+              Continue that draft or discard it and keep the last saved submission.
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              className="rounded-md border border-cyan-300 bg-white px-3 py-1.5 text-xs font-semibold text-cyan-900 hover:bg-cyan-100"
+              onClick={() => {
+                clearSubmitIntent();
+                setDraftSelection({ ...recoveryDraft.selections });
+                setDraftAverageSpeed(recoveryDraft.averageSpeed);
+                setRecoveryDraft(null);
+              }}
+              type="button"
+            >
+              Continue draft
+            </button>
+            <button
+              className="rounded-md px-3 py-1.5 text-xs font-semibold text-cyan-900 hover:bg-cyan-100"
+              onClick={() => {
+                try {
+                  window.localStorage.removeItem(storageKey);
+                } catch {
+                  // Storage cleanup is best effort.
+                }
+                setRecoveryDraft(null);
+              }}
+              type="button"
+            >
+              Discard
+            </button>
+          </div>
+        </div>
+      ) : null}
+
       <fieldset className="space-y-6 disabled:opacity-80" disabled={picksLocked || isSubmitting}>
-        <section className="rounded-2xl border border-slate-200 bg-white p-5 md:p-6">
+        <section className="rounded-lg border border-slate-200 bg-white p-5 md:p-6">
           <label className="block max-w-sm">
             <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">
               Average Speed Tie-breaker (MPH)
@@ -231,7 +381,7 @@ export function PickemForm({
             </span>
             <input
               required
-              className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm"
+              className="w-full rounded-md border border-slate-300 px-3 py-2.5 text-sm"
               min={1}
               max={300}
               name="average_speed"
@@ -250,7 +400,7 @@ export function PickemForm({
           <section
             id={`driver-group-${group.groupNumber}`}
             key={group.groupNumber}
-            className="rounded-2xl border border-slate-200 bg-white p-5 md:p-6"
+            className="rounded-lg border border-slate-200 bg-white p-5 md:p-6"
           >
             <div className="flex flex-wrap items-end justify-between gap-2">
               <div>
@@ -289,7 +439,7 @@ export function PickemForm({
                   return (
                     <label
                       key={driver.id}
-                      className={`relative flex cursor-pointer items-center gap-3 rounded-2xl border px-3 py-3 shadow-sm transition hover:-translate-y-0.5 ${cardClassName}`}
+                      className={`relative flex cursor-pointer items-center gap-3 rounded-md border px-3 py-3 shadow-sm transition hover:-translate-y-0.5 ${cardClassName}`}
                     >
                       <input
                         required
@@ -310,11 +460,15 @@ export function PickemForm({
                         // eslint-disable-next-line @next/next/no-img-element
                         <img
                           alt={driver.driverName}
-                          className="h-14 w-14 rounded-2xl border border-slate-300 object-cover"
+                          className="h-14 w-14 rounded-md border border-slate-300 object-cover"
+                          decoding="async"
+                          height={56}
+                          loading="lazy"
                           src={driver.imageUrl}
+                          width={56}
                         />
                       ) : (
-                        <div className="flex h-14 w-14 items-center justify-center rounded-2xl border border-dashed border-slate-400 text-[10px] font-semibold text-slate-500">
+                        <div className="flex h-14 w-14 items-center justify-center rounded-md border border-dashed border-slate-400 text-[10px] font-semibold text-slate-500">
                           NO IMG
                         </div>
                       )}
@@ -352,7 +506,7 @@ export function PickemForm({
         ))}
 
         <button
-          className="rounded-xl bg-slate-900 px-5 py-3 text-sm font-semibold text-white hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
+          className="rounded-md bg-slate-900 px-5 py-3 text-sm font-semibold text-white hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
           disabled={!canSubmit || isSubmitting}
           type="submit"
         >

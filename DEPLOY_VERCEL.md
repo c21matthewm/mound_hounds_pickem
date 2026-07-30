@@ -129,9 +129,11 @@ For a new project, run:
 supabase/schema.sql
 ```
 
-Then apply `supabase/migrations/20260725_harden_race_and_season_operations.sql` and
-`supabase/migrations/20260726_add_shared_pick_windows.sql` in that order. For an existing project,
-apply any missing files in `supabase/migrations/` in filename order.
+Then apply `supabase/migrations/20260725_harden_race_and_season_operations.sql`,
+`supabase/migrations/20260726_add_shared_pick_windows.sql`, and
+`supabase/migrations/20260729_scale_weekly_operations.sql`, followed by
+`supabase/migrations/20260730_atomic_picks_and_season_recovery.sql`. For an existing project, apply
+any missing files in `supabase/migrations/` in filename order.
 
 Most recent scoring safety migration:
 
@@ -237,12 +239,14 @@ select key, value
 from public.app_metadata
 where key = 'schema_version';
 
-select public.get_app_health_contract();
-
 select season_year, status, registration_code_configured_at
 from public.league_seasons
 order by season_year desc;
 ```
+
+Then open **Admin -> System Health** while signed into the app as an administrator and confirm the
+database contract reports healthy. Do not call `get_app_health_contract()` from Supabase SQL
+Editor; it intentionally requires an authenticated app-admin JWT, which SQL Editor does not have.
 
 Latest shared doubleheader pick-window migration:
 
@@ -268,18 +272,96 @@ order by season_id desc, first_round;
 select key, value
 from public.app_metadata
 where key = 'schema_version';
-
-select public.get_app_health_contract();
 ```
 
 Existing races should each show `race_count = 1`. A configured doubleheader shows `race_count = 2`,
 consecutive rounds, and `deadline_count = 1`. The schema version must be
-`20260726_shared_pick_windows`, and the health contract must report `"healthy": true`.
+`20260726_shared_pick_windows`. Confirm the health contract from **Admin -> System Health**.
 
-After the operations migration but before this newest migration, the older expected schema version
-is `20260725_operations_v2`. Existing 2026 participants remain registered. Open **Admin -> Races ->
-Season management** and set the private 2026 invite code; only new or not-yet-registered
-participants will be asked for it.
+Latest weekly-scale operations migration:
+
+```text
+supabase/migrations/20260729_scale_weekly_operations.sql
+```
+
+Apply it after the shared pick-window migration and before deploying the matching application
+code. It limits each reminder cron invocation to 25 queued deliveries with five concurrent sends,
+adds resumable retry state, records partially successful runs as `degraded`, and adds targeted
+failed-delivery retry controls to **Admin -> System Health**.
+
+Verify it after running:
+
+```sql
+select key, value
+from public.app_metadata
+where key = 'schema_version';
+
+select status, count(*)
+from public.job_runs
+group by status
+order by status;
+
+select delivery_status,
+       count(*) filter (where attempt_count = 0) as fresh,
+       count(*) filter (where attempt_count between 1 and 2) as retrying,
+       count(*) filter (where attempt_count >= 3) as permanently_failed
+from public.pick_reminders
+group by delivery_status
+order by delivery_status;
+
+select
+  to_regprocedure(
+    'public.claim_pick_reminder_delivery(bigint,uuid,text,text,text)'
+  ) is not null as reminder_claim_ready,
+  exists (
+    select 1
+    from pg_constraint
+    where conrelid = 'public.job_runs'::regclass
+      and conname = 'job_runs_status_check'
+      and pg_get_constraintdef(oid) like '%degraded%'
+  ) as degraded_job_status_ready;
+```
+
+The schema version must be `20260729_weekly_scale_v1`, and both readiness columns must be `true`.
+Confirm the complete health contract from **Admin -> System Health**. Keep the existing
+`pick_reminders_5min` cron schedule: a 90-person queue drains across several short, idempotent
+invocations.
+
+Latest atomic-pick and season-recovery migration:
+
+```text
+supabase/migrations/20260730_atomic_picks_and_season_recovery.sql
+```
+
+Apply it after the weekly-scale migration and before deploying the matching application code. It
+keeps one latest scoring pick per participant/race, records successful versions for audit, adds
+local draft recovery support, bounds feedback administration, and adds checksummed season restore
+points.
+
+Verify it after running:
+
+```sql
+select key, value
+from public.app_metadata
+where key = 'schema_version';
+
+select
+  to_regprocedure('public.save_weekly_pick(bigint,numeric,bigint[])') is not null
+    as atomic_pick_save_ready,
+  to_regprocedure('public.create_season_restore_point(bigint,text,text)') is not null
+    as season_backup_ready,
+  to_regprocedure('public.restore_season_from_restore_point(uuid,integer)') is not null
+    as season_restore_ready;
+```
+
+The schema version must be `20260730_atomic_picks_recovery_v1`, and all readiness columns must be
+`true`. Then open **Admin -> System Health** and **Admin -> Recovery** in the authenticated app.
+Do not call admin-only health or recovery functions directly from Supabase SQL Editor.
+
+After the operations migration but before the shared-window and weekly-scale migrations, the older
+expected schema versions are `20260725_operations_v2` and `20260726_shared_pick_windows`.
+Existing 2026 participants remain registered. Open **Admin -> Races -> Season management** and set
+the private 2026 invite code; only new or not-yet-registered participants will be asked for it.
 
 For the older result-publication migration, retain known historical exceptions rather than
 reconstructing missing snapshots from current standings: Race 8 has 25 official rows and a
@@ -335,6 +417,7 @@ Open the production URL and test:
 3. Confirm the active-season registration screen, then open the dashboard.
 4. Confirm `/picks`, `/leaderboard`, `/rules`, and `/feedback` load.
 5. Login as admin and confirm `/admin?tab=health` reports the expected schema version.
+6. Open `/admin?tab=recovery`, create one backup, and store the downloaded JSON securely.
 
 Cron health checks:
 

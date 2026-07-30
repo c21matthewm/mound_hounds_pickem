@@ -5,6 +5,10 @@ import { PickSubmissionSnapshot } from "@/components/pick-submission-snapshot";
 import { SignOutButton } from "@/components/sign-out-button";
 import { saveWeeklyPickAction } from "@/app/picks/actions";
 import { PickemForm } from "@/components/pickem-form";
+import {
+  ActionLink,
+  CompactNotice
+} from "@/components/ui-primitives";
 import { requireAppUser } from "@/lib/authenticated-user";
 import { getPreviousRaceResultsGate } from "@/lib/pickem-results-gate";
 import { nextPickWindow, pickWindowRoundLabel } from "@/lib/pick-windows";
@@ -111,12 +115,12 @@ export default async function PicksPage({ searchParams }: PageProps) {
         maxWidth="max-w-4xl"
         title="Pick'em Form"
       >
-        <p className="mt-4 rounded-md border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
+        <CompactNotice className="mt-4">
           No league season is currently active.
-        </p>
-        <Link className="mt-4 text-sm font-semibold text-slate-900 underline" href="/dashboard">
+        </CompactNotice>
+        <ActionLink className="mt-4 w-fit" href="/dashboard" variant="secondary">
           Back to dashboard
-        </Link>
+        </ActionLink>
       </AuthenticatedPageShell>
     );
   }
@@ -143,15 +147,15 @@ export default async function PicksPage({ searchParams }: PageProps) {
         maxWidth="max-w-4xl"
         title="Pick'em Form"
       >
-        <p className="mt-4 rounded-md border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
+        <CompactNotice className="mt-4">
           No future race is scheduled yet for the {activeSeason.seasonYear} season.
           {profile.role === "admin"
             ? " Add the next race from the admin dashboard."
             : " The league administrator will post the next race when it is ready."}
-        </p>
-        <Link className="mt-4 text-sm font-semibold text-slate-900 underline" href="/dashboard">
+        </CompactNotice>
+        <ActionLink className="mt-4 w-fit" href="/dashboard" variant="secondary">
           Back to dashboard
-        </Link>
+        </ActionLink>
       </AuthenticatedPageShell>
     );
   }
@@ -318,18 +322,10 @@ export default async function PicksPage({ searchParams }: PageProps) {
     <AuthenticatedPageShell
       actions={
         <>
-          <Link
-            className="rounded-md border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100"
-            href="/dashboard"
-          >
+          <ActionLink href="/dashboard" variant="secondary">
             Dashboard
-          </Link>
-          <Link
-            className="rounded-md border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100"
-            href="/leaderboard"
-          >
-            Leaderboard
-          </Link>
+          </ActionLink>
+          <SignOutButton className="static" />
         </>
       }
       description={
@@ -404,7 +400,7 @@ export default async function PicksPage({ searchParams }: PageProps) {
         </section>
       ) : null}
 
-      <section className="mt-6 overflow-hidden rounded-3xl border border-slate-200 bg-white">
+      <section className="mt-6 overflow-hidden rounded-lg border border-slate-200 bg-white">
         {selectedRace.title_image_url ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img
@@ -432,21 +428,21 @@ export default async function PicksPage({ searchParams }: PageProps) {
             </span>
           </div>
           <div className="mt-5 grid gap-3 text-sm md:grid-cols-2 lg:grid-cols-4">
-            <div className="rounded-xl border border-white/15 bg-white/10 p-3">
+            <div className="rounded-md border border-white/15 bg-white/10 p-3">
               <p className="text-xs font-semibold uppercase tracking-wide text-slate-300">
                 {isIndy500Pickem ? "Pick Lock (Race Start)" : "Pick Deadline"}
               </p>
               <p className="mt-1 font-medium">{formatRaceDate(pickLockAt)}</p>
             </div>
-            <div className="rounded-xl border border-white/15 bg-white/10 p-3">
+            <div className="rounded-md border border-white/15 bg-white/10 p-3">
               <p className="text-xs font-semibold uppercase tracking-wide text-slate-300">Race Start</p>
               <p className="mt-1 font-medium">{formatRaceDate(selectedRace.race_date)}</p>
             </div>
-            <div className="rounded-xl border border-white/15 bg-white/10 p-3">
+            <div className="rounded-md border border-white/15 bg-white/10 p-3">
               <p className="text-xs font-semibold uppercase tracking-wide text-slate-300">Payout</p>
               <p className="mt-1 font-medium">${Number(selectedRace.payout).toFixed(2)}</p>
             </div>
-            <div className="rounded-xl border border-white/15 bg-white/10 p-3">
+            <div className="rounded-md border border-white/15 bg-white/10 p-3">
               <p className="text-xs font-semibold uppercase tracking-wide text-slate-300">
                 {isIndy500Pickem ? "Pick Format" : "Timezone"}
               </p>
@@ -468,7 +464,7 @@ export default async function PicksPage({ searchParams }: PageProps) {
             website for more information.
           </p>
           {isIndy500Pickem ? (
-            <p className="mt-4 rounded-xl border border-cyan-300/30 bg-cyan-300/10 px-3 py-2 text-xs text-cyan-50">
+            <p className="mt-4 rounded-md border border-cyan-300/30 bg-cyan-300/10 px-3 py-2 text-xs text-cyan-50">
               Indianapolis 500 picks use qualifying-order groups and lock when the race starts.
             </p>
           ) : null}
@@ -476,15 +472,15 @@ export default async function PicksPage({ searchParams }: PageProps) {
       </section>
 
       {message ? (
-        <p className="mt-6 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-800">
+        <CompactNotice className="mt-6" tone="success">
           {message}
-        </p>
+        </CompactNotice>
       ) : null}
 
       {error ? (
-        <p className="mt-6 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+        <CompactNotice className="mt-6" tone="danger">
           {error}
-        </p>
+        </CompactNotice>
       ) : null}
 
       {!previousResultsBlocked ? (
@@ -496,47 +492,44 @@ export default async function PicksPage({ searchParams }: PageProps) {
       ) : null}
 
       {blockedPreviousResultsGate ? (
-        <section className="mt-6 rounded-2xl border border-cyan-200 bg-cyan-50 p-4 text-sm text-cyan-950">
+        <section className="mt-6 rounded-lg border border-cyan-200 bg-cyan-50 p-4 text-sm text-cyan-950">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
               <h3 className="font-semibold text-cyan-950">Form paused until results are posted</h3>
               <p className="mt-1 text-cyan-900">{blockedPreviousResultsGate.message}</p>
             </div>
             {profile.role === "admin" ? (
-              <Link
-                className="rounded-lg bg-slate-900 px-3 py-2 text-sm font-semibold text-white hover:bg-slate-700"
-                href="/admin?tab=results"
-              >
+              <ActionLink href="/admin?tab=results">
                 Upload Results
-              </Link>
+              </ActionLink>
             ) : (
-              <Link
-                className="rounded-lg border border-cyan-300 bg-white px-3 py-2 text-sm font-semibold text-cyan-950 hover:bg-cyan-100"
-                href="/leaderboard"
-              >
+              <ActionLink href="/leaderboard" variant="secondary">
                 View Leaderboard
-              </Link>
+              </ActionLink>
             )}
           </div>
         </section>
       ) : null}
 
       {!previousResultsBlocked && missingGroups.length > 0 ? (
-        <p className="mt-6 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+        <CompactNotice className="mt-6" tone="warning">
           {isIndy500Pickem
             ? "Picks are unavailable until admin imports the Indianapolis 500 qualifying order with all 33 drivers."
             : "Picks are unavailable because these groups have no active drivers: "}
           {!isIndy500Pickem
             ? `${missingGroups.map((group) => `Group ${group}`).join(", ")}. Update drivers in admin.`
             : null}
-        </p>
+        </CompactNotice>
       ) : null}
       {!previousResultsBlocked ? (
         <PickemForm
           action={saveWeeklyPickAction}
           canSubmit={canSubmit}
+          draftOwnerId={user.id}
           existingAverageSpeed={existingPick ? String(existingPick.average_speed) : ""}
+          existingSavedAt={existingPick?.updated_at ?? null}
           groups={pickGroups}
+          key={selectedRace.id}
           picksLocked={picksLocked}
           raceId={selectedRace.id}
           savedSelection={selectedMap}

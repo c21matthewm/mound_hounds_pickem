@@ -10,7 +10,22 @@ async function handleCronRequest(request: Request) {
   }
 
   try {
-    const result = await withJobRun("pick-reminders", sendDuePickReminders);
+    const result = await withJobRun("pick-reminders", sendDuePickReminders, {
+      completionForResult: (summary) => {
+        const failedAttempts = summary.emailFailed + summary.smsFailed;
+        const unresolvedFailures =
+          summary.queueRetrying + summary.queuePermanentFailed;
+        return failedAttempts > 0 || unresolvedFailures > 0
+          ? {
+              errorMessage:
+                `${failedAttempts} delivery attempt(s) failed in this run; ` +
+                `${summary.queueRetrying} retrying and ` +
+                `${summary.queuePermanentFailed} permanently failed.`,
+              status: "degraded"
+            }
+          : { status: "succeeded" };
+      }
+    });
     return NextResponse.json({
       ok: true,
       ...result

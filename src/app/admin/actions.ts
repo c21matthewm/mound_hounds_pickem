@@ -20,12 +20,16 @@ import {
   isValidAverageSpeedMph,
   isRacePickFormat,
   normalizeRacePickFormat,
+  pickLockAtForRace,
   type RacePickFormat
 } from "@/lib/race-format";
+import { getReminderWindow } from "@/lib/reminder-windows";
+import { REMINDER_MAX_ATTEMPTS } from "@/lib/reminder-queue";
 import { createServiceRoleSupabaseClient } from "@/lib/supabase/service-role";
 import { withMigrationHint } from "@/lib/supabase/migration-errors";
 import { invalidateScoringCache } from "@/lib/scoring-cache";
 import { buildLeagueScoringSnapshotUncached } from "@/lib/scoring";
+import { SEASON_RECOVERY_MIGRATION_FILE } from "@/lib/season-recovery";
 import { getLeagueYear, parseLeagueDateTimeLocalInput } from "@/lib/timezone";
 
 const asText = (value: FormDataEntryValue | null): string =>
@@ -36,7 +40,14 @@ const MAX_DRIVER_NAME_LENGTH = 100;
 const MAX_PROFILE_NAME_LENGTH = 100;
 const MAX_RACE_NAME_LENGTH = 200;
 
-type AdminTab = "drivers" | "participants" | "races" | "results" | "feedback";
+type AdminTab =
+  | "drivers"
+  | "participants"
+  | "races"
+  | "results"
+  | "feedback"
+  | "health"
+  | "recovery";
 
 type RaceStatusRow = {
   id: number;
@@ -63,7 +74,9 @@ const parseAdminTab = (value: string): AdminTab | null => {
     value === "participants" ||
     value === "races" ||
     value === "results" ||
-    value === "feedback"
+    value === "feedback" ||
+    value === "health" ||
+    value === "recovery"
   ) {
     return value;
   }
@@ -90,10 +103,18 @@ const withResultPublicationMigrationHint = (message: string): string =>
     ? withMigrationHint(message, RESULT_PUBLICATION_MIGRATION_FILE)
     : message;
 
-const adminRedirect = (key: "error" | "message", value: string, tab?: AdminTab): never => {
+const adminRedirect = (
+  key: "error" | "message",
+  value: string,
+  tab?: AdminTab,
+  resultRaceId?: number | null
+): never => {
   const params = new URLSearchParams({ [key]: value });
   if (tab) {
     params.set("tab", tab);
+  }
+  if (tab === "results" && resultRaceId) {
+    params.set("result_race_id", String(resultRaceId));
   }
   redirect(`/admin?${params.toString()}`);
 };
@@ -101,12 +122,13 @@ const adminRedirect = (key: "error" | "message", value: string, tab?: AdminTab):
 const adminMutationRedirect = (
   key: "error" | "message",
   value: string,
-  tab: AdminTab
+  tab: AdminTab,
+  resultRaceId?: number | null
 ): never => {
-  if (key === "message") {
-    invalidateScoringCache();
-  }
-  return adminRedirect(key, value, tab);
+  // Some mutations can succeed before a later audit/refresh step reports an error.
+  // Invalidating on every admin mutation exit prevents a partial success from serving stale scores.
+  invalidateScoringCache();
+  return adminRedirect(key, value, tab, resultRaceId);
 };
 
 const recordAdminAudit = async (
@@ -131,6 +153,22 @@ const recordAdminAudit = async (
 
   if (error) {
     console.error("[audit] Failed recording admin event:", error.message);
+  }
+};
+
+const createSeasonSafetySnapshot = async (
+  supabase: SupabaseClient,
+  seasonId: number,
+  label: string
+): Promise<void> => {
+  const { error } = await supabase.rpc("create_season_restore_point", {
+    p_label: label.slice(0, 160),
+    p_season_id: seasonId,
+    p_source: "automatic"
+  });
+
+  if (error) {
+    throw new Error(withMigrationHint(error.message, SEASON_RECOVERY_MIGRATION_FILE));
   }
 };
 
@@ -386,6 +424,33 @@ export async function activateLeagueSeasonAction(formData: FormData) {
 
   if (!seasonId) {
     adminRedirect("error", "Select a season to activate.", "races");
+  }
+
+  const { data: currentSeason, error: currentSeasonError } = await supabase
+    .from("league_seasons")
+    .select("id,season_year")
+    .eq("status", "active")
+    .maybeSingle<{ id: number; season_year: number }>();
+  if (currentSeasonError) {
+    adminRedirect("error", currentSeasonError.message, "races");
+  }
+
+  if (currentSeason && currentSeason.id !== seasonId) {
+    try {
+      await createSeasonSafetySnapshot(
+        supabase,
+        currentSeason.id,
+        `Before activating a new season from ${currentSeason.season_year}`
+      );
+    } catch (snapshotError) {
+      adminRedirect(
+        "error",
+        snapshotError instanceof Error
+          ? snapshotError.message
+          : "Could not create the required pre-activation backup.",
+        "races"
+      );
+    }
   }
 
   const { error } = await supabase.rpc("activate_league_season", {
@@ -1803,8 +1868,9 @@ export async function setRaceWinnerAction(formData: FormData) {
 export async function importIndy500QualifyingOrderAction(formData: FormData) {
   const { supabase } = await requireAdmin();
   const tab = parseAdminTab(asText(formData.get("tab"))) ?? "results";
+  const resultRaceId = parsePositiveInteger(asText(formData.get("result_race_id")));
   const redirectWithTab = (key: "error" | "message", value: string): never =>
-    adminMutationRedirect(key, value, tab);
+    adminMutationRedirect(key, value, tab, resultRaceId);
 
   const raceIdInput = parsePositiveInteger(asText(formData.get("race_id")));
   const rawPaste = asText(formData.get("qualifying_order_paste"));
@@ -1983,8 +2049,9 @@ export async function importIndy500QualifyingOrderAction(formData: FormData) {
 export async function upsertResultAction(formData: FormData) {
   const { supabase } = await requireAdmin();
   const tab = parseAdminTab(asText(formData.get("tab"))) ?? "results";
+  const resultRaceId = parsePositiveInteger(asText(formData.get("result_race_id")));
   const redirectWithTab = (key: "error" | "message", value: string): never =>
-    adminMutationRedirect(key, value, tab);
+    adminMutationRedirect(key, value, tab, resultRaceId);
 
   const raceId = parsePositiveInteger(asText(formData.get("race_id")));
   const driverId = parsePositiveInteger(asText(formData.get("driver_id")));
@@ -2008,9 +2075,14 @@ export async function upsertResultAction(formData: FormData) {
 
   const { data: selectedRace, error: selectedRaceError } = await supabase
     .from("races")
-    .select("race_name,results_status")
+    .select("race_name,results_status,round_number,season_id")
     .eq("id", selectedRaceId)
-    .maybeSingle<{ race_name: string; results_status: "draft" | "published" }>();
+    .maybeSingle<{
+      race_name: string;
+      results_status: "draft" | "published";
+      round_number: number;
+      season_id: number;
+    }>();
   if (selectedRaceError || !selectedRace) {
     redirectWithTab(
       "error",
@@ -2023,6 +2095,22 @@ export async function upsertResultAction(formData: FormData) {
       "error",
       "Published results require the correction confirmation before they can return to draft."
     );
+  }
+  if (resultRace.results_status === "published") {
+    try {
+      await createSeasonSafetySnapshot(
+        supabase,
+        resultRace.season_id,
+        `Before correcting R${resultRace.round_number}: ${resultRace.race_name}`
+      );
+    } catch (snapshotError) {
+      redirectWithTab(
+        "error",
+        snapshotError instanceof Error
+          ? snapshotError.message
+          : "Could not create the required pre-correction backup."
+      );
+    }
   }
 
   const { error } = await supabase.rpc("save_race_result_draft", {
@@ -2087,8 +2175,9 @@ export async function upsertResultAction(formData: FormData) {
 export async function publishSavedRaceResultsAction(formData: FormData) {
   const { supabase } = await requireAdmin();
   const tab = parseAdminTab(asText(formData.get("tab"))) ?? "results";
+  const resultRaceId = parsePositiveInteger(asText(formData.get("result_race_id")));
   const redirectWithTab = (key: "error" | "message", value: string): never =>
-    adminMutationRedirect(key, value, tab);
+    adminMutationRedirect(key, value, tab, resultRaceId);
 
   const raceId = parsePositiveInteger(asText(formData.get("race_id")));
   const officialWinningAverageSpeed = parseNonNegativeNumber(
@@ -2110,9 +2199,14 @@ export async function publishSavedRaceResultsAction(formData: FormData) {
 
   const { data: selectedRace, error: selectedRaceError } = await supabase
     .from("races")
-    .select("results_status")
+    .select("race_name,results_status,round_number,season_id")
     .eq("id", raceId)
-    .maybeSingle<{ results_status: "draft" | "published" }>();
+    .maybeSingle<{
+      race_name: string;
+      results_status: "draft" | "published";
+      round_number: number;
+      season_id: number;
+    }>();
   if (selectedRaceError || !selectedRace) {
     redirectWithTab(
       "error",
@@ -2125,6 +2219,22 @@ export async function publishSavedRaceResultsAction(formData: FormData) {
       "error",
       "Check the published-results correction confirmation before republishing this race."
     );
+  }
+  if (savedResultRace.results_status === "published") {
+    try {
+      await createSeasonSafetySnapshot(
+        supabase,
+        savedResultRace.season_id,
+        `Before republishing R${savedResultRace.round_number}: ${savedResultRace.race_name}`
+      );
+    } catch (snapshotError) {
+      redirectWithTab(
+        "error",
+        snapshotError instanceof Error
+          ? snapshotError.message
+          : "Could not create the required pre-correction backup."
+      );
+    }
   }
 
   const { data: publishedCount, error } = await supabase.rpc("publish_saved_race_results", {
@@ -2163,8 +2273,9 @@ export async function publishSavedRaceResultsAction(formData: FormData) {
 export async function importIndycarResultsAction(formData: FormData) {
   const { supabase } = await requireAdmin();
   const tab = parseAdminTab(asText(formData.get("tab"))) ?? "results";
+  const resultRaceId = parsePositiveInteger(asText(formData.get("result_race_id")));
   const redirectWithTab = (key: "error" | "message", value: string): never =>
-    adminMutationRedirect(key, value, tab);
+    adminMutationRedirect(key, value, tab, resultRaceId);
 
   const raceIdInput = parsePositiveInteger(asText(formData.get("race_id")));
   const rawPaste = asText(formData.get("results_paste"));
@@ -2186,9 +2297,14 @@ export async function importIndycarResultsAction(formData: FormData) {
 
   const { data: selectedRace, error: selectedRaceError } = await supabase
     .from("races")
-    .select("results_status")
+    .select("race_name,results_status,round_number,season_id")
     .eq("id", raceId)
-    .maybeSingle<{ results_status: "draft" | "published" }>();
+    .maybeSingle<{
+      race_name: string;
+      results_status: "draft" | "published";
+      round_number: number;
+      season_id: number;
+    }>();
   if (selectedRaceError || !selectedRace) {
     redirectWithTab(
       "error",
@@ -2202,7 +2318,6 @@ export async function importIndycarResultsAction(formData: FormData) {
       "Check the published-results correction confirmation before replacing this race."
     );
   }
-
   if (!rawPaste) {
     redirectWithTab("error", "Paste results text before importing.");
   }
@@ -2306,6 +2421,23 @@ export async function importIndycarResultsAction(formData: FormData) {
       "error",
       "Could not determine a valid official race average speed between 0 and 300 MPH. Include the Average Speed column."
     );
+  }
+
+  if (importResultRace.results_status === "published") {
+    try {
+      await createSeasonSafetySnapshot(
+        supabase,
+        importResultRace.season_id,
+        `Before replacing R${importResultRace.round_number}: ${importResultRace.race_name}`
+      );
+    } catch (snapshotError) {
+      redirectWithTab(
+        "error",
+        snapshotError instanceof Error
+          ? snapshotError.message
+          : "Could not create the required pre-correction backup."
+      );
+    }
   }
 
   const { data: publishedCount, error: publishError } = await supabase.rpc(
@@ -2467,6 +2599,21 @@ export async function finalizeHallOfFameSeasonAction(formData: FormData) {
     total_points: row.totalPoints
   }));
 
+  try {
+    await createSeasonSafetySnapshot(
+      supabase,
+      seasonIdValue,
+      `Before finalizing ${seasonYear} Hall of Fame standings`
+    );
+  } catch (snapshotError) {
+    redirectWithTab(
+      "error",
+      snapshotError instanceof Error
+        ? snapshotError.message
+        : "Could not create the required pre-finalization backup."
+    );
+  }
+
   const { error } = await supabase.rpc("finalize_hall_of_fame_season", {
     p_entries: entries,
     p_race_count: finalSnapshot.raceColumns.length,
@@ -2500,6 +2647,173 @@ export async function finalizeHallOfFameSeasonAction(formData: FormData) {
     "message",
     `${seasonYear} final standings saved to the Hall of Fame. This snapshot remains available after drivers are retired or replaced.`
   );
+}
+
+export async function retryFailedPickRemindersAction(formData: FormData) {
+  const { supabase } = await requireAdmin();
+  const raceId = parsePositiveInteger(asText(formData.get("race_id")));
+  const reminderType = asText(formData.get("reminder_type"));
+
+  if (!raceId || !["5d_open", "2d", "4h"].includes(reminderType)) {
+    adminRedirect("error", "Select a valid reminder queue before retrying.", "health");
+  }
+  const selectedRaceId = raceId as number;
+
+  const { data: race, error: raceError } = await supabase
+    .from("races")
+    .select(
+      "id,race_name,is_archived,season_id,pick_format,qualifying_start_at,race_date,league_seasons!inner(status)"
+    )
+    .eq("id", selectedRaceId)
+    .maybeSingle<{
+      id: number;
+      is_archived: boolean;
+      league_seasons: { status: string } | Array<{ status: string }>;
+      pick_format: RacePickFormat;
+      qualifying_start_at: string;
+      race_date: string;
+      race_name: string;
+      season_id: number;
+    }>();
+  if (raceError || !race) {
+    adminRedirect(
+      "error",
+      raceError?.message ?? "The selected reminder race was not found.",
+      "health"
+    );
+  }
+  const selectedRace = race!;
+  const seasonStatus = Array.isArray(selectedRace.league_seasons)
+    ? selectedRace.league_seasons[0]?.status
+    : selectedRace.league_seasons.status;
+  if (selectedRace.is_archived || seasonStatus !== "active") {
+    adminRedirect(
+      "error",
+      "Failed reminders can only be retried for an active-season race.",
+      "health"
+    );
+  }
+  const activeReminderWindow = getReminderWindow(
+    Date.parse(pickLockAtForRace(selectedRace)) - Date.now()
+  );
+  if (activeReminderWindow?.key !== reminderType) {
+    adminRedirect(
+      "error",
+      "This reminder window is no longer active. Refresh System Health before retrying.",
+      "health"
+    );
+  }
+
+  const serviceRoleSupabase = createServiceRoleSupabaseClient();
+  const { data: resetRows, error: resetError } = await serviceRoleSupabase
+    .from("pick_reminders")
+    .update({
+      attempt_count: 0,
+      delivery_status: "pending",
+      last_attempt_at: null,
+      last_error: null,
+      lease_expires_at: "1970-01-01T00:00:00.000Z"
+    })
+    .eq("race_id", selectedRaceId)
+    .eq("reminder_type", reminderType)
+    .eq("delivery_status", "failed")
+    .gte("attempt_count", REMINDER_MAX_ATTEMPTS)
+    .select("id");
+  if (resetError) {
+    adminRedirect("error", resetError.message, "health");
+  }
+
+  const resetCount = resetRows?.length ?? 0;
+  await recordAdminAudit(supabase, {
+    action: "retry_failed_reminders",
+    afterState: {
+      reminder_type: reminderType,
+      reset_count: resetCount
+    },
+    entityId: String(selectedRaceId),
+    entityType: "race",
+    summary: `Reset ${resetCount} terminal ${reminderType} reminder deliver${
+      resetCount === 1 ? "y" : "ies"
+    } for ${selectedRace.race_name}.`
+  });
+
+  revalidatePath("/admin");
+  adminRedirect(
+    "message",
+    resetCount > 0
+      ? `${resetCount} failed reminder deliver${
+          resetCount === 1 ? "y is" : "ies are"
+        } queued for the next cron run.`
+      : "No permanently failed deliveries were waiting for this race and reminder window.",
+    "health"
+  );
+}
+
+export async function updateFeedbackStatusAction(formData: FormData) {
+  const { supabase } = await requireAdmin();
+  const feedbackId = parsePositiveInteger(asText(formData.get("feedback_id")));
+  const status = asText(formData.get("status"));
+  const feedbackPage = parsePositiveInteger(asText(formData.get("feedback_page"))) ?? 1;
+  const requestedFilter = asText(formData.get("feedback_status"));
+  const feedbackStatus = ["all", "new", "in_review", "resolved"].includes(
+    requestedFilter
+  )
+    ? requestedFilter
+    : "all";
+  const redirectWithFeedbackState = (
+    key: "error" | "message",
+    value: string
+  ): never => {
+    const params = new URLSearchParams({
+      [key]: value,
+      feedback_page: String(feedbackPage),
+      feedback_status: feedbackStatus,
+      tab: "feedback"
+    });
+    redirect(`/admin?${params.toString()}`);
+  };
+
+  if (!feedbackId || !["new", "in_review", "resolved"].includes(status)) {
+    redirectWithFeedbackState("error", "Select a valid feedback status.");
+  }
+
+  const { data: existing, error: existingError } = await supabase
+    .from("feedback_items")
+    .select("id,status")
+    .eq("id", feedbackId)
+    .maybeSingle<{ id: number; status: string }>();
+  if (existingError || !existing) {
+    redirectWithFeedbackState(
+      "error",
+      existingError?.message ?? "Feedback submission was not found."
+    );
+  }
+
+  const { error } = await supabase
+    .from("feedback_items")
+    .update({
+      resolved_at: status === "resolved" ? new Date().toISOString() : null,
+      status
+    })
+    .eq("id", feedbackId);
+  if (error) {
+    redirectWithFeedbackState(
+      "error",
+      withMigrationHint(error.message, SEASON_RECOVERY_MIGRATION_FILE)
+    );
+  }
+
+  await recordAdminAudit(supabase, {
+    action: "update_feedback_status",
+    afterState: { status },
+    beforeState: { status: existing!.status },
+    entityId: String(feedbackId),
+    entityType: "feedback",
+    summary: `Marked feedback #${feedbackId} as ${status.replace("_", " ")}.`
+  });
+
+  revalidatePath("/admin");
+  redirectWithFeedbackState("message", "Feedback status updated.");
 }
 
 export async function cleanupTestFlowDataAction(formData: FormData) {

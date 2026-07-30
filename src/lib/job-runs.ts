@@ -3,6 +3,14 @@ import "server-only";
 import { createServiceRoleSupabaseClient } from "@/lib/supabase/service-role";
 
 export type JobName = "fantasy-winner" | "pick-reminders";
+export type CompletedJobStatus = "degraded" | "succeeded";
+
+type JobRunOptions<T> = {
+  completionForResult?: (result: T) => {
+    errorMessage?: string | null;
+    status: CompletedJobStatus;
+  };
+};
 
 const asSummary = (value: unknown): Record<string, unknown> => {
   if (value && typeof value === "object" && !Array.isArray(value)) {
@@ -14,7 +22,8 @@ const asSummary = (value: unknown): Record<string, unknown> => {
 
 export async function withJobRun<T>(
   jobName: JobName,
-  run: () => Promise<T>
+  run: () => Promise<T>,
+  options: JobRunOptions<T> = {}
 ): Promise<T> {
   const supabase = createServiceRoleSupabaseClient();
   const { data: jobRunId, error: startError } = await supabase.rpc("start_job_run", {
@@ -27,12 +36,16 @@ export async function withJobRun<T>(
 
   try {
     const result = await run();
+    const completion = options.completionForResult?.(result) ?? {
+      errorMessage: null,
+      status: "succeeded" as const
+    };
 
     if (typeof jobRunId === "number") {
       const { error: finishError } = await supabase.rpc("finish_job_run", {
-        p_error_message: null,
+        p_error_message: completion.errorMessage ?? null,
         p_job_run_id: jobRunId,
-        p_status: "succeeded",
+        p_status: completion.status,
         p_summary: asSummary(result)
       });
       if (finishError) {

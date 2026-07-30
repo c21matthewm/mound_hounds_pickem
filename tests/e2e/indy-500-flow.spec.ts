@@ -257,11 +257,10 @@ test.describe.serial("Indianapolis 500 Pick'em Flow", () => {
     );
     await expect(participantPage.getByRole("button", { name: "Save Pick'em Form" })).toBeDisabled();
 
-    await adminPage.goto("/admin?tab=results");
+    await adminPage.goto(`/admin?tab=results&result_race_id=${race.id}`);
     await adminPage.getByText("Indianapolis 500 qualifying order").click();
     const qualifyingForm = adminPage.getByTestId("admin-indy-qualifying-import-form");
-    await expect(qualifyingForm.getByTestId("admin-indy-qualifying-race-select")).toContainText(raceName);
-    await qualifyingForm.getByTestId("admin-indy-qualifying-race-select").selectOption(String(race.id));
+    await expect(qualifyingForm.getByTestId("admin-indy-qualifying-race")).toContainText(raceName);
     await qualifyingForm.getByTestId("admin-indy-qualifying-paste").fill(qualifyingPasteForDrivers(drivers));
     await qualifyingForm.getByTestId("admin-indy-qualifying-submit").click();
     await expect(adminPage.locator("main")).toContainText(
@@ -319,9 +318,9 @@ test.describe.serial("Indianapolis 500 Pick'em Flow", () => {
     expect(savedPick.driver_group7_id).toBe(firstPickByGroup.get(7)!.driver_id);
     expect(savedPick.driver_group8_id).toBe(firstPickByGroup.get(8)!.driver_id);
 
-    await adminPage.goto("/admin?tab=results");
+    await adminPage.goto(`/admin?tab=results&result_race_id=${race.id}`);
     const resultsImportForm = adminPage.getByTestId("admin-results-import-form");
-    await resultsImportForm.getByTestId("admin-results-import-race-select").selectOption(String(race.id));
+    await expect(resultsImportForm.getByTestId("admin-results-import-race")).toContainText(raceName);
     await resultsImportForm.getByTestId("admin-results-import-paste").fill(resultsPasteForDrivers(drivers));
     await resultsImportForm.getByTestId("admin-results-import-preview").click();
     await expect(resultsImportForm).toContainText(`Publish Preview: ${raceName}`);

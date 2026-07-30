@@ -28,52 +28,49 @@ export function PickSubmissionSnapshot({
   }, [latestSavedAt]);
 
   return (
-    <section className="mt-6 rounded-2xl border border-slate-200 bg-white p-4 md:p-5">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h3 className="text-base font-semibold text-slate-900">Last Saved Submission</h3>
-          <p className="mt-1 text-sm text-slate-600">Your saved state for this race.</p>
+    <section className="mt-5 border-y border-slate-200 py-3">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="min-w-0">
+          <h3 className="text-sm font-semibold text-slate-900">Saved submission</h3>
+          <p className="mt-0.5 text-xs text-slate-500">{latestSavedText}</p>
         </div>
-        <p className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-slate-700">
-          {savedPicks.length} saved group{savedPicks.length === 1 ? "" : "s"}
-        </p>
+        <dl className="flex items-center gap-4 text-right">
+          <div>
+            <dt className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+              Groups
+            </dt>
+            <dd className="text-sm font-semibold text-slate-900">{savedPicks.length}</dd>
+          </div>
+          <div>
+            <dt className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+              Avg Speed (MPH)
+            </dt>
+            <dd className="text-sm font-semibold text-slate-900">
+              {savedAverageSpeed ?? "-"}
+            </dd>
+          </div>
+        </dl>
       </div>
 
-      <dl className="mt-3 grid gap-2 text-sm sm:grid-cols-2">
-        <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
-          <dt className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
-            Latest Saved
-          </dt>
-          <dd className="mt-0.5 font-medium text-slate-900">{latestSavedText}</dd>
-        </div>
-        <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
-          <dt className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
-            Avg Speed (MPH)
-          </dt>
-          <dd className="mt-0.5 font-medium text-slate-900">{savedAverageSpeed ?? "Not saved"}</dd>
-        </div>
-      </dl>
-
       {savedPicks.length > 0 ? (
-        <div className="mt-3 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-3">
-          <p className="text-xs font-semibold uppercase tracking-wide text-emerald-800">
-            Last Saved Submission
-          </p>
-          <div className="mt-2 flex flex-wrap gap-1.5">
+        <details className="mt-2">
+          <summary className="w-fit cursor-pointer text-xs font-semibold text-blue-800">
+            View saved drivers
+          </summary>
+          <div className="mt-2 flex flex-wrap gap-1">
             {savedPicks.map((item) => (
               <span
                 key={`saved-pick-${item.groupNumber}`}
-                className="rounded-full border border-emerald-300 bg-white px-2 py-0.5 text-xs font-medium text-emerald-900"
+                className="rounded border border-slate-200 bg-slate-50 px-1.5 py-0.5 text-[11px] font-medium text-slate-700"
               >
-                G{item.groupNumber}: {item.driverName}
+                G{item.groupNumber} · {item.driverName}
               </span>
             ))}
           </div>
-        </div>
+        </details>
       ) : (
-        <p className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
-          No picks saved yet for this race. Your picks become official only after you click Save
-          Pick&apos;em Form.
+        <p className="mt-2 text-xs text-amber-800">
+          No picks are saved yet. Picks become official only after you press Save.
         </p>
       )}
     </section>

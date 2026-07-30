@@ -52,7 +52,9 @@ Do not commit the Resend key. Supabase stores the SMTP credential.
 
 4. Confirm the existing `NEXT_PUBLIC_SITE_URL` Production variable is `https://moundhoundspickem.app` after the custom domain is active. Email links are built from this value.
 5. Save the variables with `PICK_EMAILS_ENABLED=false`. They take effect on the next production deployment; pushing the release to `main` will create that deployment without sending league email.
-6. Run `supabase/migrations/20260717_update_pick_reminder_windows.sql` in the Supabase SQL Editor.
+6. Run `supabase/migrations/20260717_update_pick_reminder_windows.sql` and all later pending
+   migrations through `supabase/migrations/20260729_scale_weekly_operations.sql` in filename order
+   in the Supabase SQL Editor.
 7. Confirm the existing `pick_reminders_5min` job is active with the verification query in `DEPLOY_VERCEL.md`.
 8. When the migration, domain, and sender are all verified, change `PICK_EMAILS_ENABLED` to `true` in Vercel and create a new production deployment. This arms email delivery. If the current race is already inside a notification window, eligible missing-pick teams can be emailed as soon as that deployment is active.
 
@@ -63,9 +65,10 @@ The email schedule is:
 - 4 hours before the pick deadline: final reminder.
 
 Only registered teams without a saved pick for that race receive a given email. Each delivery is
-deduplicated in `pick_reminders`; failed or abandoned delivery attempts can retry up to three times
-with the same provider idempotency key. Standard-race deadlines are qualifying start. The
-Indianapolis 500 deadline remains race start because qualifying-order groups must be imported
+deduplicated in `pick_reminders`; the cron sends at most 25 queued deliveries per five-minute run
+with five concurrent provider requests. Failed or abandoned delivery attempts can retry up to
+three times with the same provider idempotency key. Standard-race deadlines are qualifying start.
+The Indianapolis 500 deadline remains race start because qualifying-order groups must be imported
 before that form is usable. If previous-race results have not been published, the form-open notice
 waits until those results are ready.
 
@@ -153,27 +156,42 @@ admin must explicitly authorize forced removal; normal profile edits do not remo
 Open **Admin > System Health** after a migration, deployment, season rollover, or notification
 configuration change. Confirm:
 
-- schema version is `20260726_shared_pick_windows` and the database contract reports healthy;
+- schema version is `20260730_atomic_picks_recovery_v1` and the database contract reports healthy;
 - the expected season is active and the registered-team count is reasonable;
 - the next race and previous-results gate are correct;
 - pick email/SMS enabled states match Vercel;
-- recent reminder attempts do not show repeated failures.
+- reminder queue counts progress from pending/retrying to sent without permanent failures;
+- use **Retry permanent failures** only after correcting the provider or recipient problem;
 - both scheduled jobs show recent heartbeat rows, even when no email or winner was due;
 - recent admin audit entries match intentional participant, race, result, and season changes.
 
 The latest matching database migrations are
-`supabase/migrations/20260725_harden_race_and_season_operations.sql` and
-`supabase/migrations/20260726_add_shared_pick_windows.sql`. Run them in filename order in Supabase
-SQL Editor before deploying this application version. They are additive and keep existing 2026
-registrations intact. After they succeed, set the 2026 invite code in the admin interface before
-accepting any new 2026 participants.
+`supabase/migrations/20260725_harden_race_and_season_operations.sql`,
+`supabase/migrations/20260726_add_shared_pick_windows.sql`, and
+`supabase/migrations/20260729_scale_weekly_operations.sql`, and
+`supabase/migrations/20260730_atomic_picks_and_season_recovery.sql`. Run them in filename order in
+Supabase SQL Editor before deploying this application version. They are additive and keep existing
+2026 registrations intact. After they succeed, set the 2026 invite code in the admin interface
+before accepting any new 2026 participants.
+
+## Season backup and recovery
+
+Open **Admin > Recovery** and select **Create & Download Backup** before results corrections,
+season rollover, or unusual database work. Store the downloaded JSON outside Supabase and Vercel,
+and retain at least the three newest files.
+
+Result publication and high-risk admin operations also create internal restore points. If recovery
+is needed, use the guided preview in the Recovery tab; it compares row counts, requires the season
+year, and creates a separate safety point before restoring. Do not manually paste backup contents
+into database tables. The permanent incident procedure and backup limitations are in
+`docs/SEASON_RECOVERY.md`.
 
 ## Doubleheader Setup
 
 1. Create the first standard-format race with its qualifying time, race start, and round.
 2. Create the consecutive second race and select the first race under **Shared pick deadline**.
 3. Confirm both race rows show **Shared deadline** and the same qualifying time.
-4. Before picks open, verify Race Center shows `0/2` submissions for a participant and Admin
+4. Before picks open, verify Dashboard shows `0/2` submissions for a participant and Admin
    readiness counts two expected submissions per registered team.
 5. Do not unlink the races after fields freeze or picks exist. Results and scoring are still
    published separately for each race.

@@ -2,142 +2,57 @@ import Link from "next/link";
 import { AuthenticatedPageShell } from "@/components/authenticated-page-shell";
 import { MobileBottomNav } from "@/components/mobile-bottom-nav";
 import { SignOutButton } from "@/components/sign-out-button";
+import {
+  ActionLink,
+  CompactNotice,
+  DetailGrid,
+  MetricStrip,
+  SectionHeader,
+  StatusChip,
+  type StatusTone
+} from "@/components/ui-primitives";
 import { MOUND_HOUND_IMAGE_PATH } from "@/lib/branding";
 import { requireAppUser } from "@/lib/authenticated-user";
-import { getPreviousRaceResultsGate } from "@/lib/pickem-results-gate";
-import { nextPickWindow, pickWindowRoundLabel } from "@/lib/pick-windows";
+import { pickWindowRoundLabel } from "@/lib/pick-windows";
 import { queryStringParam } from "@/lib/query";
 import { raceContextLabel } from "@/lib/race-label";
-import { pickLockAtForRace, type RacePickFormat } from "@/lib/race-format";
-import { isRegisteredForSeason } from "@/lib/season-participation";
+import { loadRaceWeekState, type RaceWeekStatus } from "@/lib/race-week";
+import { formatLeagueDateTime } from "@/lib/timezone";
 
 type PageProps = {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 };
 
-type DashboardRaceRow = {
-  id: number;
-  pick_format?: RacePickFormat | null;
-  pick_window_key: string;
-  qualifying_start_at: string;
-  race_date: string;
-  race_name: string;
-  round_number: number;
-  season_id: number;
+const statusTone = (status: RaceWeekStatus): StatusTone => {
+  if (status === "form_open") {
+    return "info";
+  }
+  if (status === "picks_saved") {
+    return "success";
+  }
+  if (status === "waiting_results" || status === "registration_required") {
+    return "warning";
+  }
+  return "neutral";
 };
 
-const DASHBOARD_RACE_SELECT_FIELDS =
-  "id,race_name,pick_format,pick_window_key,qualifying_start_at,race_date,season_id,round_number";
+const formatDateTime = (value: string): string =>
+  formatLeagueDateTime(value, { dateStyle: "medium", timeStyle: "short" });
 
 export default async function DashboardPage({ searchParams }: PageProps) {
   const params = await searchParams;
   const message = queryStringParam(params.message);
-
   const { activeSeason, participation, profile, supabase, user } = await requireAppUser({
     requireSeasonDecision: true
   });
-
-  const now = new Date();
-  let currentRace: DashboardRaceRow | null = null;
-  let currentPickWindow: DashboardRaceRow[] = [];
-
-  if (activeSeason) {
-    const { data, error: raceError } = await supabase
-      .from("races")
-      .select(DASHBOARD_RACE_SELECT_FIELDS)
-      .eq("is_archived", false)
-      .eq("season_id", activeSeason.id)
-      .order("round_number", { ascending: true })
-      .returns<DashboardRaceRow[]>();
-
-    if (raceError) {
-      throw new Error(`Failed loading the next race: ${raceError.message}`);
-    }
-    currentPickWindow = nextPickWindow(data ?? [], now);
-  }
-
-  const currentPickResponse = currentPickWindow.length > 0
-    ? await supabase
-        .from("picks")
-        .select("id,race_id")
-        .in("race_id", currentPickWindow.map((race) => race.id))
-        .eq("user_id", user.id)
-        .returns<Array<{ id: number; race_id: number }>>()
-    : { data: [], error: null };
-  if (currentPickResponse.error) {
-    throw new Error(`Failed loading your saved pick status: ${currentPickResponse.error.message}`);
-  }
-  const pickedRaceIds = new Set((currentPickResponse.data ?? []).map((pick) => pick.race_id));
-  const missingRace = currentPickWindow.find((race) => !pickedRaceIds.has(race.id)) ?? null;
-  currentRace = missingRace ?? currentPickWindow[0] ?? null;
-  const savedRaceCount = pickedRaceIds.size;
-  const windowIsComplete =
-    currentPickWindow.length > 0 && savedRaceCount === currentPickWindow.length;
-  const isDoubleheader = currentPickWindow.length > 1;
-  const pickLockAt = currentRace ? pickLockAtForRace(currentRace) : null;
-  const picksLocked = pickLockAt ? Date.parse(pickLockAt) <= now.getTime() : false;
-  const previousResultsGate = currentRace
-    ? await getPreviousRaceResultsGate(supabase, currentRace)
-    : null;
-  const blockedPreviousResultsGate =
-    previousResultsGate?.status === "blocked" ? previousResultsGate : null;
-  const raceAction = activeSeason && !isRegisteredForSeason(participation)
-    ? {
-        body: `Your team is not registered for the ${activeSeason.seasonYear} season. Join when you are ready to make picks.`,
-        href: "/season-registration",
-        label: "Register now",
-        status: "Not Registered",
-        title: "Not entered this season"
-      }
-    : !currentRace
-    ? {
-        body: activeSeason
-          ? `No upcoming race is scheduled yet for the ${activeSeason.seasonYear} season.`
-          : "No league season is currently active.",
-        href: "/leaderboard",
-        label: "View leaderboard",
-        status: "Waiting",
-        title: "Race week will appear here"
-      }
-    : blockedPreviousResultsGate
-      ? {
-          body: `${blockedPreviousResultsGate.shortMessage} Driver standings and pick groups will refresh before this form opens.`,
-          href: profile.role === "admin" ? "/admin?tab=results" : "/leaderboard",
-          label: profile.role === "admin" ? "Upload Results" : "View Leaderboard",
-          status: "Results Needed",
-          title: "Waiting on Results"
-        }
-    : picksLocked
-      ? {
-          body: windowIsComplete
-            ? `${isDoubleheader ? "Both doubleheader submissions are" : "Your submission is"} saved and locked.`
-            : `${currentRace.race_name} is locked. Check the leaderboard once results are posted.`,
-          href: windowIsComplete
-            ? `/leaderboard?tab=picks&race_id=${currentRace.id}`
-            : "/leaderboard",
-          label: windowIsComplete ? "View locked picks" : "View leaderboard",
-          status: "Locked",
-          title: windowIsComplete ? "Picks saved and locked" : "Race is locked"
-        }
-      : {
-          body: windowIsComplete
-            ? `No action needed. ${isDoubleheader ? "Both doubleheader submissions are" : "Your picks are"} already in.`
-            : isDoubleheader
-              ? `${savedRaceCount}/${currentPickWindow.length} race submissions saved. Complete each before the shared deadline.`
-              : `${currentRace.race_name} is open. Submit your picks before lock.`,
-          href: `/picks?race_id=${currentRace.id}`,
-          label: windowIsComplete ? "Review Picks" : "Make Picks",
-          status: windowIsComplete
-            ? "Picks Saved"
-            : isDoubleheader
-              ? `${savedRaceCount}/${currentPickWindow.length} Saved`
-              : "Form Open",
-          title: windowIsComplete
-            ? "Picks Are In"
-            : isDoubleheader && savedRaceCount > 0
-              ? "Complete Your Picks"
-              : "Make Your Picks"
-        };
+  const raceWeek = await loadRaceWeekState({
+    activeSeason,
+    isAdmin: profile.role === "admin",
+    participation,
+    supabase,
+    userId: user.id
+  });
+  const { action, currentRace } = raceWeek;
 
   return (
     <AuthenticatedPageShell
@@ -152,157 +67,183 @@ export default async function DashboardPage({ searchParams }: PageProps) {
       title="Dashboard"
     >
       {message ? (
-        <p className="mt-6 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
+        <CompactNotice className="mt-5" tone="success">
           {message}
-        </p>
+        </CompactNotice>
       ) : null}
 
-      <section className="mt-5">
-        <div className="flex items-start justify-between gap-3">
-          <div className="min-w-0 flex-1">
-            <h2 className="text-lg font-semibold text-slate-900">Quick Actions</h2>
-            <p className="mt-1 text-sm text-slate-600">Jump into the race-week work that matters.</p>
-          </div>
-          <div className="shrink-0 rounded-lg border border-slate-300 bg-white p-1 shadow-sm">
+      <section aria-label="Current race status" className="mt-5">
+        <div className="flex min-w-0 items-start gap-3">
+          <div className="shrink-0 rounded-lg border border-slate-200 bg-white p-1 shadow-sm">
             <div
               aria-hidden
-              className="h-20 w-20 rounded-md border border-slate-200 bg-slate-200 bg-cover bg-center"
-              style={{ backgroundImage: `url('${MOUND_HOUND_IMAGE_PATH}')` }}
+              className="h-[88px] w-[88px] rounded-md bg-slate-200 bg-cover bg-center"
+              style={{
+                backgroundImage: `url('${MOUND_HOUND_IMAGE_PATH}')`,
+                backgroundPosition: "50% 38%"
+              }}
             />
           </div>
-        </div>
 
-        <div className="mt-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div className="min-w-0">
-              <div className="flex flex-wrap items-center gap-2">
-                <h3 className="text-base font-semibold text-slate-900">{raceAction.title}</h3>
-                <span className="rounded-full border border-cyan-200 bg-cyan-50 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-cyan-800">
-                  {raceAction.status}
-                </span>
+          <div className="min-w-0 flex-1 overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm">
+            <div className="p-3 sm:p-4">
+              <div className="flex min-w-0 items-start justify-between gap-2 sm:gap-3">
+                <div className="flex min-w-0 flex-wrap items-center gap-2">
+                  <h2 className="text-base font-semibold text-slate-950">{action.title}</h2>
+                  <StatusChip tone={statusTone(action.status)}>{action.statusLabel}</StatusChip>
+                </div>
+                <ActionLink className="shrink-0" href={action.href}>
+                  {action.label}
+                </ActionLink>
               </div>
               {currentRace && activeSeason ? (
-                <p className="mt-1 text-xs font-semibold uppercase tracking-wide text-slate-500">
-                  {isDoubleheader
-                    ? `${activeSeason.seasonYear} · ${pickWindowRoundLabel(currentPickWindow)} · Doubleheader`
-                    : raceContextLabel({
-                        roundNumber: currentRace.round_number,
-                        seasonYear: activeSeason.seasonYear
-                      })}
+                <div className="mt-1.5 min-w-0">
+                  <p className="mt-1 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                    {raceWeek.isDoubleheader
+                      ? `${activeSeason.seasonYear} · ${pickWindowRoundLabel(raceWeek.races)} · Doubleheader`
+                      : raceContextLabel({
+                          roundNumber: currentRace.round_number,
+                          seasonYear: activeSeason.seasonYear
+                        })}
+                  </p>
+                  <p className="mt-0.5 text-sm font-medium leading-5 text-slate-800">
+                    {currentRace.race_name}
+                  </p>
+                </div>
+              ) : null}
+              <p className="mt-2 text-sm leading-5 text-slate-600">{action.body}</p>
+
+              {action.status === "form_open" && currentRace && raceWeek.pickLockAt ? (
+                <div className="mt-3 border-t border-slate-100 pt-3">
+                  <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                    Pick deadline
+                  </p>
+                  <p className="mt-0.5 text-xs font-semibold leading-5 text-slate-800">
+                    {formatDateTime(raceWeek.pickLockAt)}
+                  </p>
+                </div>
+              ) : null}
+            </div>
+
+            {raceWeek.isDoubleheader ? (
+              <div className="border-t border-slate-200 px-3 py-3 sm:px-4">
+                <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                  Weekend forms
                 </p>
-              ) : null}
-              <p className="mt-1 text-sm text-slate-600">{raceAction.body}</p>
-            </div>
-            <div className="flex flex-wrap items-center gap-2">
-              {profile.role === "admin" ? (
-                <Link
-                  className="rounded-lg border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-100"
-                  href="/admin"
-                >
-                  Admin
-                </Link>
-              ) : null}
-              <Link
-                className="rounded-lg bg-slate-900 px-3 py-2 text-sm font-semibold text-white hover:bg-slate-700"
-                href={raceAction.href}
-              >
-                {raceAction.label}
-              </Link>
-            </div>
+                <div className="mt-2 grid gap-2">
+                  {raceWeek.races.map((race) => {
+                    const saved = raceWeek.pickByRaceId.has(race.id);
+                    return (
+                      <Link
+                        className="flex min-w-0 items-center justify-between gap-2 rounded-md border border-slate-200 px-3 py-2 hover:bg-slate-50"
+                        href={`/picks?race_id=${race.id}`}
+                        key={race.id}
+                      >
+                        <span className="min-w-0 text-sm font-semibold leading-5 text-slate-900">
+                          R{race.round_number} · {race.race_name}
+                        </span>
+                        <StatusChip className="shrink-0" tone={saved ? "success" : "warning"}>
+                          {saved ? "Saved" : "Open"}
+                        </StatusChip>
+                      </Link>
+                    );
+                  })}
+                </div>
+              </div>
+            ) : null}
           </div>
         </div>
 
-        <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-          <Link
-            className="group rounded-lg bg-cyan-700 px-4 py-3 text-sm font-semibold text-white hover:bg-cyan-800"
-            href="/race-center"
-          >
-            <span className="flex items-center justify-between gap-3">
-              Race Center
-              <span className="transition group-hover:translate-x-0.5">→</span>
-            </span>
-          </Link>
-          <Link
-            className="group rounded-lg bg-slate-900 px-4 py-3 text-sm font-semibold text-white hover:bg-slate-700"
-            href={isRegisteredForSeason(participation) ? "/picks" : "/season-registration"}
-          >
-            <span className="flex items-center justify-between gap-3">
-              {isRegisteredForSeason(participation) ? "Pick'em Form" : "Season Registration"}
-              <span className="transition group-hover:translate-x-0.5">→</span>
-            </span>
-          </Link>
-          <Link
-            className="group rounded-lg bg-slate-900 px-4 py-3 text-sm font-semibold text-white hover:bg-slate-700"
-            href="/leaderboard"
-          >
-            <span className="flex items-center justify-between gap-3">
-              Leaderboard
-              <span className="transition group-hover:translate-x-0.5">→</span>
-            </span>
-          </Link>
-          <Link
-            className="rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-900 hover:bg-slate-50"
-            href="/rules"
-          >
-            Rules
-          </Link>
-          <Link
-            className="rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-900 hover:bg-slate-50"
-            href="/feedback"
-          >
-            Feedback
-          </Link>
-          <Link
-            className="rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-900 hover:bg-slate-50"
-            href="/contact-admin"
-          >
-            Contact Admin
-          </Link>
+        <nav aria-label="Primary destinations" className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
+          <ActionLink className="w-full" href="/picks">
+            Pick&apos;em
+          </ActionLink>
+          <ActionLink className="w-full" href="/leaderboard">
+            Leaderboard
+          </ActionLink>
+          <ActionLink className="w-full" href="/more">
+            More
+          </ActionLink>
           {profile.role === "admin" ? (
-            <Link
-              className="rounded-lg border border-slate-900 bg-white px-4 py-3 text-sm font-semibold text-slate-900 hover:bg-slate-50"
-              href="/admin"
-            >
-              Admin Dashboard
-            </Link>
-          ) : null}
-        </div>
+            <ActionLink className="w-full" href="/admin">
+              Admin
+            </ActionLink>
+          ) : (
+            <ActionLink className="w-full" href="/rules">
+              Rules
+            </ActionLink>
+          )}
+        </nav>
       </section>
 
-      <section className="mt-6 rounded-xl border border-slate-200 bg-white/80 p-4 sm:p-5">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <h2 className="text-lg font-semibold text-slate-900">Profile Snapshot</h2>
-            <p className="mt-1 text-sm text-slate-600">Your active league identity.</p>
-          </div>
-        </div>
-        <dl className="mt-4 grid grid-cols-1 gap-3 text-sm sm:grid-cols-2 lg:grid-cols-3">
-          <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5">
-            <dt className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
-              Full Name
-            </dt>
-            <dd className="mt-0.5 font-medium text-slate-900">{profile.full_name}</dd>
-          </div>
-          <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5">
-            <dt className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
-              Team Name
-            </dt>
-            <dd className="mt-0.5 font-medium text-slate-900">{profile.team_name}</dd>
-          </div>
-          <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5">
-            <dt className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Email</dt>
-            <dd className="mt-0.5 break-all font-medium text-slate-900">{user.email ?? "-"}</dd>
-          </div>
-          {profile.role === "admin" ? (
-            <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5">
-              <dt className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
-                Role
-              </dt>
-              <dd className="mt-0.5 font-medium capitalize text-slate-900">{profile.role}</dd>
-            </div>
-          ) : null}
-        </dl>
+      <section className="mt-6 border-t border-slate-200 pt-5">
+        <SectionHeader
+          action={
+            activeSeason ? (
+              <StatusChip tone="success">{activeSeason.seasonYear} Season</StatusChip>
+            ) : null
+          }
+          title="Profile"
+        />
+        <DetailGrid
+          className="mt-3"
+          items={[
+            {
+              label: "Name",
+              value: profile.full_name
+            },
+            {
+              label: "Team",
+              value: profile.team_name
+            },
+            {
+              label: "Email",
+              value: user.email ?? "-",
+              valueClassName: "break-all"
+            }
+          ]}
+        />
       </section>
+
+      {raceWeek.adminReadiness && currentRace ? (
+        <section className="mt-6 border-t border-slate-300 pt-5">
+          <SectionHeader
+            action={
+              <ActionLink href="/admin?tab=health" variant="quiet">
+                System health
+              </ActionLink>
+            }
+            description="Current race-week operational status."
+            title="Admin Readiness"
+          />
+          <MetricStrip
+            className="mt-3 grid-cols-2 sm:grid-cols-4"
+            items={[
+              {
+                label: "Previous results",
+                value: raceWeek.previousResultsBlocked ? "Action needed" : "Ready"
+              },
+              {
+                label: "Race field",
+                value:
+                  raceWeek.adminReadiness.frozenRaceCount === raceWeek.races.length
+                    ? `${raceWeek.adminReadiness.fieldDriverCount} slots frozen`
+                    : "Not frozen"
+              },
+              {
+                label: "Submissions",
+                value: `${raceWeek.adminReadiness.pickCount}/${
+                  raceWeek.adminReadiness.registeredTeamCount * raceWeek.races.length
+                }`
+              },
+              {
+                label: "Results",
+                value: `${raceWeek.races.filter((race) => race.results_status === "published").length}/${raceWeek.races.length} posted`
+              }
+            ]}
+          />
+        </section>
+      ) : null}
 
       <MobileBottomNav />
     </AuthenticatedPageShell>
