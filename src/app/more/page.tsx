@@ -1,11 +1,8 @@
 import Link from "next/link";
 import { AuthenticatedPageShell } from "@/components/authenticated-page-shell";
 import { MobileBottomNav } from "@/components/mobile-bottom-nav";
-import { SignOutButton } from "@/components/sign-out-button";
 import {
   ActionLink,
-  DetailGrid,
-  SectionHeader,
   StatusChip
 } from "@/components/ui-primitives";
 import { requireAppUser } from "@/lib/authenticated-user";
@@ -29,21 +26,18 @@ const destinations = [
 ];
 
 export default async function MorePage() {
-  const { activeSeason, profile, user } = await requireAppUser({
+  const { profile } = await requireAppUser({
     requireSeasonDecision: true
   });
 
   return (
     <AuthenticatedPageShell
       actions={
-        <>
-          <ActionLink href="/dashboard" variant="secondary">
-            Dashboard
-          </ActionLink>
-          <SignOutButton className="static" />
-        </>
+        <ActionLink href="/dashboard" variant="secondary">
+          Dashboard
+        </ActionLink>
       }
-      description="League information, support, and account details."
+      description="League information and support."
       eyebrow="More"
       maxWidth="max-w-3xl"
       title="League Menu"
@@ -88,31 +82,6 @@ export default async function MorePage() {
           </Link>
         ) : null}
       </nav>
-
-      <section className="mt-6 border-t border-slate-200 pt-5">
-        <SectionHeader
-          action={
-            activeSeason ? (
-              <StatusChip tone="success">{activeSeason.seasonYear} Season</StatusChip>
-            ) : (
-              <StatusChip>No Active Season</StatusChip>
-            )
-          }
-          title="Account"
-        />
-        <DetailGrid
-          className="mt-3"
-          items={[
-            { label: "Name", value: profile.full_name },
-            { label: "Team", value: profile.team_name },
-            {
-              label: "Email",
-              value: user.email ?? "-",
-              valueClassName: "break-all"
-            }
-          ]}
-        />
-      </section>
 
       <MobileBottomNav />
     </AuthenticatedPageShell>

@@ -1,6 +1,5 @@
 import { AuthenticatedPageShell } from "@/components/authenticated-page-shell";
 import { MobileBottomNav } from "@/components/mobile-bottom-nav";
-import { SignOutButton } from "@/components/sign-out-button";
 import { SubmitButton } from "@/components/submit-button";
 import {
   ActionLink,
@@ -67,12 +66,9 @@ export default async function FeedbackPage({ searchParams }: PageProps) {
   return (
     <AuthenticatedPageShell
       actions={
-        <>
-          <ActionLink href="/dashboard" variant="secondary">
-            Dashboard
-          </ActionLink>
-          <SignOutButton className="static" />
-        </>
+        <ActionLink href="/dashboard" variant="secondary">
+          Dashboard
+        </ActionLink>
       }
       description="Report bugs or suggest improvements for league admins to review."
       eyebrow="Feedback"

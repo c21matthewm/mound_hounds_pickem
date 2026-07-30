@@ -17,6 +17,9 @@ test("public auth pages load and protected routes redirect without mutating data
   await page.goto("/dashboard");
   await expect(page).toHaveURL(/\/login(?:\?.*)?$/);
 
+  await page.goto("/profile");
+  await expect(page).toHaveURL(/\/login(?:\?.*)?$/);
+
   await page.goto("/admin");
   await expect(page).toHaveURL(/\/login(?:\?.*)?$/);
 

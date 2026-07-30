@@ -1,11 +1,9 @@
 import Link from "next/link";
 import { AuthenticatedPageShell } from "@/components/authenticated-page-shell";
 import { MobileBottomNav } from "@/components/mobile-bottom-nav";
-import { SignOutButton } from "@/components/sign-out-button";
 import {
   ActionLink,
   CompactNotice,
-  DetailGrid,
   MetricStrip,
   SectionHeader,
   StatusChip,
@@ -56,7 +54,6 @@ export default async function DashboardPage({ searchParams }: PageProps) {
 
   return (
     <AuthenticatedPageShell
-      actions={<SignOutButton className="static" />}
       description={
         <>
           Signed in as <span className="font-semibold text-slate-900">{profile.team_name}</span>.
@@ -156,13 +153,10 @@ export default async function DashboardPage({ searchParams }: PageProps) {
 
         <nav aria-label="Primary destinations" className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
           <ActionLink className="w-full" href="/picks">
-            Pick&apos;em
+            Pick&apos;em Form
           </ActionLink>
           <ActionLink className="w-full" href="/leaderboard">
             Leaderboard
-          </ActionLink>
-          <ActionLink className="w-full" href="/more">
-            More
           </ActionLink>
           {profile.role === "admin" ? (
             <ActionLink className="w-full" href="/admin">
@@ -173,36 +167,10 @@ export default async function DashboardPage({ searchParams }: PageProps) {
               Rules
             </ActionLink>
           )}
+          <ActionLink className="w-full" href="/more">
+            More
+          </ActionLink>
         </nav>
-      </section>
-
-      <section className="mt-6 border-t border-slate-200 pt-5">
-        <SectionHeader
-          action={
-            activeSeason ? (
-              <StatusChip tone="success">{activeSeason.seasonYear} Season</StatusChip>
-            ) : null
-          }
-          title="Profile"
-        />
-        <DetailGrid
-          className="mt-3"
-          items={[
-            {
-              label: "Name",
-              value: profile.full_name
-            },
-            {
-              label: "Team",
-              value: profile.team_name
-            },
-            {
-              label: "Email",
-              value: user.email ?? "-",
-              valueClassName: "break-all"
-            }
-          ]}
-        />
       </section>
 
       {raceWeek.adminReadiness && currentRace ? (

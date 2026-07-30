@@ -4,7 +4,6 @@ import { AnalyticsRaceHistory } from "@/components/analytics-race-history";
 import { HallOfFameYearSelect } from "@/components/hall-of-fame-year-select";
 import { MobileBottomNav } from "@/components/mobile-bottom-nav";
 import { PicksRaceSelect } from "@/components/picks-race-select";
-import { SignOutButton } from "@/components/sign-out-button";
 import {
   ActionLink,
   CompactNotice,
@@ -122,12 +121,9 @@ export default async function LeaderboardPage({ searchParams }: PageProps) {
     return (
       <AuthenticatedPageShell
         actions={
-          <>
-            <ActionLink href="/dashboard" variant="secondary">
-              Dashboard
-            </ActionLink>
-            <SignOutButton className="static" />
-          </>
+          <ActionLink href="/dashboard" variant="secondary">
+            Dashboard
+          </ActionLink>
         }
         description="Standings, locked picks by race, season analytics, and league history."
         eyebrow="League Data"
@@ -225,12 +221,9 @@ export default async function LeaderboardPage({ searchParams }: PageProps) {
   return (
     <AuthenticatedPageShell
       actions={
-        <>
-          <ActionLink href="/dashboard" variant="secondary">
-            Dashboard
-          </ActionLink>
-          <SignOutButton className="static" />
-        </>
+        <ActionLink href="/dashboard" variant="secondary">
+          Dashboard
+        </ActionLink>
       }
       description="Standings, locked picks by race, season analytics, and league history."
       eyebrow="League Data"

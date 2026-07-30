@@ -1,6 +1,5 @@
 import { AuthenticatedPageShell } from "@/components/authenticated-page-shell";
 import { MobileBottomNav } from "@/components/mobile-bottom-nav";
-import { SignOutButton } from "@/components/sign-out-button";
 import {
   ActionLink,
   ContentPanel,
@@ -15,12 +14,9 @@ export default async function ContactAdminPage() {
   return (
     <AuthenticatedPageShell
       actions={
-        <>
-          <ActionLink href="/dashboard" variant="secondary">
-            Dashboard
-          </ActionLink>
-          <SignOutButton className="static" />
-        </>
+        <ActionLink href="/dashboard" variant="secondary">
+          Dashboard
+        </ActionLink>
       }
       description="For league questions or issues, contact the league admin directly by email."
       eyebrow="Support"
