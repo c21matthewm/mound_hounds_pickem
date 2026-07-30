@@ -144,11 +144,13 @@ supabase/migrations/20260718_add_league_seasons_and_active_participants.sql
 supabase/migrations/20260718_add_season_enrollment_and_delivery_hardening.sql
 ```
 
-The current operations and shared doubleheader pick-window migrations are:
+The current operations, shared doubleheader, and weekly-scale migrations are:
 
 ```text
 supabase/migrations/20260725_harden_race_and_season_operations.sql
 supabase/migrations/20260726_add_shared_pick_windows.sql
+supabase/migrations/20260729_scale_weekly_operations.sql
+supabase/migrations/20260730_atomic_picks_and_season_recovery.sql
 ```
 
 Apply all pending migrations in filename order before deploying application code that depends on
@@ -183,7 +185,10 @@ where p.id = u.id
 7. Use the leaderboard tabs to review standings, locked picks by race, participant analytics, and
    finalized Hall of Fame seasons.
 8. Use **Admin > System Health** to verify the schema contract, active season, next-race result
-   gate, registration count, and recent reminder delivery attempts.
+   gate, registration count, reminder queue totals, degraded cron runs, and failed-delivery retry
+   controls.
+9. Use **Admin > Recovery** to create and download a portable season backup before unusual
+   database work. Follow `docs/SEASON_RECOVERY.md` if a restore is ever needed.
 
 Example paste formats live in:
 
@@ -214,12 +219,14 @@ Vercel production deploys from `main`.
 - `/login` and `/signup`: public auth pages
 - `/forgot-password` and `/reset-password`: Supabase password recovery flow
 - `/season-registration`: returning-user confirmation for the active season
-- `/dashboard`: participant home, rules/support links, profile snapshot
+- `/dashboard`: participant race-week home, quick actions, saved-pick status, and profile snapshot
+- `/more`: compact mobile access to rules, feedback, contact, admin, and account details
 - `/picks`: active race pick form
 - `/leaderboard`: current standings, picks by race, analytics, and Hall of Fame archives
 - `/feedback`: participant bug/improvement submissions
 - `/rules`: in-app rules PDF viewer
-- `/admin`: admin-only participants, drivers, races, results, feedback, and system health
+- `/admin`: admin-only participants, drivers, races, results, feedback, system health, and recovery
+- `/api/admin/season-backups`: admin-authenticated backup download/preview/restore endpoint
 - `/api/cron/fantasy-winner`: protected fantasy winner finalization cron
 - `/api/cron/pick-reminders`: protected pick reminder cron
 

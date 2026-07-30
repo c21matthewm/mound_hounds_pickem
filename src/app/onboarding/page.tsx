@@ -50,7 +50,7 @@ export default async function OnboardingPage({ searchParams }: PageProps) {
 
   return (
     <main className="mx-auto flex min-h-screen max-w-2xl flex-col justify-center px-6 py-16">
-      <header className="relative overflow-hidden rounded-3xl border border-slate-200 bg-white p-6">
+      <header className="relative overflow-hidden rounded-lg border border-slate-200 bg-white p-6">
         <SignOutButton />
         <p className="inline-flex w-fit rounded-full border border-blue-200 bg-blue-50 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-blue-700">
           League Setup
@@ -77,13 +77,13 @@ export default async function OnboardingPage({ searchParams }: PageProps) {
 
       <form
         action={saveProfileAction}
-        className="mt-6 grid gap-4 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm"
+        className="mt-6 grid gap-4 rounded-lg border border-slate-200 bg-white p-6 shadow-sm"
       >
         <label className="block">
           <span className="mb-1 block text-sm font-medium text-slate-700">Full name</span>
           <input
             required
-            className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm"
+            className="w-full rounded-md border border-slate-300 px-3 py-2.5 text-sm"
             defaultValue={profile?.full_name ?? ""}
             maxLength={100}
             name="full_name"
@@ -96,7 +96,7 @@ export default async function OnboardingPage({ searchParams }: PageProps) {
           <span className="mb-1 block text-sm font-medium text-slate-700">Team name</span>
           <input
             required
-            className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm"
+            className="w-full rounded-md border border-slate-300 px-3 py-2.5 text-sm"
             defaultValue={profile?.team_name ?? ""}
             maxLength={100}
             name="team_name"
@@ -107,7 +107,7 @@ export default async function OnboardingPage({ searchParams }: PageProps) {
         <label className="block">
           <span className="mb-1 block text-sm font-medium text-slate-700">Phone number (optional)</span>
           <input
-            className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm"
+            className="w-full rounded-md border border-slate-300 px-3 py-2.5 text-sm"
             defaultValue={profile?.phone_number ?? ""}
             name="phone_number"
             autoComplete="tel"
@@ -119,7 +119,7 @@ export default async function OnboardingPage({ searchParams }: PageProps) {
         <label className="block">
           <span className="mb-1 block text-sm font-medium text-slate-700">Phone carrier (optional)</span>
           <select
-            className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm"
+            className="w-full rounded-md border border-slate-300 px-3 py-2.5 text-sm"
             defaultValue={profile?.phone_carrier ?? ""}
             name="phone_carrier"
           >
@@ -135,7 +135,7 @@ export default async function OnboardingPage({ searchParams }: PageProps) {
         </label>
 
         <SubmitButton
-          className="mt-2 rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white hover:bg-slate-700"
+          className="mt-2 rounded-md bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white hover:bg-slate-700"
           pendingLabel="Saving profile..."
         >
           Save profile

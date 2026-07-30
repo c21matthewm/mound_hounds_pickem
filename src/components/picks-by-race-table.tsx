@@ -215,7 +215,7 @@ export function PicksByRaceTable({ officialWinningAverageSpeed, resultsPosted, r
 
   return (
     <>
-      <section className="mt-6 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+      <section className="mt-6 overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm">
         <div className="border-b border-slate-200 bg-gradient-to-r from-cyan-50 to-slate-50 px-4 py-3">
           <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-800">
             Picks Matrix

@@ -459,12 +459,11 @@ test.describe.serial("Full App Flow", () => {
       })
     ].join("\n");
 
-    await adminPage.goto("/admin?tab=results");
+    await adminPage.goto(`/admin?tab=results&result_race_id=${raceA.id}`);
     await adminPage.getByText("Manual result entry").click();
     const manualResultsForm = adminPage.getByTestId("admin-results-manual-form");
     const firstDraftDriver = isolatedRaceDrivers[0];
     const firstDraftPoints = pointsByDriverId.get(firstDraftDriver.id)!;
-    await manualResultsForm.locator('select[name="race_id"]').selectOption(String(raceA.id));
     await manualResultsForm.locator('select[name="driver_id"]').selectOption(String(firstDraftDriver.id));
     await manualResultsForm.locator('input[name="points"]').fill(String(firstDraftPoints));
     await manualResultsForm.getByRole("button", { name: "Save draft result" }).click();
@@ -483,7 +482,7 @@ test.describe.serial("Full App Flow", () => {
     expect(draftRace.results_status).toBe("draft");
 
     const resultsImportForm = adminPage.getByTestId("admin-results-import-form");
-    await resultsImportForm.getByTestId("admin-results-import-race-select").selectOption(String(raceA.id));
+    await expect(resultsImportForm.getByTestId("admin-results-import-race")).toContainText(raceAName);
     await resultsImportForm.getByTestId("admin-results-import-paste").fill(standardPreviewPaste);
     await resultsImportForm.getByTestId("admin-results-import-preview").click();
     await expect(resultsImportForm).toContainText(`Publish Preview: ${raceAName}`);

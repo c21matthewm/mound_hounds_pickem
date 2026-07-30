@@ -11,18 +11,28 @@ import {
 } from "@/lib/race-format";
 import { participantLeaderboardLabel } from "@/lib/participant-display";
 import {
-  computeGroupScoreExtremes,
   pickDriverEntries,
   pickDriverIdsForGroupCount,
-  scorePickSelection,
   scoringNumber as asNumber
 } from "@/lib/scoring-engine";
+import {
+  buildSeasonScoringModel,
+  type LeagueScoringSnapshot,
+  type ParticipantAnalyticsSnapshot,
+  type SeasonScoringModel
+} from "@/lib/season-scoring-model";
 import { loadAllRows } from "@/lib/supabase/paginated-query";
 import { SCORING_CACHE_TAG } from "@/lib/scoring-cache";
-import {
-  assignWeeklyRanks,
-  calculateOfficialSpeedDelta
-} from "@/lib/weekly-ranking";
+import { assignWeeklyRanks } from "@/lib/weekly-ranking";
+
+export type {
+  LeaderboardRow,
+  LeagueScoringSnapshot,
+  ParticipantAnalyticsRaceRow,
+  ParticipantAnalyticsSnapshot,
+  ParticipantAnalyticsSummary,
+  RaceBreakdownColumn
+} from "@/lib/season-scoring-model";
 
 type DriverRow = {
   group_number: number;
@@ -123,28 +133,6 @@ const loadRegisteredProfiles = async (
   );
 };
 
-export type LeaderboardRow = {
-  change: number;
-  currentStanding: number;
-  displayName: string;
-  raceBreakdown: Record<number, number>;
-  teamName: string;
-  totalPoints: number;
-  userId: string;
-};
-
-export type RaceBreakdownColumn = {
-  raceDate: string;
-  raceId: number;
-  raceName: string;
-  roundNumber: number;
-};
-
-export type LeagueScoringSnapshot = {
-  leaderboardRows: LeaderboardRow[];
-  raceColumns: RaceBreakdownColumn[];
-};
-
 export type PicksByRaceOption = {
   groupCount: number;
   officialWinningAverageSpeed: number | null;
@@ -180,103 +168,7 @@ export type PicksByRaceSnapshot = {
   selectedRace: PicksByRaceOption | null;
 };
 
-export type ParticipantAnalyticsRaceRow = {
-  averageSpeedGuess: number | null;
-  cumulativePoints: number;
-  fieldSize: number;
-  officialRaceAverageSpeed: number | null;
-  pointsVsRaceAverage: number;
-  raceAveragePoints: number;
-  raceDate: string;
-  raceId: number;
-  raceName: string;
-  roundNumber: number;
-  submittedPick: boolean;
-  tiebreakDelta: number | null;
-  weeklyFinish: number | null;
-  weeklyPoints: number;
-};
-
-export type ParticipantAnalyticsSummary = {
-  averageFinish: number | null;
-  averageTiebreakDelta: number | null;
-  averageWeeklyPoints: number;
-  bestWeek: ParticipantAnalyticsRaceRow | null;
-  closestTiebreakDelta: number | null;
-  completedRaces: number;
-  currentStanding: number | null;
-  fieldSize: number;
-  lastThreeRaceAverage: number | null;
-  momentumDelta: number | null;
-  topThreeFinishes: number;
-  totalPoints: number;
-  weeklyWins: number;
-  worstWeek: ParticipantAnalyticsRaceRow | null;
-};
-
-export type ParticipantAnalyticsSnapshot = {
-  raceRows: ParticipantAnalyticsRaceRow[];
-  summary: ParticipantAnalyticsSummary;
-  teamName: string;
-  userId: string;
-};
-
-const compareLeaderboardRows = (
-  a: { racePoints: number; teamName: string; totalPoints: number },
-  b: { racePoints: number; teamName: string; totalPoints: number }
-): number => {
-  if (b.totalPoints !== a.totalPoints) {
-    return b.totalPoints - a.totalPoints;
-  }
-
-  if (b.racePoints !== a.racePoints) {
-    return b.racePoints - a.racePoints;
-  }
-
-  return a.teamName.localeCompare(b.teamName);
-};
-
-const assignCompetitionRanks = <T extends { teamName: string; totalPoints: number; racePoints: number }>(
-  rows: T[]
-): Array<T & { rank: number }> => {
-  const sorted = [...rows].sort(compareLeaderboardRows);
-  const ranked: Array<T & { rank: number }> = [];
-
-  let previous: { racePoints: number; totalPoints: number } | null = null;
-  let previousRank = 0;
-
-  sorted.forEach((row, index) => {
-    const sameAsPrevious =
-      previous !== null &&
-      previous.totalPoints === row.totalPoints &&
-      previous.racePoints === row.racePoints;
-
-    const rank = sameAsPrevious ? previousRank : index + 1;
-    ranked.push({ ...row, rank });
-
-    previous = {
-      racePoints: row.racePoints,
-      totalPoints: row.totalPoints
-    };
-    previousRank = rank;
-  });
-
-  return ranked;
-};
-
 const keyForRaceDriver = (raceId: number, driverId: number): string => `${raceId}:${driverId}`;
-const keyForRaceUser = (raceId: number, userId: string): string => `${raceId}:${userId}`;
-
-const buildGroupCountByRaceId = (races: RaceRow[]): Map<number, number> => {
-  const groupCountByRaceId = new Map<number, number>();
-  races.forEach((race) => {
-    groupCountByRaceId.set(
-      race.id,
-      pickGroupCountForFormat(normalizeRacePickFormat(race.pick_format))
-    );
-  });
-  return groupCountByRaceId;
-};
 
 const resolveRaceDriverGroup = (
   raceId: number,
@@ -313,69 +205,9 @@ const buildPickedDriverGroupByRaceDriver = (picks: PickRow[]): Map<string, numbe
   return pickedDriverGroupByRaceDriver;
 };
 
-const scorePick = (
-  pick: PickRow,
-  groupCount: number,
-  resultPointsByRaceDriver: Map<string, number>
-): { averageSpeed: number; racePoints: number } => {
-  return {
-    averageSpeed: asNumber(pick.average_speed),
-    racePoints: scorePickSelection(pick, groupCount, (driverId) =>
-      resultPointsByRaceDriver.get(keyForRaceDriver(pick.race_id, driverId))
-    )
-  };
-};
-
-const computeRaceExtremes = (
-  raceId: number,
-  groupCount: number,
-  results: ResultRow[],
-  raceDriverGroupByRaceDriver: Map<string, number>,
-  pickedDriverGroupByRaceDriver: Map<string, number>,
-  currentDriverGroupById: Map<number, number>
-): { highest: number; lowest: number } => {
-  return computeGroupScoreExtremes(
-    groupCount,
-    results,
-    (result) =>
-      resolveRaceDriverGroup(
-        raceId,
-        result.driver_id,
-        raceDriverGroupByRaceDriver,
-        pickedDriverGroupByRaceDriver,
-        currentDriverGroupById
-      ),
-    (result) => result.points
-  );
-};
-
-const computeLowestFallbackByRace = (
-  resultsByRace: Map<number, ResultRow[]>,
-  groupCountByRaceId: Map<number, number>,
-  raceDriverGroupByRaceDriver: Map<string, number>,
-  pickedDriverGroupByRaceDriver: Map<string, number>,
-  currentDriverGroupById: Map<number, number>
-): Map<number, number> => {
-  const byRace = new Map<number, number>();
-  resultsByRace.forEach((raceResults, raceId) => {
-    byRace.set(
-      raceId,
-      computeRaceExtremes(
-        raceId,
-        groupCountByRaceId.get(raceId) ?? 6,
-        raceResults,
-        raceDriverGroupByRaceDriver,
-        pickedDriverGroupByRaceDriver,
-        currentDriverGroupById
-      ).lowest
-    );
-  });
-  return byRace;
-};
-
-export async function buildLeagueScoringSnapshotUncached(
+const loadSeasonScoringModelUncached = async (
   seasonId: number
-): Promise<LeagueScoringSnapshot> {
+): Promise<SeasonScoringModel> => {
   const supabase = createServiceRoleSupabaseClient();
 
   const [profiles, races, drivers] = await Promise.all([
@@ -446,144 +278,36 @@ export async function buildLeagueScoringSnapshotUncached(
       teamName: profile.team_name.trim()
     }));
 
-  const resultPointsByRaceDriver = new Map<string, number>();
-  const resultsByRace = new Map<number, ResultRow[]>();
-  results.forEach((result) => {
-    resultPointsByRaceDriver.set(keyForRaceDriver(result.race_id, result.driver_id), asNumber(result.points));
-    const arr = resultsByRace.get(result.race_id) ?? [];
-    arr.push(result);
-    resultsByRace.set(result.race_id, arr);
+  return buildSeasonScoringModel({
+    drivers,
+    participants,
+    picks,
+    raceDriverGroups,
+    races,
+    results
   });
+};
 
-  const completedRaceIds = new Set<number>(Array.from(resultsByRace.keys()));
-  const completedRaces = races.filter((race) => completedRaceIds.has(race.id));
-  const groupCountByRaceId = buildGroupCountByRaceId(races);
-  const raceColumns: RaceBreakdownColumn[] = completedRaces.map((race) => ({
-    raceDate: race.race_date,
-    raceId: race.id,
-    raceName: race.race_name,
-    roundNumber: race.round_number
-  }));
-
-  if (completedRaces.length === 0) {
-    return {
-      leaderboardRows: [],
-      raceColumns
-    };
-  }
-
-  const pickScoreByRaceUser = new Map<string, { averageSpeed: number; racePoints: number }>();
-  picks.forEach((pick) => {
-    if (!completedRaceIds.has(pick.race_id)) {
-      return;
-    }
-
-    pickScoreByRaceUser.set(
-      keyForRaceUser(pick.race_id, pick.user_id),
-      scorePick(pick, groupCountByRaceId.get(pick.race_id) ?? 6, resultPointsByRaceDriver)
-    );
-  });
-  const pickedDriverGroupByRaceDriver = buildPickedDriverGroupByRaceDriver(picks);
-
-  const currentDriverGroupById = new Map<number, number>();
-  drivers.forEach((driver) => {
-    currentDriverGroupById.set(driver.id, driver.group_number);
-  });
-  const raceDriverGroupByRaceDriver = new Map<string, number>();
-  raceDriverGroups.forEach((row) => {
-    raceDriverGroupByRaceDriver.set(keyForRaceDriver(row.race_id, row.driver_id), row.group_number);
-  });
-
-  const lowestFallbackByRaceId = computeLowestFallbackByRace(
-    resultsByRace,
-    groupCountByRaceId,
-    raceDriverGroupByRaceDriver,
-    pickedDriverGroupByRaceDriver,
-    currentDriverGroupById
-  );
-
-  const latestRace = completedRaces[completedRaces.length - 1];
-  const cumulativeByUser = new Map<string, number>();
-  const standingByRaceUser = new Map<string, number>();
-  const raceBreakdownByUser = new Map<string, Map<number, number>>();
-
-  participants.forEach((participant) => {
-    cumulativeByUser.set(participant.id, 0);
-    raceBreakdownByUser.set(participant.id, new Map<number, number>());
-  });
-
-  completedRaces.forEach((race) => {
-    const missingPickRacePoints = lowestFallbackByRaceId.get(race.id) ?? 0;
-    const rankingInput = participants.map((participant) => {
-      const weekly = pickScoreByRaceUser.get(keyForRaceUser(race.id, participant.id));
-      const weeklyPoints = weekly?.racePoints ?? missingPickRacePoints;
-      const nextTotal = (cumulativeByUser.get(participant.id) ?? 0) + weeklyPoints;
-
-      cumulativeByUser.set(participant.id, nextTotal);
-      raceBreakdownByUser.get(participant.id)?.set(race.id, weeklyPoints);
-
-      return {
-        racePoints: weeklyPoints,
-        teamName: participant.teamName,
-        totalPoints: nextTotal,
-        userId: participant.id
-      };
-    });
-
-    const ranked = assignCompetitionRanks(rankingInput);
-    ranked.forEach((row) => {
-      standingByRaceUser.set(keyForRaceUser(race.id, row.userId), row.rank);
-    });
-  });
-
-  const previousRace = completedRaces.length > 1 ? completedRaces[completedRaces.length - 2] : null;
-
-  const leaderboardRows: LeaderboardRow[] = participants
-    .map((participant) => {
-      const currentStanding = standingByRaceUser.get(keyForRaceUser(latestRace.id, participant.id)) ?? 0;
-      const previousStanding = previousRace
-        ? (standingByRaceUser.get(keyForRaceUser(previousRace.id, participant.id)) ?? null)
-        : null;
-      const baselinePrevious = previousStanding ?? currentStanding;
-      const change = baselinePrevious - currentStanding;
-
-      return {
-        change,
-        currentStanding,
-        displayName: participant.displayName,
-        raceBreakdown: Object.fromEntries(raceBreakdownByUser.get(participant.id) ?? []),
-        teamName: participant.teamName,
-        totalPoints: cumulativeByUser.get(participant.id) ?? 0,
-        userId: participant.id
-      };
-    })
-    .sort((a, b) => {
-      if (a.currentStanding !== b.currentStanding) {
-        return a.currentStanding - b.currentStanding;
-      }
-
-      if (b.totalPoints !== a.totalPoints) {
-        return b.totalPoints - a.totalPoints;
-      }
-
-      return a.teamName.localeCompare(b.teamName);
-    });
-
-  return {
-    leaderboardRows,
-    raceColumns
-  };
-}
-
-const buildCachedLeagueScoringSnapshot = unstable_cache(
-  async (seasonId: number) => buildLeagueScoringSnapshotUncached(seasonId),
-  ["league-scoring-snapshot-v2"],
+const buildCachedSeasonScoringModel = unstable_cache(
+  loadSeasonScoringModelUncached,
+  ["season-scoring-model-v1"],
   { revalidate: 3600, tags: [SCORING_CACHE_TAG] }
 );
 
+export const buildSeasonScoringSnapshot = (
+  seasonId: number
+): Promise<SeasonScoringModel> => buildCachedSeasonScoringModel(seasonId);
+
+export async function buildLeagueScoringSnapshotUncached(
+  seasonId: number
+): Promise<LeagueScoringSnapshot> {
+  return (await loadSeasonScoringModelUncached(seasonId)).leaderboardSnapshot;
+}
+
 export const buildLeagueScoringSnapshot = (
   seasonId: number
-): Promise<LeagueScoringSnapshot> => buildCachedLeagueScoringSnapshot(seasonId);
+): Promise<LeagueScoringSnapshot> =>
+  buildSeasonScoringSnapshot(seasonId).then((model) => model.leaderboardSnapshot);
 
 export async function buildPicksByRaceSnapshot(
   seasonId: number,
@@ -788,313 +512,26 @@ export async function buildPicksByRaceSnapshot(
   };
 }
 
-const average = (values: number[]): number | null =>
-  values.length === 0 ? null : values.reduce((sum, value) => sum + value, 0) / values.length;
-
-const pickBetterBestWeek = (
-  current: ParticipantAnalyticsRaceRow | null,
-  candidate: ParticipantAnalyticsRaceRow
-): ParticipantAnalyticsRaceRow => {
-  if (!current) {
-    return candidate;
-  }
-  if (candidate.weeklyPoints !== current.weeklyPoints) {
-    return candidate.weeklyPoints > current.weeklyPoints ? candidate : current;
-  }
-  const candidateFinish = candidate.weeklyFinish ?? Number.POSITIVE_INFINITY;
-  const currentFinish = current.weeklyFinish ?? Number.POSITIVE_INFINITY;
-  if (candidateFinish !== currentFinish) {
-    return candidateFinish < currentFinish ? candidate : current;
-  }
-  return candidate.raceDate > current.raceDate ? candidate : current;
-};
-
-const pickWorseWeek = (
-  current: ParticipantAnalyticsRaceRow | null,
-  candidate: ParticipantAnalyticsRaceRow
-): ParticipantAnalyticsRaceRow => {
-  if (!current) {
-    return candidate;
-  }
-  if (candidate.weeklyPoints !== current.weeklyPoints) {
-    return candidate.weeklyPoints < current.weeklyPoints ? candidate : current;
-  }
-  const candidateFinish = candidate.weeklyFinish ?? Number.POSITIVE_INFINITY;
-  const currentFinish = current.weeklyFinish ?? Number.POSITIVE_INFINITY;
-  if (candidateFinish !== currentFinish) {
-    return candidateFinish > currentFinish ? candidate : current;
-  }
-  return candidate.raceDate > current.raceDate ? candidate : current;
-};
-
 export async function buildParticipantAnalyticsSnapshotUncached(
   userId: string,
   seasonId: number
 ): Promise<ParticipantAnalyticsSnapshot> {
-  const supabase = createServiceRoleSupabaseClient();
-
-  const [profiles, races, drivers] = await Promise.all([
-      loadRegisteredProfiles(supabase, seasonId),
-      loadAllRows<RaceRow>("published races", (from, to) =>
-        supabase
-          .from("races")
-          .select(
-            "id,race_name,pick_format,race_date,official_winning_average_speed,results_status,season_id,round_number"
-          )
-          .eq("is_archived", false)
-          .eq("results_status", "published")
-          .eq("season_id", seasonId)
-          .order("round_number", { ascending: true })
-          .order("id", { ascending: true })
-          .range(from, to)
-      ),
-      loadAllRows<DriverRow>("drivers", (from, to) =>
-        supabase
-          .from("drivers")
-          .select("id,group_number")
-          .order("id", { ascending: true })
-          .range(from, to)
-      )
-    ]);
-
-  const publishedRaceIds = races.map((race) => race.id);
-  const [picks, results, raceDriverGroups]: [PickRow[], ResultRow[], RaceDriverGroupRow[]] =
-    publishedRaceIds.length === 0
-      ? [[], [], []]
-      : await Promise.all([
-      loadAllRows<PickRow>("picks", (from, to) =>
-        supabase
-          .from("picks")
-          .select(
-            "user_id,race_id,average_speed,driver_group1_id,driver_group2_id,driver_group3_id,driver_group4_id,driver_group5_id,driver_group6_id,driver_group7_id,driver_group8_id"
-          )
-          .in("race_id", publishedRaceIds)
-          .order("race_id", { ascending: true })
-          .order("user_id", { ascending: true })
-          .range(from, to)
-      ),
-      loadAllRows<ResultRow>("race results", (from, to) =>
-        supabase
-          .from("results")
-          .select("race_id,driver_id,points")
-          .in("race_id", publishedRaceIds)
-          .order("race_id", { ascending: true })
-          .order("driver_id", { ascending: true })
-          .range(from, to)
-      ),
-      loadAllRows<RaceDriverGroupRow>("race driver groups", (from, to) =>
-        supabase
-          .from("race_driver_groups")
-          .select("race_id,driver_id,group_number")
-          .in("race_id", publishedRaceIds)
-          .order("race_id", { ascending: true })
-          .order("driver_id", { ascending: true })
-          .range(from, to)
-      )
-    ]);
-
-  const participants: Participant[] = profiles
-    .filter((profile) => typeof profile.team_name === "string" && profile.team_name.trim().length > 0)
-    .map((profile) => ({
-      displayName: participantLeaderboardLabel(profile.full_name, profile.team_name.trim()),
-      id: profile.id,
-      teamName: profile.team_name.trim()
-    }));
-  const participant = participants.find((row) => row.id === userId);
-  if (!participant) {
+  const model = await loadSeasonScoringModelUncached(seasonId);
+  const snapshot = model.analyticsByUserId[userId];
+  if (!snapshot) {
     throw new Error("Participant profile not found for analytics.");
   }
-
-  const fieldSize = participants.length;
-
-  const resultPointsByRaceDriver = new Map<string, number>();
-  const resultsByRace = new Map<number, ResultRow[]>();
-  results.forEach((result) => {
-    resultPointsByRaceDriver.set(keyForRaceDriver(result.race_id, result.driver_id), asNumber(result.points));
-    const arr = resultsByRace.get(result.race_id) ?? [];
-    arr.push(result);
-    resultsByRace.set(result.race_id, arr);
-  });
-
-  const completedRaceIds = new Set<number>(Array.from(resultsByRace.keys()));
-  const completedRaces = races.filter((race) => completedRaceIds.has(race.id));
-  const groupCountByRaceId = buildGroupCountByRaceId(races);
-  const currentDriverGroupById = new Map<number, number>();
-  drivers.forEach((driver) => {
-    currentDriverGroupById.set(driver.id, driver.group_number);
-  });
-  const raceDriverGroupByRaceDriver = new Map<string, number>();
-  raceDriverGroups.forEach((row) => {
-    raceDriverGroupByRaceDriver.set(keyForRaceDriver(row.race_id, row.driver_id), row.group_number);
-  });
-
-  const lowestFallbackByRaceId = computeLowestFallbackByRace(
-    resultsByRace,
-    groupCountByRaceId,
-    raceDriverGroupByRaceDriver,
-    buildPickedDriverGroupByRaceDriver(picks),
-    currentDriverGroupById
-  );
-
-  if (completedRaces.length === 0) {
-    return {
-      raceRows: [],
-      summary: {
-        averageFinish: null,
-        averageTiebreakDelta: null,
-        averageWeeklyPoints: 0,
-        bestWeek: null,
-        closestTiebreakDelta: null,
-        completedRaces: 0,
-        currentStanding: null,
-        fieldSize,
-        lastThreeRaceAverage: null,
-        momentumDelta: null,
-        topThreeFinishes: 0,
-        totalPoints: 0,
-        weeklyWins: 0,
-        worstWeek: null
-      },
-      teamName: participant.teamName,
-      userId: participant.id
-    };
-  }
-
-  const pickScoreByRaceUser = new Map<string, { averageSpeed: number; racePoints: number }>();
-  picks.forEach((pick) => {
-    if (!completedRaceIds.has(pick.race_id)) {
-      return;
-    }
-    pickScoreByRaceUser.set(
-      keyForRaceUser(pick.race_id, pick.user_id),
-      scorePick(pick, groupCountByRaceId.get(pick.race_id) ?? 6, resultPointsByRaceDriver)
-    );
-  });
-
-  const cumulativeByUser = new Map<string, number>();
-  participants.forEach((row) => cumulativeByUser.set(row.id, 0));
-
-  let currentStanding: number | null = null;
-  const raceRows: ParticipantAnalyticsRaceRow[] = [];
-
-  completedRaces.forEach((race) => {
-    const officialRaceAverageSpeed =
-      race.official_winning_average_speed === null
-        ? null
-        : asNumber(race.official_winning_average_speed);
-    const missingPickRacePoints = lowestFallbackByRaceId.get(race.id) ?? 0;
-
-    const weeklyRows = participants.map((row) => {
-      const weekly = pickScoreByRaceUser.get(keyForRaceUser(race.id, row.id));
-      return {
-        averageSpeed: weekly?.averageSpeed ?? null,
-        racePoints: weekly?.racePoints ?? missingPickRacePoints,
-        teamName: row.teamName,
-        userId: row.id
-      };
-    });
-    const weeklyRanks = assignWeeklyRanks(
-      weeklyRows.map((row) => ({
-        ...row,
-        points: row.racePoints
-      })),
-      officialRaceAverageSpeed
-    );
-    const weeklyRankByUser = new Map(weeklyRanks.map((row) => [row.userId, row.rank]));
-    const raceAveragePoints =
-      weeklyRows.length === 0
-        ? 0
-        : weeklyRows.reduce((sum, row) => sum + row.racePoints, 0) / weeklyRows.length;
-
-    const cumulativeRankingInput = participants.map((row) => {
-      const weekly = pickScoreByRaceUser.get(keyForRaceUser(race.id, row.id));
-      const weeklyPoints = weekly?.racePoints ?? missingPickRacePoints;
-      const nextTotal = (cumulativeByUser.get(row.id) ?? 0) + weeklyPoints;
-      cumulativeByUser.set(row.id, nextTotal);
-      return {
-        racePoints: weeklyPoints,
-        teamName: row.teamName,
-        totalPoints: nextTotal,
-        userId: row.id
-      };
-    });
-    const cumulativeRanks = assignCompetitionRanks(cumulativeRankingInput);
-    currentStanding =
-      cumulativeRanks.find((row) => row.userId === participant.id)?.rank ?? currentStanding;
-
-    const participantWeekly = weeklyRows.find((row) => row.userId === participant.id);
-    const participantWeeklyPoints = participantWeekly?.racePoints ?? missingPickRacePoints;
-    const participantAverageSpeed = participantWeekly?.averageSpeed ?? null;
-
-    raceRows.push({
-      averageSpeedGuess: participantAverageSpeed,
-      cumulativePoints: cumulativeByUser.get(participant.id) ?? 0,
-      fieldSize,
-      officialRaceAverageSpeed,
-      pointsVsRaceAverage: participantWeeklyPoints - raceAveragePoints,
-      raceAveragePoints,
-      raceDate: race.race_date,
-      raceId: race.id,
-      raceName: race.race_name,
-      roundNumber: race.round_number,
-      submittedPick: participantAverageSpeed !== null,
-      tiebreakDelta: calculateOfficialSpeedDelta(participantAverageSpeed, officialRaceAverageSpeed),
-      weeklyFinish: weeklyRankByUser.get(participant.id) ?? null,
-      weeklyPoints: participantWeeklyPoints
-    });
-  });
-
-  const weeklyPoints = raceRows.map((row) => row.weeklyPoints);
-  const weeklyFinishes = raceRows
-    .map((row) => row.weeklyFinish)
-    .filter((value): value is number => value !== null);
-  const tiebreakDeltas = raceRows
-    .map((row) => row.tiebreakDelta)
-    .filter((value): value is number => value !== null);
-  const bestWeek = raceRows.reduce<ParticipantAnalyticsRaceRow | null>(
-    (best, row) => pickBetterBestWeek(best, row),
-    null
-  );
-  const worstWeek = raceRows.reduce<ParticipantAnalyticsRaceRow | null>(
-    (worst, row) => pickWorseWeek(worst, row),
-    null
-  );
-  const averageWeeklyPoints = average(weeklyPoints) ?? 0;
-  const lastThreeRaceRows = raceRows.slice(-3);
-  const lastThreeRaceAverage = average(lastThreeRaceRows.map((row) => row.weeklyPoints));
-
-  return {
-    raceRows,
-    summary: {
-      averageFinish: average(weeklyFinishes),
-      averageTiebreakDelta: average(tiebreakDeltas),
-      averageWeeklyPoints,
-      bestWeek,
-      closestTiebreakDelta: tiebreakDeltas.length === 0 ? null : Math.min(...tiebreakDeltas),
-      completedRaces: raceRows.length,
-      currentStanding,
-      fieldSize,
-      lastThreeRaceAverage,
-      momentumDelta: lastThreeRaceAverage === null ? null : lastThreeRaceAverage - averageWeeklyPoints,
-      topThreeFinishes: weeklyFinishes.filter((finish) => finish <= 3).length,
-      totalPoints: raceRows[raceRows.length - 1]?.cumulativePoints ?? 0,
-      weeklyWins: weeklyFinishes.filter((finish) => finish === 1).length,
-      worstWeek
-    },
-    teamName: participant.teamName,
-    userId: participant.id
-  };
+  return snapshot;
 }
 
-const buildCachedParticipantAnalyticsSnapshot = unstable_cache(
-  async (userId: string, seasonId: number) =>
-    buildParticipantAnalyticsSnapshotUncached(userId, seasonId),
-  ["participant-analytics-snapshot"],
-  { revalidate: 3600, tags: [SCORING_CACHE_TAG] }
-);
-
-export const buildParticipantAnalyticsSnapshot = (
+export const buildParticipantAnalyticsSnapshot = async (
   userId: string,
   seasonId: number
-): Promise<ParticipantAnalyticsSnapshot> =>
-  buildCachedParticipantAnalyticsSnapshot(userId, seasonId);
+): Promise<ParticipantAnalyticsSnapshot> => {
+  const model = await buildSeasonScoringSnapshot(seasonId);
+  const snapshot = model.analyticsByUserId[userId];
+  if (!snapshot) {
+    throw new Error("Participant profile not found for analytics.");
+  }
+  return snapshot;
+};

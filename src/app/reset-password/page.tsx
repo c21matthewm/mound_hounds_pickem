@@ -22,7 +22,7 @@ export default async function ResetPasswordPage({ searchParams }: PageProps) {
       <div className="flex items-center gap-3">
         <div
           aria-hidden
-          className="h-14 w-14 rounded-2xl border border-slate-200 bg-slate-200 bg-cover bg-center shadow-sm"
+          className="h-14 w-14 rounded-lg border border-slate-200 bg-slate-200 bg-cover bg-center shadow-sm"
           style={{ backgroundImage: `url('${MOUND_HOUND_IMAGE_PATH}')`, backgroundPosition: "50% 38%" }}
         />
         <div>
@@ -40,13 +40,13 @@ export default async function ResetPasswordPage({ searchParams }: PageProps) {
       </p>
 
       {!user ? (
-        <div className="mt-6 rounded-2xl border border-amber-200 bg-amber-50 p-5 text-sm text-amber-800">
+        <div className="mt-6 rounded-lg border border-amber-200 bg-amber-50 p-5 text-sm text-amber-800">
           <p className="font-semibold">Your reset session is not active.</p>
           <p className="mt-2 leading-6">
             Password reset links expire after a short period. Request a fresh link, then open it from the same browser.
           </p>
           <Link
-            className="mt-4 inline-flex rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white hover:bg-slate-700"
+            className="mt-4 inline-flex rounded-md bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white hover:bg-slate-700"
             href="/forgot-password"
           >
             Request a new link
@@ -62,13 +62,13 @@ export default async function ResetPasswordPage({ searchParams }: PageProps) {
 
           <form
             action={updatePasswordAction}
-            className="mt-6 space-y-4 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"
+            className="mt-6 space-y-4 rounded-lg border border-slate-200 bg-white p-5 shadow-sm"
           >
             <label className="block">
               <span className="mb-1 block text-sm font-medium text-slate-700">New password</span>
               <input
                 required
-                className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm"
+                className="w-full rounded-md border border-slate-300 px-3 py-2.5 text-sm"
                 autoComplete="new-password"
                 minLength={10}
                 name="password"
@@ -80,7 +80,7 @@ export default async function ResetPasswordPage({ searchParams }: PageProps) {
               <span className="mb-1 block text-sm font-medium text-slate-700">Confirm new password</span>
               <input
                 required
-                className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm"
+                className="w-full rounded-md border border-slate-300 px-3 py-2.5 text-sm"
                 autoComplete="new-password"
                 minLength={10}
                 name="confirm_password"
@@ -89,7 +89,7 @@ export default async function ResetPasswordPage({ searchParams }: PageProps) {
             </label>
 
             <SubmitButton
-              className="w-full rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white hover:bg-slate-700"
+              className="w-full rounded-md bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white hover:bg-slate-700"
               pendingLabel="Updating..."
             >
               Update password

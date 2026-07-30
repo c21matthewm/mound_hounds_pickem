@@ -13,6 +13,7 @@ import {
   importIndy500QualifyingOrderAction,
   importIndycarResultsAction,
   publishSavedRaceResultsAction,
+  retryFailedPickRemindersAction,
   setLeagueSeasonInviteCodeAction,
   setLeagueSeasonRulesDocumentAction,
   setRaceArchivedAction,
@@ -20,6 +21,7 @@ import {
   setRaceWinnerAction,
   updateRaceAction,
   updateDriverAction,
+  updateFeedbackStatusAction,
   updateParticipantAction,
   upsertResultAction
 } from "@/app/admin/actions";
@@ -29,11 +31,18 @@ import {
   AdminSystemHealth,
   type AdminAuditHealthRow,
   type AdminJobRunHealthRow,
+  type AdminReminderQueueHealth,
   type AdminReminderHealthRow
 } from "@/components/admin-system-health";
 import { ConfirmSubmitButton } from "@/components/confirm-submit-button";
+import { SeasonRecoveryCenter } from "@/components/season-recovery-center";
 import { SignOutButton } from "@/components/sign-out-button";
 import { SubmitButton } from "@/components/submit-button";
+import {
+  ActionLink,
+  AdminWorkspaceHeader,
+  StatusChip
+} from "@/components/ui-primitives";
 import { requireAdmin } from "@/lib/admin";
 import { feedbackCategoryLabel, feedbackTypeLabel } from "@/lib/feedback";
 import { getPreviousRaceResultsGate } from "@/lib/pickem-results-gate";
@@ -51,8 +60,14 @@ import {
 import {
   normalizeRacePickFormat,
   pickGroupCountForFormat,
+  pickLockAtForRace,
   type RacePickFormat
 } from "@/lib/race-format";
+import {
+  summarizeReminderQueue,
+  type ReminderQueueRow
+} from "@/lib/reminder-queue";
+import { getReminderWindow } from "@/lib/reminder-windows";
 import { loadAllRows } from "@/lib/supabase/paginated-query";
 import {
   formatLeagueDateTime,
@@ -60,6 +75,7 @@ import {
   LEAGUE_TIME_ZONE
 } from "@/lib/timezone";
 import { assignWeeklyRanks, calculateOfficialSpeedDelta } from "@/lib/weekly-ranking";
+import type { SeasonRestorePointSummary } from "@/lib/season-recovery";
 
 type DriverRow = {
   championship_points: number;
@@ -159,6 +175,8 @@ type FeedbackItemRow = {
   details: string;
   feedback_type: string;
   id: number;
+  resolved_at: string | null;
+  status: "in_review" | "new" | "resolved";
   user_id: string;
 };
 
@@ -178,7 +196,14 @@ type PageProps = {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 };
 
-type AdminTab = "drivers" | "participants" | "races" | "results" | "feedback" | "health";
+type AdminTab =
+  | "drivers"
+  | "participants"
+  | "races"
+  | "results"
+  | "feedback"
+  | "health"
+  | "recovery";
 
 type ScoringAuditDriverCell = {
   driverName: string | null;
@@ -226,12 +251,18 @@ const parseAdminTab = (value: string | undefined): AdminTab => {
     value === "races" ||
     value === "results" ||
     value === "feedback" ||
-    value === "health"
+    value === "health" ||
+    value === "recovery"
   ) {
     return value;
   }
 
   return "drivers";
+};
+
+const parsePositiveQueryInteger = (value: string | undefined): number | null => {
+  const parsed = Number(value);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
 };
 
 const asNumber = (value: number | string | null | undefined): number => {
@@ -252,11 +283,50 @@ const asNumber = (value: number | string | null | undefined): number => {
 const formatOptionalDecimal = (value: number | null, digits = 3): string =>
   value === null ? "-" : value.toFixed(digits);
 
-const loadAdminRaces = async (supabase: SupabaseClient) => {
-  const fields =
-    "id,race_name,pick_format,pick_window_key,title_image_url,qualifying_start_at,race_date,payout,official_winning_average_speed,results_status,results_published_at,is_archived,archived_at,winner_profile_id,winner_source,winner_is_manual_override,winner_auto_eligible_at,winner_set_at,season_id,round_number,field_frozen_at";
-  return supabase.from("races").select(fields).order("race_date", { ascending: false });
+const ADMIN_RACE_FIELDS =
+  "id,race_name,pick_format,pick_window_key,title_image_url,qualifying_start_at,race_date,payout,official_winning_average_speed,results_status,results_published_at,is_archived,archived_at,winner_profile_id,winner_source,winner_is_manual_override,winner_auto_eligible_at,winner_set_at,season_id,round_number,field_frozen_at";
+
+const loadAdminRaces = async (supabase: SupabaseClient, seasonId: number) =>
+  supabase
+    .from("races")
+    .select(ADMIN_RACE_FIELDS)
+    .eq("season_id", seasonId)
+    .order("race_date", { ascending: false });
+
+const loadAdminFeedback = (
+  supabase: SupabaseClient,
+  status: string,
+  page: number,
+  pageSize: number
+) => {
+  let query = supabase
+    .from("feedback_items")
+    .select(
+      "id,user_id,feedback_type,category,details,status,resolved_at,created_at",
+      { count: "exact" }
+    )
+    .order("created_at", { ascending: false })
+    .order("id", { ascending: false });
+
+  if (status !== "all") {
+    query = query.eq("status", status);
+  }
+
+  const from = (page - 1) * pageSize;
+  return query.range(from, from + pageSize - 1);
 };
+
+const loadAdminResultRaces = async (
+  supabase: SupabaseClient,
+  seasonId: number
+) =>
+  supabase
+    .from("races")
+    .select(ADMIN_RACE_FIELDS)
+    .eq("season_id", seasonId)
+    .eq("is_archived", false)
+    .order("round_number", { ascending: true })
+    .order("id", { ascending: true });
 
 const paginatedAdminLoad = async <T,>(
   label: string,
@@ -486,8 +556,22 @@ export default async function AdminPage({ searchParams }: PageProps) {
   const message = queryStringParam(params.message);
   const error = queryStringParam(params.error);
   const activeTab = parseAdminTab(queryStringParam(params.tab));
+  const requestedRaceSeasonId = parsePositiveQueryInteger(
+    queryStringParam(params.race_season_id)
+  );
+  const requestedResultRaceId = parsePositiveQueryInteger(
+    queryStringParam(params.result_race_id)
+  );
   const participantQuery = (queryStringParam(params.participant_q) ?? "").trim().toLowerCase();
   const participantStatus = queryStringParam(params.participant_status) ?? "all";
+  const feedbackStatusInput = queryStringParam(params.feedback_status) ?? "all";
+  const feedbackStatus = ["all", "new", "in_review", "resolved"].includes(
+    feedbackStatusInput
+  )
+    ? feedbackStatusInput
+    : "all";
+  const feedbackPage = parsePositiveQueryInteger(queryStringParam(params.feedback_page)) ?? 1;
+  const feedbackPageSize = 20;
 
   const { profile, supabase } = await requireAdmin();
 
@@ -499,7 +583,13 @@ export default async function AdminPage({ searchParams }: PageProps) {
     .order("season_year", { ascending: false });
   const loadedSeasons = (seasonsResponse.data ?? []) as LeagueSeasonRow[];
   const loadedActiveSeason = loadedSeasons.find((season) => season.status === "active") ?? null;
+  const selectedRaceSeason =
+    loadedSeasons.find((season) => season.id === requestedRaceSeasonId) ??
+    loadedActiveSeason ??
+    loadedSeasons[0] ??
+    null;
   const emptyResponse = { data: [], error: null };
+  const emptyCountResponse = { count: 0, data: [], error: null };
 
   const [
     driversResponse,
@@ -507,26 +597,26 @@ export default async function AdminPage({ searchParams }: PageProps) {
     profilesResponse,
     feedbackResponse,
     seasonParticipantsResponse,
-    participantPicksResponse
+    participantPicksResponse,
+    restorePointsResponse
   ] = await Promise.all([
     activeTab === "drivers" || activeTab === "results" ? supabase
       .from("drivers")
       .select("id,driver_name,image_url,current_standing,group_number,is_active,championship_points")
       .order("current_standing", { ascending: true }) : emptyResponse,
-    activeTab === "races" || activeTab === "results" ? loadAdminRaces(supabase) : emptyResponse,
+    activeTab === "races" && selectedRaceSeason
+      ? loadAdminRaces(supabase, selectedRaceSeason.id)
+      : activeTab === "results" && loadedActiveSeason
+        ? loadAdminResultRaces(supabase, loadedActiveSeason.id)
+        : emptyResponse,
     activeTab === "participants" || activeTab === "races" || activeTab === "results" || activeTab === "feedback" ? supabase
       .from("profiles")
       .select("id,full_name,team_name,role,is_active")
       .in("role", ["participant", "admin"])
       .order("team_name", { ascending: true }) : emptyResponse,
-    activeTab === "feedback" ? paginatedAdminLoad<FeedbackItemRow>("participant feedback", (from, to) =>
-      supabase
-        .from("feedback_items")
-        .select("id,user_id,feedback_type,category,details,created_at")
-        .order("created_at", { ascending: false })
-        .order("id", { ascending: false })
-        .range(from, to)
-    ) : emptyResponse,
+    activeTab === "feedback"
+      ? loadAdminFeedback(supabase, feedbackStatus, feedbackPage, feedbackPageSize)
+      : emptyCountResponse,
     loadedActiveSeason && (activeTab === "participants" || activeTab === "races" || activeTab === "results" || activeTab === "health")
       ? supabase
           .from("season_participants")
@@ -543,13 +633,29 @@ export default async function AdminPage({ searchParams }: PageProps) {
             .order("user_id", { ascending: true })
             .range(from, to)
         )
+      : emptyResponse,
+    loadedActiveSeason && activeTab === "recovery"
+      ? supabase
+          .from("season_restore_points")
+          .select(
+            "id,season_id,season_year,label,source,schema_version,format_version,row_counts,checksum,created_at"
+          )
+          .eq("season_id", loadedActiveSeason.id)
+          .order("created_at", { ascending: false })
+          .limit(30)
       : emptyResponse
   ]);
 
   const loadedRaces = (racesResponse.data ?? []) as RaceRow[];
-  const resultRaceIds = loadedRaces
+  const currentSeasonRaces = loadedRaces
     .filter((race) => race.season_id === loadedActiveSeason?.id && !race.is_archived)
-    .map((race) => race.id);
+    .sort((left, right) => left.round_number - right.round_number || left.id - right.id);
+  const selectedResultRace =
+    currentSeasonRaces.find((race) => race.id === requestedResultRaceId) ??
+    currentSeasonRaces.find((race) => race.results_status !== "published") ??
+    currentSeasonRaces.at(-1) ??
+    null;
+  const resultRaceIds = selectedResultRace ? [selectedResultRace.id] : [];
   const [resultsResponse, picksResponse, raceDriverGroupsResponse] =
     activeTab === "results" && resultRaceIds.length > 0
       ? await Promise.all([
@@ -578,6 +684,7 @@ export default async function AdminPage({ searchParams }: PageProps) {
     raceDriverGroupsResponse.error?.message ??
     seasonParticipantsResponse.error?.message ??
     participantPicksResponse.error?.message ??
+    restorePointsResponse.error?.message ??
     seasonsResponse.error?.message;
 
   if (loadError) {
@@ -586,7 +693,6 @@ export default async function AdminPage({ searchParams }: PageProps) {
 
   const drivers: DriverRow[] = (driversResponse.data ?? []) as DriverRow[];
   const races = loadedRaces;
-  const activeRaces = races.filter((race) => !race.is_archived);
   const results: ResultRow[] = (resultsResponse.data ?? []) as ResultRow[];
   const winnerProfiles: WinnerProfileRow[] = (profilesResponse.data ?? []) as WinnerProfileRow[];
   const seasonParticipants = (seasonParticipantsResponse.data ?? []) as SeasonParticipantRow[];
@@ -623,16 +729,26 @@ export default async function AdminPage({ searchParams }: PageProps) {
   const seasons = loadedSeasons;
   const activeSeason = loadedActiveSeason;
   const feedbackItems: FeedbackItemRow[] = (feedbackResponse.data ?? []) as FeedbackItemRow[];
+  const feedbackCount = feedbackResponse.count ?? 0;
+  const feedbackPageCount = Math.max(1, Math.ceil(feedbackCount / feedbackPageSize));
+  const feedbackPageHref = (page: number): string => {
+    const nextParams = new URLSearchParams({
+      feedback_page: String(Math.max(1, page)),
+      feedback_status: feedbackStatus,
+      tab: "feedback"
+    });
+    return `/admin?${nextParams.toString()}`;
+  };
+  const restorePoints = (restorePointsResponse.data ?? []) as SeasonRestorePointSummary[];
   const pickRows: PickSummaryRow[] = (picksResponse.data ?? []) as PickSummaryRow[];
   const raceDriverGroups: RaceDriverGroupRow[] = (
     raceDriverGroupsResponse.data ?? []
   ) as RaceDriverGroupRow[];
-  const currentSeasonRaces = activeRaces.filter(
-    (race) => race.season_id === activeSeason?.id
-  );
-  const activeIndy500Races = currentSeasonRaces.filter(
-    (race) => normalizeRacePickFormat(race.pick_format) === "indy_500"
-  );
+  const activeIndy500Races =
+    selectedResultRace &&
+    normalizeRacePickFormat(selectedResultRace.pick_format) === "indy_500"
+      ? [selectedResultRace]
+      : [];
   const unpublishedSeasonRaces = currentSeasonRaces.filter(
     (race) => race.results_status !== "published"
   );
@@ -644,7 +760,7 @@ export default async function AdminPage({ searchParams }: PageProps) {
     currentSeasonRaces.length > 0 &&
     unpublishedSeasonRaces.length === 0 &&
     Boolean(finalSeasonRace && Date.parse(finalSeasonRace.race_date) <= currentTime);
-  const hallOfFameSeasonResponse = activeSeason
+  const hallOfFameSeasonResponse = activeSeason && activeTab === "results"
     ? await supabase
       .from("hall_of_fame_seasons")
       .select("id,finalized_at,participant_count,race_count")
@@ -663,7 +779,7 @@ export default async function AdminPage({ searchParams }: PageProps) {
     participants: activeParticipants,
     picks: pickRows,
     raceDriverGroups,
-    races: currentSeasonRaces,
+    races: selectedResultRace ? [selectedResultRace] : [],
     results
   });
 
@@ -686,12 +802,9 @@ export default async function AdminPage({ searchParams }: PageProps) {
   });
   const seasonById = new Map(seasons.map((season) => [season.id, season]));
 
-  const currentSeasonRaceIds = new Set(currentSeasonRaces.map((race) => race.id));
-  const sortedResults = results.filter((result) => currentSeasonRaceIds.has(result.race_id)).sort((a, b) => {
-    const aRaceDate = raceById.get(a.race_id)?.race_date ?? "1970-01-01T00:00:00.000Z";
-    const bRaceDate = raceById.get(b.race_id)?.race_date ?? "1970-01-01T00:00:00.000Z";
-    return new Date(bRaceDate).getTime() - new Date(aRaceDate).getTime() || b.points - a.points;
-  });
+  const sortedResults = [...results].sort(
+    (left, right) => right.points - left.points || left.id - right.id
+  );
 
   let healthNextRace: HealthRaceRow | null = null;
   let healthNextRaces: HealthRaceRow[] = [];
@@ -699,6 +812,7 @@ export default async function AdminPage({ searchParams }: PageProps) {
   let healthPreviousResultsStatus = "No upcoming race is scheduled.";
   let healthSchemaVersion: string | null = null;
   let healthReminderRows: AdminReminderHealthRow[] = [];
+  let healthReminderQueue: AdminReminderQueueHealth | null = null;
   let healthJobRuns: AdminJobRunHealthRow[] = [];
   let healthAuditRows: AdminAuditHealthRow[] = [];
   let healthContract: {
@@ -784,21 +898,52 @@ export default async function AdminPage({ searchParams }: PageProps) {
     healthNextRace = healthNextRaces[0] ?? null;
 
     if (healthNextRace) {
-      const [{ count }, gate] = await Promise.all([
+      const reminderWindow = getReminderWindow(
+        Date.parse(pickLockAtForRace(healthNextRace)) - currentTime
+      );
+      const [{ count }, gate, queueResponse] = await Promise.all([
         supabase
           .from("picks")
           .select("id", { count: "exact", head: true })
           .in("race_id", healthNextRaces.map((race) => race.id)),
-        getPreviousRaceResultsGate(supabase, healthNextRace)
+        getPreviousRaceResultsGate(supabase, healthNextRace),
+        reminderWindow
+          ? supabase
+              .from("pick_reminders")
+              .select(
+                "id,user_id,channel,recipient,delivery_status,attempt_count,last_attempt_at,lease_expires_at"
+              )
+              .eq("race_id", healthNextRace.id)
+              .eq("reminder_type", reminderWindow.key)
+          : Promise.resolve({ data: [], error: null })
       ]);
+      if (queueResponse.error) {
+        throw new Error(`Failed loading reminder queue health: ${queueResponse.error.message}`);
+      }
       healthPickCount = count ?? 0;
       healthPreviousResultsStatus =
         gate.status === "ready" ? "Ready: previous results are published." : gate.shortMessage;
+      if (reminderWindow) {
+        const queueRows = (queueResponse.data ?? []) as ReminderQueueRow[];
+        const queueSummary = summarizeReminderQueue(queueRows);
+        healthReminderQueue = {
+          pending: queueSummary.pending,
+          permanentFailed: queueSummary.permanentFailed,
+          raceId: healthNextRace.id,
+          raceName: pickWindowDisplayName(
+            healthNextRaces,
+            healthNextRace.race_name
+          ),
+          reminderType: reminderWindow.key,
+          retrying: queueSummary.retrying,
+          sent: queueSummary.sent
+        };
+      }
     }
   }
 
   const tabLinkClass = (tab: AdminTab): string =>
-    `rounded-md px-3 py-2 text-sm font-medium ${
+    `shrink-0 whitespace-nowrap rounded-md px-3 py-2 text-sm font-medium ${
       activeTab === tab
         ? "bg-slate-900 text-white"
         : "border border-slate-300 text-slate-700 hover:bg-slate-100"
@@ -808,12 +953,9 @@ export default async function AdminPage({ searchParams }: PageProps) {
     <AuthenticatedPageShell
       actions={
         <>
-          <Link
-            className="rounded-md border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100"
-            href="/dashboard"
-          >
+          <ActionLink href="/dashboard" variant="secondary">
             Back to dashboard
-          </Link>
+          </ActionLink>
           <SignOutButton className="static" />
         </>
       }
@@ -834,7 +976,10 @@ export default async function AdminPage({ searchParams }: PageProps) {
       ) : null}
 
       {message ? (
-        <p className="mt-6 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
+        <p
+          className="mt-6 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700"
+          data-testid={activeTab === "results" ? "admin-results-save-alert" : undefined}
+        >
           {message}
         </p>
       ) : null}
@@ -845,7 +990,10 @@ export default async function AdminPage({ searchParams }: PageProps) {
         </p>
       ) : null}
 
-      <nav className="mt-6 flex flex-wrap gap-2">
+      <nav
+        aria-label="Admin workspaces"
+        className="-mx-4 mt-6 flex flex-nowrap gap-2 overflow-x-auto px-4 pb-2 sm:mx-0 sm:px-0"
+      >
         <Link className={tabLinkClass("drivers")} data-testid="admin-tab-drivers" href="/admin?tab=drivers">
           Drivers
         </Link>
@@ -868,6 +1016,9 @@ export default async function AdminPage({ searchParams }: PageProps) {
         <Link className={tabLinkClass("health")} href="/admin?tab=health">
           System Health
         </Link>
+        <Link className={tabLinkClass("recovery")} href="/admin?tab=recovery">
+          Recovery
+        </Link>
       </nav>
 
       {activeTab === "health" ? (
@@ -886,9 +1037,22 @@ export default async function AdminPage({ searchParams }: PageProps) {
             roundNumber: healthNextRace.round_number
           } : null}
           registeredTeamCount={registeredProfileIds.size}
+          reminderQueue={healthReminderQueue}
           reminderRows={healthReminderRows}
+          retryFailedRemindersAction={retryFailedPickRemindersAction}
           schemaVersion={healthSchemaVersion}
           smsEnabled={process.env.REMINDER_SMS_ENABLED?.toLowerCase() === "true"}
+        />
+      ) : null}
+
+      {activeTab === "recovery" ? (
+        <SeasonRecoveryCenter
+          activeSeason={
+            activeSeason
+              ? { id: activeSeason.id, seasonYear: activeSeason.season_year }
+              : null
+          }
+          restorePoints={restorePoints}
         />
       ) : null}
 
@@ -1301,15 +1465,38 @@ export default async function AdminPage({ searchParams }: PageProps) {
       ) : null}
 
       {activeTab === "races" ? (
-        <section className="mt-6 rounded-lg border border-slate-200 bg-white p-6">
-        <h2 className="text-xl font-semibold text-slate-900">Races</h2>
-        <p className="mt-2 text-sm text-slate-600">
-          Create race weeks with qualifying start (pick deadline), race start, payout, and an
-          optional race title image shown on the Pick&apos;em Form.
-        </p>
-        <p className="mt-1 text-xs text-slate-500">
-          All race times are interpreted and displayed in {LEAGUE_TIME_ZONE}.
-        </p>
+        <section className="mt-6 rounded-lg border border-slate-200 bg-white p-4 sm:p-6">
+        <AdminWorkspaceHeader
+          description={`Create and manage race weeks. Times use ${LEAGUE_TIME_ZONE}.`}
+          meta={
+            <form action="/admin" className="flex items-end gap-2" method="get">
+              <input name="tab" type="hidden" value="races" />
+              <label className="block">
+                <span className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                  Viewing season
+                </span>
+                <select
+                  className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm"
+                  defaultValue={selectedRaceSeason ? String(selectedRaceSeason.id) : ""}
+                  name="race_season_id"
+                >
+                  {seasons.map((season) => (
+                    <option key={season.id} value={season.id}>
+                      {season.season_year} {season.status === "active" ? "(active)" : ""}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <button
+                className="rounded-md border border-slate-300 px-3 py-2 text-sm font-semibold"
+                type="submit"
+              >
+                View
+              </button>
+            </form>
+          }
+          title="Races"
+        />
 
         <details className="mt-5 rounded-md border border-slate-200 bg-slate-50">
           <summary className="cursor-pointer px-4 py-3 text-sm font-semibold text-slate-900">
@@ -1530,9 +1717,11 @@ export default async function AdminPage({ searchParams }: PageProps) {
               required
               className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
               defaultValue={
-                currentSeasonRaces.length > 0
+                selectedRaceSeason?.id === activeSeason?.id && currentSeasonRaces.length > 0
                   ? Math.max(...currentSeasonRaces.map((race) => race.round_number)) + 1
-                  : 1
+                  : selectedRaceSeason?.id === activeSeason?.id
+                    ? 1
+                    : undefined
               }
               max={99}
               min={1}
@@ -2121,18 +2310,103 @@ export default async function AdminPage({ searchParams }: PageProps) {
       ) : null}
 
       {activeTab === "results" ? (
-        <section className="mt-6 rounded-lg border border-slate-200 bg-white p-6">
+        <section
+          className="mt-6 rounded-lg border border-slate-200 bg-white p-6"
+          key={`results-workspace-${selectedResultRace?.id ?? "empty"}`}
+        >
         <h2 className="text-xl font-semibold text-slate-900">Race Results</h2>
         <p className="mt-2 text-sm text-slate-600">
-          Enter official points for each race/driver combination. Existing entries are updated.
+          Select one race, validate its official results, then publish or correct that race.
         </p>
-        {message ? (
-          <p
-            className="mt-3 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-800"
-            data-testid="admin-results-save-alert"
+
+        <div className="mt-4 rounded-md border border-slate-200 bg-slate-50 p-3">
+          <form
+            action="/admin"
+            className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto]"
+            method="get"
           >
-            Latest update: {message}
-          </p>
+            <input name="tab" type="hidden" value="results" />
+            <label className="block">
+              <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-600">
+                Results workspace
+              </span>
+              <select
+                className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm"
+                defaultValue={selectedResultRace ? String(selectedResultRace.id) : ""}
+                name="result_race_id"
+              >
+                <option value="">
+                  {currentSeasonRaces.length > 0 ? "Select race" : "No active-season races"}
+                </option>
+                {currentSeasonRaces.map((race) => (
+                  <option key={`workspace-race-${race.id}`} value={race.id}>
+                    R{race.round_number} · {race.race_name} ·{" "}
+                    {race.results_status === "published" ? "Published" : "Draft"}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <button
+              className="self-end rounded-md bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-700"
+              type="submit"
+            >
+              Open race
+            </button>
+          </form>
+
+          {selectedResultRace ? (
+            <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-slate-200 pt-3 text-xs">
+              <p className="min-w-0 font-semibold text-slate-900">
+                R{selectedResultRace.round_number} · {selectedResultRace.race_name}
+              </p>
+              <div className="flex flex-wrap gap-1.5">
+                <span
+                  className={`rounded-full border px-2 py-0.5 font-semibold ${
+                    selectedResultRace.results_status === "published"
+                      ? "border-emerald-200 bg-emerald-50 text-emerald-800"
+                      : "border-amber-200 bg-amber-50 text-amber-800"
+                  }`}
+                >
+                  {selectedResultRace.results_status === "published" ? "Published" : "Draft"}
+                </span>
+                <span className="rounded-full border border-slate-200 bg-white px-2 py-0.5 font-semibold text-slate-700">
+                  {pickRows.length} picks
+                </span>
+                <span className="rounded-full border border-slate-200 bg-white px-2 py-0.5 font-semibold text-slate-700">
+                  {results.length} result rows
+                </span>
+              </div>
+            </div>
+          ) : null}
+        </div>
+
+        {currentSeasonRaces.length > 0 ? (
+          <nav
+            aria-label="Season result status"
+            className="mt-3 flex gap-1.5 overflow-x-auto pb-1"
+          >
+            {currentSeasonRaces.map((race) => {
+              const isSelected = race.id === selectedResultRace?.id;
+              return (
+                <Link
+                  aria-current={isSelected ? "page" : undefined}
+                  className={`shrink-0 rounded-md border px-2.5 py-1.5 text-xs font-semibold ${
+                    isSelected
+                      ? "border-slate-900 bg-slate-900 text-white"
+                      : race.results_status === "published"
+                        ? "border-emerald-200 bg-emerald-50 text-emerald-800 hover:bg-emerald-100"
+                        : "border-amber-200 bg-amber-50 text-amber-800 hover:bg-amber-100"
+                  }`}
+                  href={`/admin?tab=results&result_race_id=${race.id}`}
+                  key={`results-status-${race.id}`}
+                  title={`${race.race_name}: ${race.results_status}`}
+                >
+                  R{race.round_number} ·{" "}
+                  {race.results_status === "published" ? "Posted" : "Draft"}
+                </Link>
+              );
+            })}
+          </nav>
         ) : null}
 
         <div className="mt-5 grid gap-2 text-sm md:grid-cols-4">
@@ -2156,30 +2430,33 @@ export default async function AdminPage({ searchParams }: PageProps) {
             data-testid="admin-indy-qualifying-import-form"
           >
             <input name="tab" type="hidden" value="results" />
+            <input
+              name="result_race_id"
+              type="hidden"
+              value={String(selectedResultRace?.id ?? "")}
+            />
+            <input
+              name="race_id"
+              type="hidden"
+              value={String(activeIndy500Races[0]?.id ?? "")}
+            />
             <p className="text-xs text-slate-600">
               For Indy 500 races only: paste the 33-car qualifying order to create 8 pick groups.
             </p>
             <div className="mt-3 grid gap-3 md:grid-cols-4">
-              <label className="block md:col-span-1">
-                <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-600">
+              <div
+                className="rounded-md border border-cyan-200 bg-white px-3 py-2 md:col-span-1"
+                data-testid="admin-indy-qualifying-race"
+              >
+                <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
                   Indy 500 race
-                </span>
-                <select
-                  required
-                  className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
-                  data-testid="admin-indy-qualifying-race-select"
-                  name="race_id"
-                >
-                  <option value="">
-                    {activeIndy500Races.length > 0 ? "Select race" : "No active Indy 500 races"}
-                  </option>
-                  {activeIndy500Races.map((race) => (
-                    <option key={race.id} value={String(race.id)}>
-                      R{race.round_number} · {race.race_name}
-                    </option>
-                  ))}
-                </select>
-              </label>
+                </p>
+                <p className="mt-1 text-sm font-semibold text-slate-900">
+                  {activeIndy500Races[0]
+                    ? `R${activeIndy500Races[0].round_number} · ${activeIndy500Races[0].race_name}`
+                    : "Select an Indy 500 race above"}
+                </p>
+              </div>
               <label className="block md:col-span-3">
                 <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-600">
                   Qualifying order paste
@@ -2196,6 +2473,7 @@ export default async function AdminPage({ searchParams }: PageProps) {
             <SubmitButton
               className="mt-3 rounded-md bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-700"
               data-testid="admin-indy-qualifying-submit"
+              disabled={activeIndy500Races.length === 0}
               pendingLabel="Importing..."
             >
               Import qualifying order
@@ -2205,19 +2483,23 @@ export default async function AdminPage({ searchParams }: PageProps) {
 
         <AdminResultsImportForm
           action={importIndycarResultsAction}
-          activeRaces={currentSeasonRaces.map((race) => ({
-            id: race.id,
-            pickFormat: normalizeRacePickFormat(race.pick_format),
-            raceName: race.race_name,
-            resultsStatus: race.results_status
-          }))}
+          selectedRace={
+            selectedResultRace
+              ? {
+                  id: selectedResultRace.id,
+                  pickFormat: normalizeRacePickFormat(selectedResultRace.pick_format),
+                  raceName: selectedResultRace.race_name,
+                  resultsStatus: selectedResultRace.results_status
+                }
+              : null
+          }
           drivers={drivers.map((driver) => ({
             driverName: driver.driver_name,
             groupNumber: driver.group_number,
             id: driver.id,
             isActive: driver.is_active
           }))}
-          participants={winnerProfiles.map((winnerProfile) => ({
+          participants={activeParticipants.map((winnerProfile) => ({
             id: winnerProfile.id,
             teamName: winnerProfile.team_name
           }))}
@@ -2376,24 +2658,20 @@ export default async function AdminPage({ searchParams }: PageProps) {
             data-testid="admin-results-manual-form"
           >
             <input name="tab" type="hidden" value="results" />
-            <label className="block">
-              <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-600">
-                Race
-              </span>
-              <select
-                required
-                className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
-                data-testid="admin-results-manual-race-select"
-                name="race_id"
-              >
-                <option value="">{currentSeasonRaces.length > 0 ? "Select race" : "No current-season races"}</option>
-                {currentSeasonRaces.map((race) => (
-                  <option key={race.id} value={String(race.id)}>
-                    R{race.round_number} · {race.race_name}
-                  </option>
-                ))}
-              </select>
-            </label>
+            <input
+              name="result_race_id"
+              type="hidden"
+              value={String(selectedResultRace?.id ?? "")}
+            />
+            <input name="race_id" type="hidden" value={String(selectedResultRace?.id ?? "")} />
+            <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2">
+              <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Race</p>
+              <p className="mt-1 text-sm font-semibold text-slate-900">
+                {selectedResultRace
+                  ? `R${selectedResultRace.round_number} · ${selectedResultRace.race_name}`
+                  : "No race selected"}
+              </p>
+            </div>
 
             <label className="block">
               <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-600">
@@ -2451,24 +2729,26 @@ export default async function AdminPage({ searchParams }: PageProps) {
             className="grid gap-3 border-t border-slate-200 bg-emerald-50/50 p-4 md:grid-cols-3"
           >
             <input name="tab" type="hidden" value="results" />
-            <label className="block">
-              <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-600">
+            <input
+              name="result_race_id"
+              type="hidden"
+              value={String(selectedResultRace?.id ?? "")}
+            />
+            <input name="race_id" type="hidden" value={String(selectedResultRace?.id ?? "")} />
+            <div className="rounded-md border border-slate-200 bg-white px-3 py-2">
+              <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
                 Complete draft race
-              </span>
-              <select
-                required
-                className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
-                name="race_id"
-              >
-                <option value="">Select race</option>
-                {currentSeasonRaces.map((race) => (
-                  <option key={`publish-draft-${race.id}`} value={String(race.id)}>
-                    R{race.round_number} · {race.race_name}
-                    {race.results_status === "published" ? " (published correction)" : " (draft)"}
-                  </option>
-                ))}
-              </select>
-            </label>
+              </p>
+              <p className="mt-1 text-sm font-semibold text-slate-900">
+                {selectedResultRace
+                  ? `R${selectedResultRace.round_number} · ${selectedResultRace.race_name}${
+                      selectedResultRace.results_status === "published"
+                        ? " (published correction)"
+                        : " (draft)"
+                    }`
+                  : "No race selected"}
+              </p>
+            </div>
             <label className="block">
               <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-600">
                 Official winning average speed
@@ -2595,17 +2875,50 @@ export default async function AdminPage({ searchParams }: PageProps) {
       ) : null}
 
       {activeTab === "feedback" ? (
-        <section className="mt-6 rounded-lg border border-slate-200 bg-white p-6">
-          <h2 className="text-xl font-semibold text-slate-900">Participant Feedback</h2>
-          <p className="mt-2 text-sm text-slate-600">
-            Bug reports and improvement ideas submitted by participants.
-          </p>
-          <p className="mt-1 text-xs text-slate-500">Times shown in {LEAGUE_TIME_ZONE}.</p>
+        <section className="mt-6 rounded-lg border border-slate-200 bg-white p-4 sm:p-6">
+          <AdminWorkspaceHeader
+            description="Review participant bug reports and improvement ideas in manageable batches."
+            meta={
+              <span className="text-sm font-semibold text-slate-700">
+                {feedbackCount} submission{feedbackCount === 1 ? "" : "s"}
+              </span>
+            }
+            title="Participant Feedback"
+          />
+
+          <form
+            action="/admin"
+            className="mt-4 flex flex-col gap-2 border-y border-slate-200 py-3 sm:flex-row sm:items-end"
+            method="get"
+          >
+            <input name="tab" type="hidden" value="feedback" />
+            <label className="block sm:max-w-56">
+              <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-600">
+                Status
+              </span>
+              <select
+                className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm"
+                defaultValue={feedbackStatus}
+                name="feedback_status"
+              >
+                <option value="all">All feedback</option>
+                <option value="new">New</option>
+                <option value="in_review">In review</option>
+                <option value="resolved">Resolved</option>
+              </select>
+            </label>
+            <button
+              className="min-h-10 rounded-md border border-slate-300 px-3 py-2 text-sm font-semibold"
+              type="submit"
+            >
+              Apply
+            </button>
+          </form>
 
           <div className="mt-5 grid gap-3">
             {feedbackItems.length === 0 ? (
               <p className="rounded-md border border-dashed border-slate-300 bg-slate-50 px-3 py-3 text-sm text-slate-600">
-                No feedback submissions yet.
+                No feedback submissions match this status.
               </p>
             ) : (
               feedbackItems.map((item) => (
@@ -2620,24 +2933,93 @@ export default async function AdminPage({ searchParams }: PageProps) {
                           {formatDateTime(item.created_at)} · {feedbackCategoryLabel(item.category)}
                         </p>
                       </div>
-                      <span
-                        className={`rounded-full border px-2 py-0.5 text-xs font-semibold ${
-                          item.feedback_type === "bug"
-                            ? "border-red-200 bg-red-50 text-red-700"
-                            : "border-cyan-200 bg-cyan-50 text-cyan-800"
-                        }`}
-                      >
-                        {feedbackTypeLabel(item.feedback_type)}
-                      </span>
+                      <div className="flex items-center gap-2">
+                        <StatusChip
+                          tone={
+                            item.status === "resolved"
+                              ? "success"
+                              : item.status === "in_review"
+                                ? "warning"
+                                : "info"
+                          }
+                        >
+                          {item.status.replace("_", " ")}
+                        </StatusChip>
+                        <StatusChip tone={item.feedback_type === "bug" ? "danger" : "neutral"}>
+                          {feedbackTypeLabel(item.feedback_type)}
+                        </StatusChip>
+                      </div>
                     </div>
                   </summary>
                   <div className="border-t border-slate-200 px-3 py-3 text-sm text-slate-700">
-                    <p>{item.details}</p>
+                    <p className="whitespace-pre-wrap">{item.details}</p>
+                    <form
+                      action={updateFeedbackStatusAction}
+                      className="mt-4 flex flex-col gap-2 border-t border-slate-200 pt-3 sm:flex-row sm:items-end"
+                    >
+                      <input name="feedback_id" type="hidden" value={item.id} />
+                      <input name="feedback_page" type="hidden" value={feedbackPage} />
+                      <input name="feedback_status" type="hidden" value={feedbackStatus} />
+                      <label className="block sm:max-w-48">
+                        <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-600">
+                          Workflow status
+                        </span>
+                        <select
+                          className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm"
+                          defaultValue={item.status}
+                          name="status"
+                        >
+                          <option value="new">New</option>
+                          <option value="in_review">In review</option>
+                          <option value="resolved">Resolved</option>
+                        </select>
+                      </label>
+                      <SubmitButton
+                        className="min-h-10 rounded-md border border-slate-300 px-3 py-2 text-sm font-semibold"
+                        pendingLabel="Updating..."
+                      >
+                        Update status
+                      </SubmitButton>
+                      {item.resolved_at ? (
+                        <span className="self-center text-xs text-slate-500">
+                          Resolved {formatDateTime(item.resolved_at)}
+                        </span>
+                      ) : null}
+                    </form>
                   </div>
                 </details>
               ))
             )}
           </div>
+
+          {feedbackPageCount > 1 ? (
+            <nav
+              aria-label="Feedback pages"
+              className="mt-4 flex items-center justify-between gap-3 border-t border-slate-200 pt-4"
+            >
+              <Link
+                aria-disabled={feedbackPage <= 1}
+                className={`rounded-md border border-slate-300 px-3 py-2 text-sm font-semibold ${
+                  feedbackPage <= 1 ? "pointer-events-none opacity-50" : ""
+                }`}
+                href={feedbackPageHref(feedbackPage - 1)}
+              >
+                Previous
+              </Link>
+              <span className="text-sm text-slate-600">
+                Page {Math.min(feedbackPage, feedbackPageCount)} of {feedbackPageCount}
+              </span>
+              <Link
+                aria-disabled={feedbackPage >= feedbackPageCount}
+                className={`rounded-md border border-slate-300 px-3 py-2 text-sm font-semibold ${
+                  feedbackPage >= feedbackPageCount ? "pointer-events-none opacity-50" : ""
+                }`}
+                href={feedbackPageHref(feedbackPage + 1)}
+              >
+                Next
+              </Link>
+            </nav>
+          ) : null}
 
           <details className="mt-5 rounded-md border border-amber-200 bg-amber-50">
             <summary className="cursor-pointer px-4 py-3 text-sm font-semibold text-amber-900">

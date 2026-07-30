@@ -79,31 +79,31 @@ const MAX_STANDARD_NONSTARTERS = 5;
 
 type Props = {
   action: (formData: FormData) => void | Promise<void>;
-  activeRaces: RaceOption[];
   drivers: DriverOption[];
   participants: ParticipantOption[];
   picks: PickSummary[];
   raceDriverGroups: RaceDriverGroupOption[];
+  selectedRace: RaceOption | null;
 };
 
 const buildInputKey = (raceId: string, rawPaste: string): string => `${raceId}::${rawPaste}`;
 
-const summaryCardClassName = "rounded-xl border border-slate-200 bg-white px-3 py-3 shadow-sm";
+const summaryCardClassName = "rounded-md border border-slate-200 bg-white px-3 py-3 shadow-sm";
 
 const formatScore = (value: number | null): string => (value === null ? "Incomplete" : String(value));
 
 export function AdminResultsImportForm({
   action,
-  activeRaces,
   drivers,
   participants,
   picks,
-  raceDriverGroups
+  raceDriverGroups,
+  selectedRace
 }: Props) {
-  const [raceId, setRaceId] = useState("");
   const [rawPaste, setRawPaste] = useState("");
   const [previewState, setPreviewState] = useState<PreviewState | null>(null);
   const [previewError, setPreviewError] = useState<string | null>(null);
+  const raceId = selectedRace ? String(selectedRace.id) : "";
 
   const driverMap = useMemo(() => {
     const byNormalizedName = new Map<string, { groupNumber: number; id: number; name: string }>();
@@ -123,8 +123,6 @@ export function AdminResultsImportForm({
     return byId;
   }, [drivers]);
 
-  const selectedRace =
-    activeRaces.find((race) => String(race.id) === raceId) ?? null;
   const currentInputKey = buildInputKey(raceId, rawPaste);
   const previewIsStale = previewState ? previewState.inputKey !== currentInputKey : false;
   const canPublish =
@@ -369,33 +367,27 @@ export function AdminResultsImportForm({
       data-testid="admin-results-import-form"
     >
       <input name="tab" type="hidden" value="results" />
+      <input name="race_id" type="hidden" value={raceId} />
+      <input name="result_race_id" type="hidden" value={raceId} />
       <h3 className="text-sm font-semibold text-slate-900">Bulk Import (Preview to Publish)</h3>
       <p className="mt-1 text-xs text-slate-600">
         Step 1 preview parsed driver mappings, scoring ranges, and no-pick fallbacks. Step 2 publish only after preview is clean.
       </p>
 
       <div className="mt-3 grid gap-3 md:grid-cols-4">
-        <label className="block md:col-span-1">
-          <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-600">
-            Race
-          </span>
-          <select
-            required
-            className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
-            data-testid="admin-results-import-race-select"
-            name="race_id"
-            onChange={(event) => setRaceId(event.target.value)}
-            value={raceId}
+        <div className="rounded-md border border-slate-200 bg-white px-3 py-2 md:col-span-1">
+          <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Race</p>
+          <p
+            className="mt-1 text-sm font-semibold text-slate-900"
+            data-testid="admin-results-import-race"
           >
-            <option value="">{activeRaces.length > 0 ? "Select race" : "No active races"}</option>
-            {activeRaces.map((race) => (
-              <option key={race.id} value={String(race.id)}>
-                {race.raceName}
-                {race.pickFormat === "indy_500" ? " (Indy 500)" : ""}
-              </option>
-            ))}
-          </select>
-        </label>
+            {selectedRace
+              ? `${selectedRace.raceName}${
+                  selectedRace.pickFormat === "indy_500" ? " (Indy 500)" : ""
+                }`
+              : "No race selected"}
+          </p>
+        </div>
 
         <label className="block md:col-span-3">
           <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-600">
@@ -458,7 +450,7 @@ export function AdminResultsImportForm({
       ) : null}
 
       {previewState ? (
-        <section className="mt-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+        <section className="mt-4 rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
               <h4 className="text-base font-semibold text-slate-900">

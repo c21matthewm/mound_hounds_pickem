@@ -1,3 +1,6 @@
+import { SubmitButton } from "@/components/submit-button";
+import { formatLeagueDateTime } from "@/lib/timezone";
+
 export type AdminReminderHealthRow = {
   attempt_count: number;
   delivery_status: "failed" | "pending" | "sent";
@@ -11,8 +14,18 @@ export type AdminJobRunHealthRow = {
   error_message: string | null;
   job_name: "fantasy-winner" | "pick-reminders";
   started_at: string;
-  status: "failed" | "running" | "succeeded";
+  status: "degraded" | "failed" | "running" | "succeeded";
   summary: Record<string, unknown>;
+};
+
+export type AdminReminderQueueHealth = {
+  pending: number;
+  permanentFailed: number;
+  raceId: number;
+  raceName: string;
+  reminderType: string;
+  retrying: number;
+  sent: number;
 };
 
 export type AdminAuditHealthRow = {
@@ -41,12 +54,14 @@ type AdminSystemHealthProps = {
     roundNumber: number;
   } | null;
   registeredTeamCount: number;
+  reminderQueue: AdminReminderQueueHealth | null;
   reminderRows: AdminReminderHealthRow[];
+  retryFailedRemindersAction: (formData: FormData) => void | Promise<void>;
   schemaVersion: string | null;
   smsEnabled: boolean;
 };
 
-const EXPECTED_SCHEMA_VERSION = "20260726_shared_pick_windows";
+const EXPECTED_SCHEMA_VERSION = "20260729_weekly_scale_v1";
 
 export function AdminSystemHealth({
   activeSeasonName,
@@ -56,7 +71,9 @@ export function AdminSystemHealth({
   jobRuns,
   nextRace,
   registeredTeamCount,
+  reminderQueue,
   reminderRows,
+  retryFailedRemindersAction,
   schemaVersion,
   smsEnabled
 }: AdminSystemHealthProps) {
@@ -128,7 +145,58 @@ export function AdminSystemHealth({
         </div>
 
         <div className="border-t border-slate-200 pt-4">
-          <h3 className="font-semibold text-slate-900">Recent reminder delivery</h3>
+          <h3 className="font-semibold text-slate-900">Reminder delivery queue</h3>
+          {reminderQueue ? (
+            <>
+              <p className="mt-1 text-xs text-slate-500">
+                {reminderQueue.raceName} / {reminderQueue.reminderType}
+              </p>
+              <dl className="mt-3 grid grid-cols-2 gap-x-4 gap-y-3 text-sm sm:grid-cols-4">
+                <div>
+                  <dt className="text-xs font-medium text-slate-500">Sent</dt>
+                  <dd className="font-semibold text-emerald-700">{reminderQueue.sent}</dd>
+                </div>
+                <div>
+                  <dt className="text-xs font-medium text-slate-500">Pending</dt>
+                  <dd className="font-semibold text-slate-900">{reminderQueue.pending}</dd>
+                </div>
+                <div>
+                  <dt className="text-xs font-medium text-slate-500">Retrying</dt>
+                  <dd className="font-semibold text-amber-700">{reminderQueue.retrying}</dd>
+                </div>
+                <div>
+                  <dt className="text-xs font-medium text-slate-500">Failed</dt>
+                  <dd className="font-semibold text-red-700">
+                    {reminderQueue.permanentFailed}
+                  </dd>
+                </div>
+              </dl>
+              {reminderQueue.permanentFailed > 0 ? (
+                <form action={retryFailedRemindersAction} className="mt-3">
+                  <input name="race_id" type="hidden" value={reminderQueue.raceId} />
+                  <input
+                    name="reminder_type"
+                    type="hidden"
+                    value={reminderQueue.reminderType}
+                  />
+                  <SubmitButton
+                    className="rounded-md border border-red-200 bg-white px-3 py-2 text-xs font-semibold text-red-700 hover:bg-red-50"
+                    pendingLabel="Queueing..."
+                  >
+                    Retry permanent failures
+                  </SubmitButton>
+                </form>
+              ) : null}
+            </>
+          ) : (
+            <p className="mt-2 text-sm text-slate-600">
+              No reminder window is currently due.
+            </p>
+          )}
+
+          <h4 className="mt-4 border-t border-slate-200 pt-3 text-sm font-semibold text-slate-800">
+            Recent attempts
+          </h4>
           {reminderRows.length === 0 ? (
             <p className="mt-2 text-sm text-slate-600">No reminder delivery attempts recorded.</p>
           ) : (
@@ -180,14 +248,22 @@ export function AdminSystemHealth({
                       })}
                     </p>
                     {run.error_message ? (
-                      <p className="mt-0.5 line-clamp-2 text-xs text-red-700">
+                      <p
+                        className={`mt-0.5 line-clamp-2 text-xs ${
+                          run.status === "degraded" ? "text-amber-700" : "text-red-700"
+                        }`}
+                      >
                         {run.error_message}
                       </p>
                     ) : null}
                   </div>
                   <span
                     className={`shrink-0 text-xs font-semibold uppercase ${
-                      run.status === "failed" ? "text-red-700" : "text-slate-600"
+                      run.status === "failed"
+                        ? "text-red-700"
+                        : run.status === "degraded"
+                          ? "text-amber-700"
+                          : "text-slate-600"
                     }`}
                   >
                     {run.status}
@@ -232,4 +308,3 @@ export function AdminSystemHealth({
     </section>
   );
 }
-import { formatLeagueDateTime } from "@/lib/timezone";

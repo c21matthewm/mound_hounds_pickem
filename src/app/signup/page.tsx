@@ -22,7 +22,7 @@ export default async function SignupPage({ searchParams }: PageProps) {
       <div className="flex items-center gap-3">
         <div
           aria-hidden
-          className="h-14 w-14 rounded-2xl border border-slate-200 bg-slate-200 bg-cover bg-center shadow-sm"
+          className="h-14 w-14 rounded-lg border border-slate-200 bg-slate-200 bg-cover bg-center shadow-sm"
           style={{ backgroundImage: `url('${MOUND_HOUND_IMAGE_PATH}')`, backgroundPosition: "50% 38%" }}
         />
         <div>
@@ -54,12 +54,12 @@ export default async function SignupPage({ searchParams }: PageProps) {
         </p>
       ) : null}
 
-      <form action={signUpAction} className="mt-6 space-y-4 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+      <form action={signUpAction} className="mt-6 space-y-4 rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
         <label className="block">
           <span className="mb-1 block text-sm font-medium text-slate-700">Full name</span>
           <input
             required
-            className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm"
+            className="w-full rounded-md border border-slate-300 px-3 py-2.5 text-sm"
             name="full_name"
             maxLength={100}
             autoComplete="name"
@@ -71,7 +71,7 @@ export default async function SignupPage({ searchParams }: PageProps) {
           <span className="mb-1 block text-sm font-medium text-slate-700">Team name</span>
           <input
             required
-            className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm"
+            className="w-full rounded-md border border-slate-300 px-3 py-2.5 text-sm"
             name="team_name"
             maxLength={100}
             type="text"
@@ -86,7 +86,7 @@ export default async function SignupPage({ searchParams }: PageProps) {
             required
             autoCapitalize="none"
             autoComplete="off"
-            className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm"
+            className="w-full rounded-md border border-slate-300 px-3 py-2.5 text-sm"
             disabled={!registrationOpen}
             maxLength={64}
             minLength={8}
@@ -102,7 +102,7 @@ export default async function SignupPage({ searchParams }: PageProps) {
           <span className="mb-1 block text-sm font-medium text-slate-700">Email</span>
           <input
             required
-            className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm"
+            className="w-full rounded-md border border-slate-300 px-3 py-2.5 text-sm"
             name="email"
             autoComplete="email"
             type="email"
@@ -113,7 +113,7 @@ export default async function SignupPage({ searchParams }: PageProps) {
           <span className="mb-1 block text-sm font-medium text-slate-700">Password</span>
           <input
             required
-            className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm"
+            className="w-full rounded-md border border-slate-300 px-3 py-2.5 text-sm"
             minLength={10}
             name="password"
             autoComplete="new-password"
@@ -125,7 +125,7 @@ export default async function SignupPage({ searchParams }: PageProps) {
           <span className="mb-1 block text-sm font-medium text-slate-700">Confirm password</span>
           <input
             required
-            className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm"
+            className="w-full rounded-md border border-slate-300 px-3 py-2.5 text-sm"
             minLength={10}
             name="confirm_password"
             autoComplete="new-password"
@@ -134,7 +134,7 @@ export default async function SignupPage({ searchParams }: PageProps) {
         </label>
 
         <SubmitButton
-          className="w-full rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white hover:bg-slate-700 disabled:cursor-not-allowed disabled:bg-slate-400"
+          className="w-full rounded-md bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white hover:bg-slate-700 disabled:cursor-not-allowed disabled:bg-slate-400"
           disabled={!registrationOpen}
           pendingLabel="Creating account..."
         >

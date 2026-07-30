@@ -19,7 +19,7 @@ export default async function LoginPage({ searchParams }: PageProps) {
       <p className="inline-flex w-fit rounded-full border border-blue-200 bg-blue-50 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-blue-700">
         Mound Hounds Pick&apos;em League
       </p>
-      <div className="mt-4 overflow-hidden rounded-3xl border border-slate-200 bg-slate-100 p-1 shadow-sm">
+      <div className="mt-4 overflow-hidden rounded-lg border border-slate-200 bg-slate-100 p-1 shadow-sm">
         <div className="relative aspect-[16/9] overflow-hidden rounded-lg bg-slate-900">
           <div
             aria-hidden
@@ -51,7 +51,7 @@ export default async function LoginPage({ searchParams }: PageProps) {
 
       <form
         action={signInAction}
-        className="mt-6 space-y-4 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"
+        className="mt-6 space-y-4 rounded-lg border border-slate-200 bg-white p-5 shadow-sm"
       >
         <input name="next" type="hidden" value={next} />
 
@@ -59,7 +59,7 @@ export default async function LoginPage({ searchParams }: PageProps) {
           <span className="mb-1 block text-sm font-medium text-slate-700">Email</span>
           <input
             required
-            className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm"
+            className="w-full rounded-md border border-slate-300 px-3 py-2.5 text-sm"
             name="email"
             autoComplete="email"
             type="email"
@@ -75,7 +75,7 @@ export default async function LoginPage({ searchParams }: PageProps) {
           </span>
           <input
             required
-            className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm"
+            className="w-full rounded-md border border-slate-300 px-3 py-2.5 text-sm"
             name="password"
             autoComplete="current-password"
             type="password"
@@ -83,7 +83,7 @@ export default async function LoginPage({ searchParams }: PageProps) {
         </label>
 
         <SubmitButton
-          className="w-full rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white hover:bg-slate-700"
+          className="w-full rounded-md bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white hover:bg-slate-700"
           pendingLabel="Signing in..."
         >
           Sign in

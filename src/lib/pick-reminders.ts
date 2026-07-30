@@ -5,6 +5,13 @@ import { pickWindowDisplayName, racesInPickWindow } from "@/lib/pick-windows";
 import { pickLockAtForRace } from "@/lib/race-format";
 import { getPreviousRaceResultsGate } from "@/lib/pickem-results-gate";
 import {
+  REMINDER_BATCH_SIZE,
+  REMINDER_SEND_CONCURRENCY,
+  selectReminderDeliveryBatch,
+  summarizeReminderQueue,
+  type ReminderQueueRow
+} from "@/lib/reminder-queue";
+import {
   getReminderWindow,
   type ReminderType,
   type ReminderWindow
@@ -44,21 +51,27 @@ type SendResult = {
 };
 
 type PickReminderSummary = {
+  batchDeliveryCount: number;
   emailDeliveryEnabled: boolean;
   emailFailed: number;
   emailSent: number;
   emailSkippedNoAddress: number;
   emailSkippedAlreadySent: number;
   pendingParticipants: number;
+  queuePending: number;
+  queuePermanentFailed: number;
+  queueRetrying: number;
+  queueSent: number;
   raceId: number | null;
   raceName: string | null;
+  remainingDeliveries: number;
   reason:
     | "delivery_disabled"
     | "no_upcoming_race"
     | "waiting_previous_results"
     | "no_window_due"
     | "no_missing_participants"
-    | "reminders_sent";
+    | "delivery_batch_processed";
   reminderType: ReminderType | null;
   smsDeliveryEnabled: boolean;
   smsFailed: number;
@@ -376,25 +389,37 @@ export async function sendDuePickReminders(): Promise<PickReminderSummary> {
   const now = new Date();
   const emailDeliveryEnabled = process.env.PICK_EMAILS_ENABLED?.trim().toLowerCase() === "true";
   const smsDeliveryEnabled = process.env.REMINDER_SMS_ENABLED?.trim().toLowerCase() === "true";
+  const emptySummary = (
+    reason: PickReminderSummary["reason"],
+    raceId: number | null = null,
+    raceName: string | null = null,
+    reminderType: ReminderType | null = null
+  ): PickReminderSummary => ({
+    batchDeliveryCount: 0,
+    emailDeliveryEnabled,
+    emailFailed: 0,
+    emailSent: 0,
+    emailSkippedAlreadySent: 0,
+    emailSkippedNoAddress: 0,
+    pendingParticipants: 0,
+    queuePending: 0,
+    queuePermanentFailed: 0,
+    queueRetrying: 0,
+    queueSent: 0,
+    raceId,
+    raceName,
+    reason,
+    remainingDeliveries: 0,
+    reminderType,
+    smsDeliveryEnabled,
+    smsFailed: 0,
+    smsSent: 0,
+    smsSkippedAlreadySent: 0,
+    smsSkippedNoGatewayAddress: 0
+  });
 
   if (!emailDeliveryEnabled) {
-    return {
-      emailDeliveryEnabled,
-      emailFailed: 0,
-      emailSent: 0,
-      emailSkippedAlreadySent: 0,
-      emailSkippedNoAddress: 0,
-      pendingParticipants: 0,
-      raceId: null,
-      raceName: null,
-      reason: "delivery_disabled",
-      reminderType: null,
-      smsDeliveryEnabled,
-      smsFailed: 0,
-      smsSent: 0,
-      smsSkippedAlreadySent: 0,
-      smsSkippedNoGatewayAddress: 0
-    };
+    return emptySummary("delivery_disabled");
   }
 
   const activeSeason = await loadActiveLeagueSeason(supabase);
@@ -430,66 +455,22 @@ export async function sendDuePickReminders(): Promise<PickReminderSummary> {
     : null;
 
   if (!upcomingRace) {
-    return {
-      emailDeliveryEnabled,
-      emailFailed: 0,
-      emailSent: 0,
-      emailSkippedAlreadySent: 0,
-      emailSkippedNoAddress: 0,
-      pendingParticipants: 0,
-      raceId: null,
-      raceName: null,
-      reason: "no_upcoming_race",
-      reminderType: null,
-      smsDeliveryEnabled,
-      smsFailed: 0,
-      smsSent: 0,
-      smsSkippedAlreadySent: 0,
-      smsSkippedNoGatewayAddress: 0
-    };
+    return emptySummary("no_upcoming_race");
   }
 
   const previousResultsGate = await getPreviousRaceResultsGate(supabase, upcomingRace);
   if (previousResultsGate.status === "blocked") {
-    return {
-      emailDeliveryEnabled,
-      emailFailed: 0,
-      emailSent: 0,
-      emailSkippedAlreadySent: 0,
-      emailSkippedNoAddress: 0,
-      pendingParticipants: 0,
-      raceId: upcomingRace.id,
-      raceName: upcomingRaceName,
-      reason: "waiting_previous_results",
-      reminderType: null,
-      smsDeliveryEnabled,
-      smsFailed: 0,
-      smsSent: 0,
-      smsSkippedAlreadySent: 0,
-      smsSkippedNoGatewayAddress: 0
-    };
+    return emptySummary(
+      "waiting_previous_results",
+      upcomingRace.id,
+      upcomingRaceName
+    );
   }
 
   const msUntilDeadline = Date.parse(pickLockAtForRace(upcomingRace)) - now.getTime();
   const reminderWindow = getReminderWindow(msUntilDeadline);
   if (!reminderWindow) {
-    return {
-      emailDeliveryEnabled,
-      emailFailed: 0,
-      emailSent: 0,
-      emailSkippedAlreadySent: 0,
-      emailSkippedNoAddress: 0,
-      pendingParticipants: 0,
-      raceId: upcomingRace.id,
-      raceName: upcomingRaceName,
-      reason: "no_window_due",
-      reminderType: null,
-      smsDeliveryEnabled,
-      smsFailed: 0,
-      smsSent: 0,
-      smsSkippedAlreadySent: 0,
-      smsSkippedNoGatewayAddress: 0
-    };
+    return emptySummary("no_window_due", upcomingRace.id, upcomingRaceName);
   }
 
   const { error: fieldFreezeError } = await supabase.rpc(
@@ -551,33 +532,145 @@ export async function sendDuePickReminders(): Promise<PickReminderSummary> {
   );
 
   if (participantsMissingPicks.length === 0) {
-    return {
-      emailDeliveryEnabled,
-      emailFailed: 0,
-      emailSent: 0,
-      emailSkippedAlreadySent: 0,
-      emailSkippedNoAddress: 0,
-      pendingParticipants: 0,
-      raceId: upcomingRace.id,
-      raceName: upcomingRaceName,
-      reason: "no_missing_participants",
-      reminderType: reminderWindow.key,
-      smsDeliveryEnabled,
-      smsFailed: 0,
-      smsSent: 0,
-      smsSkippedAlreadySent: 0,
-      smsSkippedNoGatewayAddress: 0
-    };
+    const { error: clearQueueError } = await supabase
+      .from("pick_reminders")
+      .delete()
+      .eq("race_id", upcomingRace.id)
+      .eq("reminder_type", reminderWindow.key)
+      .in("delivery_status", ["pending", "failed"]);
+    if (clearQueueError) {
+      throw new Error(`Failed clearing obsolete reminder queue rows: ${clearQueueError.message}`);
+    }
+    return emptySummary(
+      "no_missing_participants",
+      upcomingRace.id,
+      upcomingRaceName,
+      reminderWindow.key
+    );
   }
 
   const emailByUserId = await loadAuthEmailsByUserId(
     supabase,
     participantsMissingPicks.map((participant) => participant.id)
   );
+  const participantById = new Map(
+    participantsMissingPicks.map((participant) => [participant.id, participant])
+  );
+  const desiredDeliveryByKey = new Map<
+    string,
+    {
+      channel: ReminderChannel;
+      participant: ProfileForReminder;
+      recipient: string;
+    }
+  >();
+  let emailSkippedNoAddress = 0;
+  let smsSkippedNoGatewayAddress = 0;
+
+  [...participantsMissingPicks]
+    .sort((left, right) => left.id.localeCompare(right.id))
+    .forEach((participant) => {
+      const recipientEmail = emailByUserId.get(participant.id) ?? null;
+      if (recipientEmail) {
+        desiredDeliveryByKey.set(`${participant.id}:email`, {
+          channel: "email",
+          participant,
+          recipient: recipientEmail
+        });
+      } else {
+        emailSkippedNoAddress += 1;
+      }
+
+      if (!smsDeliveryEnabled) {
+        return;
+      }
+      const smsAddress = toSmsGatewayAddress(
+        participant.phone_number,
+        participant.phone_carrier
+      );
+      if (smsAddress) {
+        desiredDeliveryByKey.set(`${participant.id}:sms`, {
+          channel: "sms",
+          participant,
+          recipient: smsAddress
+        });
+      } else {
+        smsSkippedNoGatewayAddress += 1;
+      }
+    });
+
+  const queueFields =
+    "id,user_id,channel,recipient,delivery_status,attempt_count,last_attempt_at,lease_expires_at";
+  const { data: existingQueueData, error: existingQueueError } = await supabase
+    .from("pick_reminders")
+    .select(queueFields)
+    .eq("race_id", upcomingRace.id)
+    .eq("reminder_type", reminderWindow.key);
+  if (existingQueueError) {
+    throw new Error(`Failed loading reminder delivery queue: ${existingQueueError.message}`);
+  }
+
+  const existingQueueRows = (existingQueueData ?? []) as ReminderQueueRow[];
+  const staleQueueIds = existingQueueRows
+    .filter(
+      (row) =>
+        row.delivery_status !== "sent" &&
+        !desiredDeliveryByKey.has(`${row.user_id}:${row.channel}`)
+    )
+    .map((row) => row.id);
+  if (staleQueueIds.length > 0) {
+    const { error: staleDeleteError } = await supabase
+      .from("pick_reminders")
+      .delete()
+      .in("id", staleQueueIds);
+    if (staleDeleteError) {
+      throw new Error(`Failed removing obsolete reminder deliveries: ${staleDeleteError.message}`);
+    }
+  }
+
+  const preparedRows = Array.from(desiredDeliveryByKey.values()).map((delivery) => ({
+    attempt_count: 0,
+    channel: delivery.channel,
+    delivery_status: "pending" as const,
+    lease_expires_at: "1970-01-01T00:00:00.000Z",
+    race_id: upcomingRace.id,
+    recipient: delivery.recipient,
+    reminder_type: reminderWindow.key,
+    user_id: delivery.participant.id
+  }));
+  if (preparedRows.length > 0) {
+    const { error: prepareQueueError } = await supabase
+      .from("pick_reminders")
+      .upsert(preparedRows, {
+        ignoreDuplicates: true,
+        onConflict: "race_id,user_id,reminder_type,channel"
+      });
+    if (prepareQueueError) {
+      throw new Error(`Failed preparing reminder delivery queue: ${prepareQueueError.message}`);
+    }
+  }
+
+  const { data: queuedData, error: queuedError } = await supabase
+    .from("pick_reminders")
+    .select(queueFields)
+    .eq("race_id", upcomingRace.id)
+    .eq("reminder_type", reminderWindow.key);
+  if (queuedError) {
+    throw new Error(`Failed refreshing reminder delivery queue: ${queuedError.message}`);
+  }
+
+  const queueRows = ((queuedData ?? []) as ReminderQueueRow[]).filter((row) =>
+    desiredDeliveryByKey.has(`${row.user_id}:${row.channel}`)
+  );
+  const deliveryBatch = selectReminderDeliveryBatch(
+    queueRows,
+    now,
+    REMINDER_BATCH_SIZE
+  );
   const deliveryResults = await mapWithConcurrency(
-    participantsMissingPicks,
-    5,
-    async (participant) => {
+    deliveryBatch,
+    REMINDER_SEND_CONCURRENCY,
+    async (queueRow) => {
       const counts = {
         emailFailed: 0,
         emailSent: 0,
@@ -588,6 +681,13 @@ export async function sendDuePickReminders(): Promise<PickReminderSummary> {
         smsSkippedAlreadySent: 0,
         smsSkippedNoGatewayAddress: 0
       };
+      const participant = participantById.get(queueRow.user_id);
+      const desiredDelivery = desiredDeliveryByKey.get(
+        `${queueRow.user_id}:${queueRow.channel}`
+      );
+      if (!participant || !desiredDelivery) {
+        return counts;
+      }
       const pickedRaceIds = pickedRaceIdsByUser.get(participant.id) ?? new Set<number>();
       const missingRaces = upcomingRaceWindow.filter((race) => !pickedRaceIds.has(race.id));
       const message = buildReminderMessage(
@@ -595,11 +695,9 @@ export async function sendDuePickReminders(): Promise<PickReminderSummary> {
         missingRaces,
         reminderWindow
       );
-      const recipientEmail = emailByUserId.get(participant.id) ?? null;
+      const recipient = desiredDelivery.recipient;
 
-      if (!recipientEmail) {
-        counts.emailSkippedNoAddress = 1;
-      } else {
+      if (queueRow.channel === "email") {
         let reminderId: number | null = null;
         try {
           reminderId = await claimReminderSlot(
@@ -608,14 +706,14 @@ export async function sendDuePickReminders(): Promise<PickReminderSummary> {
             participant.id,
             reminderWindow.key,
             "email",
-            recipientEmail
+            recipient
           );
 
           if (!reminderId) {
             counts.emailSkippedAlreadySent = 1;
           } else {
             const sendResult = await sendWithResend(
-              recipientEmail,
+              recipient,
               message.subject,
               message.text,
               `pick-${upcomingRace.id}-${participant.id}-${reminderWindow.key}-email`
@@ -634,15 +732,6 @@ export async function sendDuePickReminders(): Promise<PickReminderSummary> {
             });
           }
         }
-      }
-
-      if (!smsDeliveryEnabled) {
-        return counts;
-      }
-
-      const smsAddress = toSmsGatewayAddress(participant.phone_number, participant.phone_carrier);
-      if (!smsAddress) {
-        counts.smsSkippedNoGatewayAddress = 1;
         return counts;
       }
 
@@ -654,14 +743,14 @@ export async function sendDuePickReminders(): Promise<PickReminderSummary> {
           participant.id,
           reminderWindow.key,
           "sms",
-          smsAddress
+          recipient
         );
 
         if (!smsReminderId) {
           counts.smsSkippedAlreadySent = 1;
         } else {
           const sendResult = await sendWithResend(
-            smsAddress,
+            recipient,
             message.subject,
             message.smsText,
             `pick-${upcomingRace.id}-${participant.id}-${reminderWindow.key}-sms`
@@ -708,14 +797,46 @@ export async function sendDuePickReminders(): Promise<PickReminderSummary> {
     }
   );
 
+  const { data: finalQueueData, error: finalQueueError } = await supabase
+    .from("pick_reminders")
+    .select(queueFields)
+    .eq("race_id", upcomingRace.id)
+    .eq("reminder_type", reminderWindow.key);
+  if (finalQueueError) {
+    throw new Error(`Failed summarizing reminder delivery queue: ${finalQueueError.message}`);
+  }
+  const finalQueueRows = ((finalQueueData ?? []) as ReminderQueueRow[]).filter((row) =>
+    desiredDeliveryByKey.has(`${row.user_id}:${row.channel}`)
+  );
+  const queueSummary = summarizeReminderQueue(finalQueueRows);
+
   return {
+    batchDeliveryCount: deliveryBatch.length,
     emailDeliveryEnabled,
     ...totals,
+    emailSkippedAlreadySent:
+      totals.emailSkippedAlreadySent +
+      queueRows.filter(
+        (row) => row.channel === "email" && row.delivery_status === "sent"
+      ).length,
+    emailSkippedNoAddress,
     pendingParticipants: participantsMissingPicks.length,
+    queuePending: queueSummary.pending,
+    queuePermanentFailed: queueSummary.permanentFailed,
+    queueRetrying: queueSummary.retrying,
+    queueSent: queueSummary.sent,
     raceId: upcomingRace.id,
     raceName: upcomingRaceName,
-    reason: "reminders_sent",
+    reason: "delivery_batch_processed",
+    remainingDeliveries: queueSummary.pending + queueSummary.retrying,
     reminderType: reminderWindow.key,
-    smsDeliveryEnabled
+    smsDeliveryEnabled,
+    smsSkippedAlreadySent:
+      totals.smsSkippedAlreadySent +
+      queueRows.filter(
+        (row) => row.channel === "sms" && row.delivery_status === "sent"
+      ).length,
+    smsSkippedNoGatewayAddress:
+      totals.smsSkippedNoGatewayAddress + smsSkippedNoGatewayAddress
   };
 }
