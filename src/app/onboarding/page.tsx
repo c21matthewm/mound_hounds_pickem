@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 import { saveProfileAction } from "@/app/actions/auth";
-import { SignOutButton } from "@/components/sign-out-button";
+import { ProfileButton } from "@/components/profile-button";
 import { SubmitButton } from "@/components/submit-button";
 import { isProfileComplete, type ProfileRow } from "@/lib/profile";
 import { queryStringParam } from "@/lib/query";
@@ -51,7 +51,7 @@ export default async function OnboardingPage({ searchParams }: PageProps) {
   return (
     <main className="mx-auto flex min-h-screen max-w-2xl flex-col justify-center px-6 py-16">
       <header className="relative overflow-hidden rounded-lg border border-slate-200 bg-white p-6">
-        <SignOutButton />
+        <ProfileButton className="absolute right-4 top-4" />
         <p className="inline-flex w-fit rounded-full border border-blue-200 bg-blue-50 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-blue-700">
           League Setup
         </p>

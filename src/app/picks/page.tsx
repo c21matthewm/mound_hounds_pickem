@@ -2,7 +2,6 @@ import Link from "next/link";
 import { AuthenticatedPageShell } from "@/components/authenticated-page-shell";
 import { MobileBottomNav } from "@/components/mobile-bottom-nav";
 import { PickSubmissionSnapshot } from "@/components/pick-submission-snapshot";
-import { SignOutButton } from "@/components/sign-out-button";
 import { saveWeeklyPickAction } from "@/app/picks/actions";
 import { PickemForm } from "@/components/pickem-form";
 import {
@@ -110,7 +109,6 @@ export default async function PicksPage({ searchParams }: PageProps) {
   if (!activeSeason) {
     return (
       <AuthenticatedPageShell
-        actions={<SignOutButton className="static" />}
         eyebrow="Race Picks"
         maxWidth="max-w-4xl"
         title="Pick'em Form"
@@ -142,7 +140,6 @@ export default async function PicksPage({ searchParams }: PageProps) {
   if (pickWindow.length === 0) {
     return (
       <AuthenticatedPageShell
-        actions={<SignOutButton className="static" />}
         eyebrow="Race Picks"
         maxWidth="max-w-4xl"
         title="Pick'em Form"
@@ -321,12 +318,9 @@ export default async function PicksPage({ searchParams }: PageProps) {
   return (
     <AuthenticatedPageShell
       actions={
-        <>
-          <ActionLink href="/dashboard" variant="secondary">
-            Dashboard
-          </ActionLink>
-          <SignOutButton className="static" />
-        </>
+        <ActionLink href="/dashboard" variant="secondary">
+          Dashboard
+        </ActionLink>
       }
       description={
         <>

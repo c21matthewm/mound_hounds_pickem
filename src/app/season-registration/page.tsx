@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 import { setSeasonParticipationAction } from "@/app/actions/auth";
-import { SignOutButton } from "@/components/sign-out-button";
+import { ProfileButton } from "@/components/profile-button";
 import { SubmitButton } from "@/components/submit-button";
 import { isProfileComplete, type ProfileRow } from "@/lib/profile";
 import { queryStringParam, sanitizeNextPath } from "@/lib/query";
@@ -64,7 +64,7 @@ export default async function SeasonRegistrationPage({ searchParams }: PageProps
             joining the {activeSeason.seasonYear} league field.
           </p>
         </div>
-        <SignOutButton className="static shrink-0" />
+        <ProfileButton />
       </header>
 
       {error ? (

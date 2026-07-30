@@ -1,6 +1,5 @@
 import { AuthenticatedPageShell } from "@/components/authenticated-page-shell";
 import { MobileBottomNav } from "@/components/mobile-bottom-nav";
-import { SignOutButton } from "@/components/sign-out-button";
 import {
   ActionAnchor,
   ActionLink,
@@ -20,12 +19,9 @@ export default async function RulesPage() {
   return (
     <AuthenticatedPageShell
       actions={
-        <>
-          <ActionLink href="/dashboard" variant="secondary">
-            Dashboard
-          </ActionLink>
-          <SignOutButton className="static" />
-        </>
+        <ActionLink href="/dashboard" variant="secondary">
+          Dashboard
+        </ActionLink>
       }
       description={`Official Mound Hounds Pick'em league rules${
         activeSeason ? ` for ${activeSeason.seasonYear}` : ""

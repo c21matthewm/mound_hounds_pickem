@@ -36,7 +36,6 @@ import {
 } from "@/components/admin-system-health";
 import { ConfirmSubmitButton } from "@/components/confirm-submit-button";
 import { SeasonRecoveryCenter } from "@/components/season-recovery-center";
-import { SignOutButton } from "@/components/sign-out-button";
 import { SubmitButton } from "@/components/submit-button";
 import {
   ActionLink,
@@ -952,12 +951,9 @@ export default async function AdminPage({ searchParams }: PageProps) {
   return (
     <AuthenticatedPageShell
       actions={
-        <>
-          <ActionLink href="/dashboard" variant="secondary">
-            Back to dashboard
-          </ActionLink>
-          <SignOutButton className="static" />
-        </>
+        <ActionLink href="/dashboard" variant="secondary">
+          Back to dashboard
+        </ActionLink>
       }
       description={
         <>
