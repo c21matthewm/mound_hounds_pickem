@@ -1,8 +1,14 @@
 import Link from "next/link";
 import { requestPasswordResetAction } from "@/app/actions/auth";
-import { MOUND_HOUND_IMAGE_PATH } from "@/lib/branding";
+import { AuthFlowShell, AuthFormPanel } from "@/components/auth-flow-shell";
 import { queryStringParam } from "@/lib/query";
 import { SubmitButton } from "@/components/submit-button";
+import {
+  CompactNotice,
+  FormField,
+  actionControlClassName,
+  fieldControlClassName
+} from "@/components/ui-primitives";
 
 type PageProps = {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
@@ -14,67 +20,51 @@ export default async function ForgotPasswordPage({ searchParams }: PageProps) {
   const message = queryStringParam(params.message);
 
   return (
-    <main className="mx-auto flex min-h-screen max-w-lg flex-col justify-center px-6 py-16">
-      <div className="flex items-center gap-3">
-        <div
-          aria-hidden
-          className="h-14 w-14 rounded-lg border border-slate-200 bg-slate-200 bg-cover bg-center shadow-sm"
-          style={{ backgroundImage: `url('${MOUND_HOUND_IMAGE_PATH}')`, backgroundPosition: "50% 38%" }}
-        />
-        <div>
-          <p className="inline-flex w-fit rounded-full border border-blue-200 bg-blue-50 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-blue-700">
-            Mound Hounds Pick&apos;em League
-          </p>
-          <h1 className="mt-2 text-4xl font-semibold tracking-tight text-slate-950">
-            Reset password
-          </h1>
-        </div>
-      </div>
-
-      <p className="mt-3 text-sm leading-6 text-slate-600">
-        Enter your account email and we&apos;ll send you a secure link to choose a new password.
-      </p>
+    <AuthFlowShell
+      description="Enter your account email and we'll send you a secure link to choose a new password."
+      footer={
+        <>
+          Remembered it?{" "}
+          <Link className="font-semibold text-slate-900 underline" href="/login">
+            Back to sign in
+          </Link>
+        </>
+      }
+      title="Reset password"
+    >
 
       {error ? (
-        <p className="mt-4 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+        <CompactNotice className="mt-4" tone="danger">
           {error}
-        </p>
+        </CompactNotice>
       ) : null}
 
       {message ? (
-        <p className="mt-4 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
+        <CompactNotice className="mt-4" tone="success">
           {message}
-        </p>
+        </CompactNotice>
       ) : null}
 
-      <form
-        action={requestPasswordResetAction}
-        className="mt-6 space-y-4 rounded-lg border border-slate-200 bg-white p-5 shadow-sm"
-      >
-        <label className="block">
-          <span className="mb-1 block text-sm font-medium text-slate-700">Email</span>
-          <input
-            required
-            className="w-full rounded-md border border-slate-300 px-3 py-2.5 text-sm"
-            name="email"
-            type="email"
-          />
-        </label>
+      <AuthFormPanel>
+        <form action={requestPasswordResetAction} className="space-y-4">
+          <FormField label="Email">
+            <input
+              required
+              autoComplete="email"
+              className={fieldControlClassName()}
+              name="email"
+              type="email"
+            />
+          </FormField>
 
-        <SubmitButton
-          className="w-full rounded-md bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white hover:bg-slate-700"
-          pendingLabel="Sending..."
-        >
-          Send reset link
-        </SubmitButton>
-      </form>
-
-      <p className="mt-5 text-sm text-slate-600">
-        Remembered it?{" "}
-        <Link className="font-semibold text-slate-900 underline" href="/login">
-          Back to sign in
-        </Link>
-      </p>
-    </main>
+          <SubmitButton
+            className={actionControlClassName("primary", "w-full")}
+            pendingLabel="Sending..."
+          >
+            Send reset link
+          </SubmitButton>
+        </form>
+      </AuthFormPanel>
+    </AuthFlowShell>
   );
 }

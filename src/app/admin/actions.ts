@@ -172,6 +172,43 @@ const createSeasonSafetySnapshot = async (
   }
 };
 
+type WinnerFinalizationOutcome = {
+  errorMessage: string | null;
+  status: "finalized" | "pending";
+  winnerProfileId: string | null;
+};
+
+const finalizePublishedRaceWinner = async (
+  supabase: SupabaseClient,
+  raceId: number
+): Promise<WinnerFinalizationOutcome> => {
+  try {
+    return {
+      errorMessage: null,
+      status: "finalized",
+      winnerProfileId: await finalizeRaceWinnerNow(supabase, raceId)
+    };
+  } catch (error) {
+    const errorMessage =
+      error instanceof Error ? error.message : "Unknown fantasy winner calculation error.";
+    console.error(
+      `[fantasy-winner] Immediate finalization failed for race ${raceId}; automatic retry remains pending:`,
+      errorMessage
+    );
+
+    return {
+      errorMessage,
+      status: "pending",
+      winnerProfileId: null
+    };
+  }
+};
+
+const fantasyWinnerPublicationMessage = (outcome: WinnerFinalizationOutcome): string =>
+  outcome.status === "finalized"
+    ? "The fantasy winner was recalculated immediately."
+    : "Fantasy winner calculation is pending an automatic retry.";
+
 const parsePositiveInteger = (value: string): number | null => {
   const parsed = Number(value);
 
@@ -2196,11 +2233,12 @@ export async function publishSavedRaceResultsAction(formData: FormData) {
       "Race and an official winning average speed between 0 and 300 MPH are required."
     );
   }
+  const selectedRaceId = raceId as number;
 
   const { data: selectedRace, error: selectedRaceError } = await supabase
     .from("races")
     .select("race_name,results_status,round_number,season_id")
-    .eq("id", raceId)
+    .eq("id", selectedRaceId)
     .maybeSingle<{
       race_name: string;
       results_status: "draft" | "published";
@@ -2239,7 +2277,7 @@ export async function publishSavedRaceResultsAction(formData: FormData) {
 
   const { data: publishedCount, error } = await supabase.rpc("publish_saved_race_results", {
     p_official_winning_average_speed: officialWinningAverageSpeed,
-    p_race_id: raceId
+    p_race_id: selectedRaceId
   });
 
   if (error) {
@@ -2249,13 +2287,18 @@ export async function publishSavedRaceResultsAction(formData: FormData) {
     );
   }
 
+  const winnerOutcome = await finalizePublishedRaceWinner(supabase, selectedRaceId);
+
   await recordAdminAudit(supabase, {
     action: "publish_results",
     afterState: {
+      fantasy_winner_error: winnerOutcome.errorMessage,
+      fantasy_winner_status: winnerOutcome.status,
       official_winning_average_speed: officialWinningAverageSpeed,
-      published_result_count: Number(publishedCount ?? 0)
+      published_result_count: Number(publishedCount ?? 0),
+      winner_profile_id: winnerOutcome.winnerProfileId
     },
-    entityId: String(raceId),
+    entityId: String(selectedRaceId),
     entityType: "race",
     summary: `Published ${Number(publishedCount ?? 0)} saved result rows.`
   });
@@ -2266,7 +2309,7 @@ export async function publishSavedRaceResultsAction(formData: FormData) {
   revalidatePath("/picks");
   redirectWithTab(
     "message",
-    `Published ${Number(publishedCount ?? 0)} saved result row(s). Driver standings and groups were refreshed, and fantasy winner calculation is scheduled for about 15 minutes from now.`
+    `Published ${Number(publishedCount ?? 0)} saved result row(s). Driver standings and groups were refreshed. ${fantasyWinnerPublicationMessage(winnerOutcome)}`
   );
 }
 
@@ -2460,11 +2503,16 @@ export async function importIndycarResultsAction(formData: FormData) {
     );
   }
 
+  const winnerOutcome = await finalizePublishedRaceWinner(supabase, raceId);
+
   await recordAdminAudit(supabase, {
     action: "import_and_publish_results",
     afterState: {
+      fantasy_winner_error: winnerOutcome.errorMessage,
+      fantasy_winner_status: winnerOutcome.status,
       official_winning_average_speed: parsed.winningAverageSpeed,
-      published_result_count: Number(publishedCount ?? payload.length)
+      published_result_count: Number(publishedCount ?? payload.length),
+      winner_profile_id: winnerOutcome.winnerProfileId
     },
     entityId: String(raceId),
     entityType: "race",
@@ -2496,7 +2544,7 @@ export async function importIndycarResultsAction(formData: FormData) {
 
   redirectWithTab(
     "message",
-    `Published ${Number(publishedCount ?? payload.length)} complete result row(s) for ${raceName}. ${raceResultCountText} Driver standings/groups were refreshed, and fantasy winner auto-calculation is scheduled for about 15 minutes from now.${ignoredSummary}`
+    `Published ${Number(publishedCount ?? payload.length)} complete result row(s) for ${raceName}. ${raceResultCountText} Driver standings/groups were refreshed. ${fantasyWinnerPublicationMessage(winnerOutcome)}${ignoredSummary}`
   );
 }
 

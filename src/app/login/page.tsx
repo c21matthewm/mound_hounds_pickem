@@ -1,8 +1,14 @@
 import Link from "next/link";
 import { queryStringParam, sanitizeNextPath } from "@/lib/query";
 import { signInAction } from "@/app/actions/auth";
-import { MOUND_HOUND_IMAGE_PATH } from "@/lib/branding";
+import { AuthFlowShell, AuthFormPanel } from "@/components/auth-flow-shell";
 import { SubmitButton } from "@/components/submit-button";
+import {
+  CompactNotice,
+  FormField,
+  actionControlClassName,
+  fieldControlClassName
+} from "@/components/ui-primitives";
 
 type PageProps = {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
@@ -15,87 +21,77 @@ export default async function LoginPage({ searchParams }: PageProps) {
   const next = sanitizeNextPath(queryStringParam(params.next) ?? "/dashboard");
 
   return (
-    <main className="mx-auto flex min-h-screen max-w-lg flex-col justify-center px-6 py-16">
-      <p className="inline-flex w-fit rounded-full border border-blue-200 bg-blue-50 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-blue-700">
-        Mound Hounds Pick&apos;em League
-      </p>
-      <div className="mt-4 overflow-hidden rounded-lg border border-slate-200 bg-slate-100 p-1 shadow-sm">
-        <div className="relative aspect-[16/9] overflow-hidden rounded-lg bg-slate-900">
-          <div
-            aria-hidden
-            className="absolute inset-0 bg-cover bg-center opacity-90"
-            style={{ backgroundImage: `url('${MOUND_HOUND_IMAGE_PATH}')`, backgroundPosition: "50% 38%" }}
-          />
-          <div
-            aria-hidden
-            className="absolute inset-0 bg-gradient-to-t from-slate-950/70 via-slate-950/15 to-transparent"
-          />
-        </div>
-      </div>
-      <h1 className="mt-5 text-4xl font-semibold tracking-tight text-slate-950">Sign in</h1>
-      <p className="mt-2 text-sm leading-6 text-slate-600">
-        Access your Mound Hounds Pick&apos;em League account.
-      </p>
-      
+    <AuthFlowShell
+      description="Access your league account and current race week."
+      footer={
+        <>
+          New here?{" "}
+          <Link className="font-semibold text-slate-900 underline" href="/signup">
+            Create an account
+          </Link>
+        </>
+      }
+      title="Sign in"
+    >
       {error ? (
-        <p className="mt-4 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+        <CompactNotice className="mt-4" tone="danger">
           {error}
-        </p>
+        </CompactNotice>
       ) : null}
 
       {message ? (
-        <p className="mt-4 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
+        <CompactNotice className="mt-4" tone="success">
           {message}
-        </p>
+        </CompactNotice>
       ) : null}
 
-      <form
-        action={signInAction}
-        className="mt-6 space-y-4 rounded-lg border border-slate-200 bg-white p-5 shadow-sm"
-      >
-        <input name="next" type="hidden" value={next} />
+      <AuthFormPanel>
+        <form action={signInAction} className="space-y-4">
+          <input name="next" type="hidden" value={next} />
 
-        <label className="block">
-          <span className="mb-1 block text-sm font-medium text-slate-700">Email</span>
-          <input
-            required
-            className="w-full rounded-md border border-slate-300 px-3 py-2.5 text-sm"
-            name="email"
-            autoComplete="email"
-            type="email"
-          />
-        </label>
+          <FormField label="Email">
+            <input
+              required
+              autoComplete="email"
+              className={fieldControlClassName()}
+              name="email"
+              type="email"
+            />
+          </FormField>
 
-        <label className="block">
-          <span className="mb-1 flex items-center justify-between gap-3 text-sm font-medium text-slate-700">
-            <span>Password</span>
-            <Link className="text-xs font-semibold text-blue-700 underline" href="/forgot-password">
-              Forgot password?
-            </Link>
-          </span>
-          <input
-            required
-            className="w-full rounded-md border border-slate-300 px-3 py-2.5 text-sm"
-            name="password"
-            autoComplete="current-password"
-            type="password"
-          />
-        </label>
+          <div>
+            <div className="mb-1 flex items-center justify-between gap-3">
+              <label
+                className="text-xs font-semibold uppercase tracking-wide text-slate-600"
+                htmlFor="password"
+              >
+                Password
+              </label>
+              <Link
+                className="text-xs font-semibold text-blue-700 underline"
+                href="/forgot-password"
+              >
+                Forgot password?
+              </Link>
+            </div>
+            <input
+              required
+              autoComplete="current-password"
+              className={fieldControlClassName()}
+              id="password"
+              name="password"
+              type="password"
+            />
+          </div>
 
-        <SubmitButton
-          className="w-full rounded-md bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white hover:bg-slate-700"
-          pendingLabel="Signing in..."
-        >
-          Sign in
-        </SubmitButton>
-      </form>
-
-      <p className="mt-5 text-sm text-slate-600">
-        New here?{" "}
-        <Link className="font-semibold text-slate-900 underline" href="/signup">
-          Create an account
-        </Link>
-      </p>
-    </main>
+          <SubmitButton
+            className={actionControlClassName("primary", "w-full")}
+            pendingLabel="Signing in..."
+          >
+            Sign in
+          </SubmitButton>
+        </form>
+      </AuthFormPanel>
+    </AuthFlowShell>
   );
 }

@@ -1,7 +1,15 @@
 import { redirect } from "next/navigation";
 import { saveProfileAction } from "@/app/actions/auth";
+import { AuthFlowShell, AuthFormPanel } from "@/components/auth-flow-shell";
 import { ProfileButton } from "@/components/profile-button";
 import { SubmitButton } from "@/components/submit-button";
+import {
+  CompactNotice,
+  Disclosure,
+  FormField,
+  actionControlClassName,
+  fieldControlClassName
+} from "@/components/ui-primitives";
 import { isProfileComplete, type ProfileRow } from "@/lib/profile";
 import { queryStringParam } from "@/lib/query";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
@@ -49,99 +57,92 @@ export default async function OnboardingPage({ searchParams }: PageProps) {
   }
 
   return (
-    <main className="mx-auto flex min-h-screen max-w-2xl flex-col justify-center px-6 py-16">
-      <header className="relative overflow-hidden rounded-lg border border-slate-200 bg-white p-6">
-        <ProfileButton className="absolute right-4 top-4" />
-        <p className="inline-flex w-fit rounded-full border border-blue-200 bg-blue-50 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-blue-700">
-          League Setup
-        </p>
-        <h1 className="mt-4 text-4xl font-semibold tracking-tight text-slate-950">
-          Complete your profile
-        </h1>
-        <p className="mt-2 max-w-xl text-sm leading-6 text-slate-600">
-          Add your name and team once. Contact details are optional while league notifications are email-only.
-        </p>
-      </header>
+    <AuthFlowShell
+      action={<ProfileButton />}
+      description="Add your name and team once. Contact details remain optional while notifications are email-only."
+      eyebrow="League Setup"
+      maxWidth="max-w-2xl"
+      title="Complete your profile"
+    >
 
       {error ? (
-        <p className="mt-4 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+        <CompactNotice className="mt-4" tone="danger">
           {error}
-        </p>
+        </CompactNotice>
       ) : null}
 
       {message ? (
-        <p className="mt-4 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
+        <CompactNotice className="mt-4" tone="success">
           {message}
-        </p>
+        </CompactNotice>
       ) : null}
 
-      <form
-        action={saveProfileAction}
-        className="mt-6 grid gap-4 rounded-lg border border-slate-200 bg-white p-6 shadow-sm"
-      >
-        <label className="block">
-          <span className="mb-1 block text-sm font-medium text-slate-700">Full name</span>
+      <AuthFormPanel>
+        <form action={saveProfileAction} className="grid gap-4">
+        <FormField label="Full name">
           <input
             required
-            className="w-full rounded-md border border-slate-300 px-3 py-2.5 text-sm"
+            className={fieldControlClassName()}
             defaultValue={profile?.full_name ?? ""}
             maxLength={100}
             name="full_name"
             autoComplete="name"
             type="text"
           />
-        </label>
+        </FormField>
 
-        <label className="block">
-          <span className="mb-1 block text-sm font-medium text-slate-700">Team name</span>
+        <FormField label="Team name">
           <input
             required
-            className="w-full rounded-md border border-slate-300 px-3 py-2.5 text-sm"
+            className={fieldControlClassName()}
             defaultValue={profile?.team_name ?? ""}
             maxLength={100}
             name="team_name"
             type="text"
           />
-        </label>
+        </FormField>
 
-        <label className="block">
-          <span className="mb-1 block text-sm font-medium text-slate-700">Phone number (optional)</span>
-          <input
-            className="w-full rounded-md border border-slate-300 px-3 py-2.5 text-sm"
-            defaultValue={profile?.phone_number ?? ""}
-            name="phone_number"
-            autoComplete="tel"
-            placeholder="e.g. 317-555-1212"
-            type="tel"
-          />
-        </label>
+        <Disclosure
+          description="Not required for email notifications."
+          summary="Optional contact details"
+        >
+          <div className="grid gap-4 sm:grid-cols-2">
+            <FormField label="Phone number">
+              <input
+                autoComplete="tel"
+                className={fieldControlClassName()}
+                defaultValue={profile?.phone_number ?? ""}
+                name="phone_number"
+                placeholder="317-555-1212"
+                type="tel"
+              />
+            </FormField>
 
-        <label className="block">
-          <span className="mb-1 block text-sm font-medium text-slate-700">Phone carrier (optional)</span>
-          <select
-            className="w-full rounded-md border border-slate-300 px-3 py-2.5 text-sm"
-            defaultValue={profile?.phone_carrier ?? ""}
-            name="phone_carrier"
-          >
-            <option disabled value="">
-              Select carrier
-            </option>
-            {CARRIERS.map((carrier) => (
-              <option key={carrier.value} value={carrier.value}>
-                {carrier.label}
-              </option>
-            ))}
-          </select>
-        </label>
+            <FormField label="Phone carrier">
+              <select
+                className={fieldControlClassName()}
+                defaultValue={profile?.phone_carrier ?? ""}
+                name="phone_carrier"
+              >
+                <option value="">Select carrier</option>
+                {CARRIERS.map((carrier) => (
+                  <option key={carrier.value} value={carrier.value}>
+                    {carrier.label}
+                  </option>
+                ))}
+              </select>
+            </FormField>
+          </div>
+        </Disclosure>
 
         <SubmitButton
-          className="mt-2 rounded-md bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white hover:bg-slate-700"
+          className={actionControlClassName("primary", "mt-1")}
           pendingLabel="Saving profile..."
         >
           Save profile
         </SubmitButton>
-      </form>
-
-    </main>
+        </form>
+      </AuthFormPanel>
+    </AuthFlowShell>
   );
 }

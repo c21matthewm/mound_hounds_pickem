@@ -103,7 +103,7 @@ Key database triggers:
 - The Race Results tab has an Indianapolis 500 qualifying-order importer that expects positions 1-33, maps drivers by normalized name, and writes `race_driver_groups.qualifying_position` plus derived groups.
 - Manual entries save draft rows and temporarily remove a corrected race from published scoring. Draft publication requires every snapshotted driver plus official winning average speed.
 - Bulk import uses `publish_race_results()` to publish a unique, contiguous official finishing order atomically. Standard-race drivers in the pickable snapshot but absent from that order are stored as zero-point nonstarters; Indianapolis still requires all 33 drivers. The server validates field membership even if client preview is bypassed.
-- Publication refreshes championship points from published races only, updates groups, revalidates app paths, and schedules winner calculation about 15 minutes later.
+- Publication refreshes championship points from published races only, updates groups, revalidates app paths, and recalculates the fantasy winner immediately. A pending timestamp and hourly cron provide fallback recovery after a temporary calculation failure.
 - Race winner can be manually overridden or auto-calculated with `src/lib/fantasy-winner.ts`.
 - Auto-calculation ranks the full participant/admin field using the same weekly scoring model shown on the leaderboard, including lowest-possible-score fallback rows for teams without submitted picks.
 - Admin feedback is status-filtered and paginated; test cleanup remains under advanced maintenance.
@@ -155,7 +155,7 @@ Key database triggers:
 - Leaderboard/scoring: `src/app/leaderboard/page.tsx`, `src/lib/scoring.ts`, `src/lib/season-scoring-model.ts`, `src/lib/scoring-engine.ts`, `src/lib/weekly-ranking.ts`, `src/components/standings-table.tsx`, `src/components/picks-by-race-table.tsx`.
 - Admin: `src/app/admin/page.tsx`, `src/app/admin/actions.ts`, `src/components/admin-results-import-form.tsx`.
 - Race format helpers: `src/lib/race-format.ts`, `src/lib/qualifying-order.ts`.
-- Data and security: `supabase/schema.sql`, `supabase/migrations/`, `src/lib/supabase/`, `src/lib/admin.ts`.
+- Data and security: `supabase/schema.sql`, `supabase/migrations/`, `supabase/operations/`, `src/lib/supabase/`, `src/lib/admin.ts`.
 - Cron: `src/app/api/cron/fantasy-winner/route.ts`, `src/app/api/cron/pick-reminders/route.ts`, `src/lib/fantasy-winner.ts`, `src/lib/pick-reminders.ts`.
 
 ## Project Invariants To Preserve

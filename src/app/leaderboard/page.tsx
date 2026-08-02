@@ -1,4 +1,3 @@
-import Link from "next/link";
 import { AuthenticatedPageShell } from "@/components/authenticated-page-shell";
 import { AnalyticsRaceHistory } from "@/components/analytics-race-history";
 import { HallOfFameYearSelect } from "@/components/hall-of-fame-year-select";
@@ -8,6 +7,9 @@ import {
   ActionLink,
   CompactNotice,
   ContentPanel,
+  Disclosure,
+  EmptyState,
+  RouteTabs,
   SectionHeader
 } from "@/components/ui-primitives";
 import {
@@ -231,50 +233,20 @@ export default async function LeaderboardPage({ searchParams }: PageProps) {
       title="Season Leaderboard"
     >
 
-      <nav className="mt-6">
-        <ul className="grid w-full grid-cols-2 rounded-md border border-slate-300 bg-white p-1 text-sm sm:inline-flex sm:w-auto">
-          <li>
-            <Link
-              className={`block rounded px-3 py-1.5 text-center font-medium ${
-                activeTab === "standings" ? "bg-slate-900 text-white" : "text-slate-700 hover:bg-slate-100"
-              }`}
-              href={tabHref("standings")}
-            >
-              Standings
-            </Link>
-          </li>
-          <li>
-            <Link
-              className={`block rounded px-3 py-1.5 text-center font-medium ${
-                activeTab === "picks" ? "bg-slate-900 text-white" : "text-slate-700 hover:bg-slate-100"
-              }`}
-              href={tabHref("picks", picksSnapshot?.selectedRace?.raceId)}
-            >
-              Picks by Race
-            </Link>
-          </li>
-          <li>
-            <Link
-              className={`block rounded px-3 py-1.5 text-center font-medium ${
-                activeTab === "analytics" ? "bg-slate-900 text-white" : "text-slate-700 hover:bg-slate-100"
-              }`}
-              href={tabHref("analytics")}
-            >
-              Analytics
-            </Link>
-          </li>
-          <li>
-            <Link
-              className={`block rounded px-3 py-1.5 text-center font-medium ${
-                activeTab === "hall" ? "bg-slate-900 text-white" : "text-slate-700 hover:bg-slate-100"
-              }`}
-              href={tabHref("hall")}
-            >
-              Hall of Fame
-            </Link>
-          </li>
-        </ul>
-      </nav>
+      <RouteTabs
+        ariaLabel="Leaderboard views"
+        className="mt-6"
+        items={[
+          { active: activeTab === "standings", href: tabHref("standings"), label: "Standings" },
+          {
+            active: activeTab === "picks",
+            href: tabHref("picks", picksSnapshot?.selectedRace?.raceId),
+            label: "Picks by Race"
+          },
+          { active: activeTab === "analytics", href: tabHref("analytics"), label: "Analytics" },
+          { active: activeTab === "hall", href: tabHref("hall"), label: "Hall of Fame" }
+        ]}
+      />
 
       {activeTab === "standings" && standingsSnapshot ? (
         standingsSnapshot.raceColumns.length === 0 ? (
@@ -295,20 +267,36 @@ export default async function LeaderboardPage({ searchParams }: PageProps) {
 
       {activeTab === "picks" && picksSnapshot ? (
         picksSnapshot.availableRaces.length === 0 ? (
-          <ContentPanel className="mt-6">
-            <SectionHeader
-              description="Races appear here after their pick deadline has passed."
-              title="Picks by Race"
-            />
-          </ContentPanel>
+          <EmptyState
+            className="mt-6"
+            description="Race picks appear here after their pick deadline has passed."
+            title="No locked race picks yet"
+          />
         ) : (
           <>
             <ContentPanel className="mt-6">
-              <div className="flex flex-wrap items-end justify-between gap-4">
-                <div className="min-w-[280px] flex-1">
-                  <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-600">
-                    Select race
-                  </label>
+              <SectionHeader
+                action={
+                  picksSnapshot.selectedRace ? (
+                    <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                      R{picksSnapshot.selectedRace.roundNumber}
+                    </span>
+                  ) : null
+                }
+                description={
+                  picksSnapshot.selectedRace
+                    ? `Viewing ${picksSnapshot.selectedRace.raceName}`
+                    : "Choose a locked race to review participant picks."
+                }
+                title="Picks by Race"
+              />
+              <div className="mt-4 max-w-xl">
+                <label
+                  className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-600"
+                  htmlFor="leaderboard-race-select"
+                >
+                  Select race
+                </label>
                   <PicksRaceSelect
                     races={picksSnapshot.availableRaces.map((race) => ({
                       raceId: race.raceId,
@@ -317,22 +305,7 @@ export default async function LeaderboardPage({ searchParams }: PageProps) {
                     }))}
                     selectedRaceId={picksSnapshot.selectedRace?.raceId ?? null}
                   />
-                </div>
-                <div className="rounded-md border border-cyan-100 bg-cyan-50 px-4 py-3 text-sm text-cyan-900">
-                  Picks unlock here after the race pick deadline. Results add per-driver scores.
-                </div>
               </div>
-
-              {picksSnapshot.selectedRace ? (
-                <div className="mt-4 border-t border-slate-200 pt-4">
-                  <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                    Selected Race
-                  </p>
-                  <p className="mt-1 text-lg font-semibold text-slate-900">
-                    {picksSnapshot.selectedRace.raceName}
-                  </p>
-                </div>
-              ) : null}
             </ContentPanel>
             <PicksByRaceTable
               officialWinningAverageSpeed={picksSnapshot.selectedRace?.officialWinningAverageSpeed ?? null}
@@ -345,13 +318,11 @@ export default async function LeaderboardPage({ searchParams }: PageProps) {
 
       {activeTab === "analytics" && analyticsSnapshot ? (
         analyticsSnapshot.raceRows.length === 0 ? (
-          <section className="mt-6 rounded-lg border border-slate-200 bg-white p-6">
-            <h2 className="text-xl font-semibold text-slate-900">Your Season Analytics</h2>
-            <p className="mt-2 text-sm text-slate-700">
-              No completed races with results yet. Analytics will populate after the first race
-              results are posted.
-            </p>
-          </section>
+          <EmptyState
+            className="mt-6"
+            description="Your trends and race history will appear after the first results are posted."
+            title="No completed races yet"
+          />
         ) : (
           <>
             <section className="mt-6 overflow-hidden rounded-lg border border-slate-200 bg-white">
@@ -413,8 +384,8 @@ export default async function LeaderboardPage({ searchParams }: PageProps) {
                 </div>
               </div>
 
-              <div className="grid gap-4 p-6 lg:grid-cols-[1.1fr_0.9fr]">
-                <section className="border-t border-slate-200 pt-4 lg:border-t-0 lg:pt-0">
+              <div className="p-5 sm:p-6">
+                <section>
                   <div className="flex items-center justify-between gap-3">
                     <div>
                       <h3 className="text-sm font-semibold uppercase tracking-wide text-slate-700">
@@ -457,9 +428,16 @@ export default async function LeaderboardPage({ searchParams }: PageProps) {
                     ))}
                   </div>
                 </section>
+              </div>
+            </section>
 
-                <section className="divide-y divide-slate-200 border-y border-slate-200">
-                  <div className="py-3">
+            <Disclosure
+              className="mt-4"
+              description="Best and toughest weeks, field comparisons, and speed tie-break accuracy."
+              summary="Season highlights"
+            >
+              <div className="grid gap-x-6 gap-y-4 sm:grid-cols-2">
+                  <div>
                     <p className="text-xs font-semibold uppercase tracking-wide text-emerald-700">
                       Best Week
                     </p>
@@ -476,7 +454,7 @@ export default async function LeaderboardPage({ searchParams }: PageProps) {
                       <p className="mt-1 text-sm text-emerald-800">-</p>
                     )}
                   </div>
-                  <div className="py-3">
+                  <div>
                     <p className="text-xs font-semibold uppercase tracking-wide text-amber-700">
                       Toughest Week
                     </p>
@@ -493,7 +471,7 @@ export default async function LeaderboardPage({ searchParams }: PageProps) {
                       <p className="mt-1 text-sm text-amber-800">-</p>
                     )}
                   </div>
-                  <div className="py-3">
+                  <div>
                     <p className="text-xs font-semibold uppercase tracking-wide text-slate-600">
                       Tiebreak Read
                     </p>
@@ -506,11 +484,7 @@ export default async function LeaderboardPage({ searchParams }: PageProps) {
                       {formatOptionalNumber(analyticsSnapshot.summary.closestTiebreakDelta, 3)}
                     </p>
                   </div>
-                </section>
-              </div>
-
-              <div className="grid gap-4 border-t border-slate-200 bg-slate-50 px-6 py-4 lg:grid-cols-2">
-                <div>
+                  <div>
                   <p className="text-xs font-semibold uppercase tracking-wide text-slate-600">
                     Biggest Jump On The Field
                   </p>
@@ -535,7 +509,7 @@ export default async function LeaderboardPage({ searchParams }: PageProps) {
                   </p>
                 </div>
               </div>
-            </section>
+            </Disclosure>
 
             <AnalyticsRaceHistory rows={analyticsSnapshot.raceRows} />
           </>
@@ -543,39 +517,37 @@ export default async function LeaderboardPage({ searchParams }: PageProps) {
       ) : null}
 
       {activeTab === "analytics" && !registeredForActiveSeason ? (
-        <section className="mt-6 rounded-lg border border-slate-200 bg-white p-5">
-          <h2 className="text-lg font-semibold text-slate-900">Current Season Analytics</h2>
-          <p className="mt-2 text-sm text-slate-700">
-            Analytics are available to teams registered for the current season.
-          </p>
-        </section>
+        <EmptyState
+          className="mt-6"
+          description="Analytics are available to teams registered for the current season."
+          title="Current-season registration required"
+        />
       ) : null}
 
       {activeTab === "analytics" && registeredForActiveSeason && !activeSeason ? (
-        <section className="mt-6 rounded-lg border border-slate-200 bg-white p-5">
-          <h2 className="text-lg font-semibold text-slate-900">Current Season Analytics</h2>
-          <p className="mt-2 text-sm text-slate-700">No league season is currently active.</p>
-        </section>
+        <EmptyState
+          className="mt-6"
+          description="Analytics will return when the next league season becomes active."
+          title="No active league season"
+        />
       ) : null}
 
       {activeTab === "hall" && hallOfFameSnapshot ? (
         !hallOfFameSnapshot.migrationReady ? (
-          <section className="mt-6 rounded-lg border border-amber-200 bg-amber-50 p-5">
-            <h2 className="text-lg font-semibold text-amber-950">Hall of Fame setup required</h2>
-            <p className="mt-2 text-sm text-amber-900">
-              The season archive migration has not been applied yet. An admin must apply
-              supabase/migrations/20260717_add_hall_of_fame.sql before final standings can be saved.
+          <CompactNotice className="mt-6 p-4" tone="warning">
+            <p className="font-semibold">Hall of Fame is temporarily unavailable</p>
+            <p className="mt-1 text-sm">
+              League history setup is still being completed. No current standings are affected.
             </p>
-          </section>
+          </CompactNotice>
         ) : hallOfFameSnapshot.seasons.length === 0 ? (
-          <section className="mt-6 rounded-lg border border-slate-200 bg-white p-6">
-            <h2 className="text-xl font-semibold text-slate-900">Hall of Fame</h2>
-            <p className="mt-2 text-sm text-slate-700">
-              Coming soon!
-            </p>
-          </section>
+          <EmptyState
+            className="mt-6"
+            description="Final standings will appear here after the first season is completed and archived."
+            title="No archived seasons yet"
+          />
         ) : (
-          <div className="mt-6 grid gap-4">
+          <div className="mt-6">
             {selectedHallSeason ? (
               <div className="flex justify-end">
                 <HallOfFameYearSelect
@@ -585,24 +557,15 @@ export default async function LeaderboardPage({ searchParams }: PageProps) {
               </div>
             ) : null}
             {selectedHallSeason ? [selectedHallSeason].map((season) => (
-              <details
-                className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm"
+              <ContentPanel
+                className="mt-3"
                 key={season.seasonId}
-                open
               >
-                <summary className="cursor-pointer list-none p-5 marker:hidden">
-                  <div className="flex flex-wrap items-center justify-between gap-4">
-                    <div>
-                      <p className="text-xs font-semibold uppercase tracking-wide text-cyan-700">
-                        {season.seasonYear} Champion
-                      </p>
-                      <h2 className="mt-1 text-2xl font-semibold text-slate-950">
-                        {season.championTeamName}
-                      </h2>
-                    </div>
+                <SectionHeader
+                  action={
                     <div className="flex items-center gap-5 text-right">
                       <div>
-                        <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                        <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
                           Points
                         </p>
                         <p className="text-xl font-semibold text-slate-900">
@@ -610,7 +573,7 @@ export default async function LeaderboardPage({ searchParams }: PageProps) {
                         </p>
                       </div>
                       <div>
-                        <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                        <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
                           Field
                         </p>
                         <p className="text-xl font-semibold text-slate-900">
@@ -618,13 +581,13 @@ export default async function LeaderboardPage({ searchParams }: PageProps) {
                         </p>
                       </div>
                     </div>
-                  </div>
-                  <p className="mt-3 text-xs text-slate-500">
-                    {season.raceCount} races · Finalized {formatRaceDate(season.finalizedAt)}
-                  </p>
-                </summary>
+                  }
+                  description={`${season.raceCount} races · Finalized ${formatRaceDate(season.finalizedAt)}`}
+                  eyebrow={`${season.seasonYear} Champion`}
+                  title={season.championTeamName}
+                />
 
-                <div className="border-t border-slate-200 p-4 sm:p-5">
+                <div className="mt-5 border-t border-slate-200 pt-4">
                   <div className="grid gap-2 md:hidden">
                     {season.entries.map((entry) => (
                       <div
@@ -674,7 +637,7 @@ export default async function LeaderboardPage({ searchParams }: PageProps) {
                     </table>
                   </div>
                 </div>
-              </details>
+              </ContentPanel>
             )) : null}
           </div>
         )

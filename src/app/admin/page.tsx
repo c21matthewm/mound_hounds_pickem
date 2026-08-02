@@ -22,10 +22,17 @@ import {
   updateRaceAction,
   updateDriverAction,
   updateFeedbackStatusAction,
-  updateParticipantAction,
   upsertResultAction
 } from "@/app/admin/actions";
+import {
+  AdminParticipantsWorkspace,
+  type AdminParticipantRow
+} from "@/components/admin-participants-workspace";
 import { AuthenticatedPageShell } from "@/components/authenticated-page-shell";
+import {
+  AdminWorkspaceNav,
+  type AdminWorkspaceTab
+} from "@/components/admin-workspace-nav";
 import { AdminResultsImportForm } from "@/components/admin-results-import-form";
 import {
   AdminSystemHealth,
@@ -40,7 +47,13 @@ import { SubmitButton } from "@/components/submit-button";
 import {
   ActionLink,
   AdminWorkspaceHeader,
-  StatusChip
+  CompactNotice,
+  Disclosure,
+  EmptyState,
+  FormField,
+  StatusChip,
+  actionControlClassName,
+  fieldControlClassName
 } from "@/components/ui-primitives";
 import { requireAdmin } from "@/lib/admin";
 import { feedbackCategoryLabel, feedbackTypeLabel } from "@/lib/feedback";
@@ -195,14 +208,7 @@ type PageProps = {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 };
 
-type AdminTab =
-  | "drivers"
-  | "participants"
-  | "races"
-  | "results"
-  | "feedback"
-  | "health"
-  | "recovery";
+type AdminTab = AdminWorkspaceTab;
 
 type ScoringAuditDriverCell = {
   driverName: string | null;
@@ -561,7 +567,7 @@ export default async function AdminPage({ searchParams }: PageProps) {
   const requestedResultRaceId = parsePositiveQueryInteger(
     queryStringParam(params.result_race_id)
   );
-  const participantQuery = (queryStringParam(params.participant_q) ?? "").trim().toLowerCase();
+  const participantQuery = (queryStringParam(params.participant_q) ?? "").trim();
   const participantStatus = queryStringParam(params.participant_status) ?? "all";
   const feedbackStatusInput = queryStringParam(params.feedback_status) ?? "all";
   const feedbackStatus = ["all", "new", "in_review", "resolved"].includes(
@@ -710,21 +716,15 @@ export default async function AdminPage({ searchParams }: PageProps) {
   const activeParticipants = winnerProfiles.filter((participant) =>
     participant.is_active && registeredProfileIds.has(participant.id)
   );
-  const visibleParticipants = winnerProfiles.filter((participant) => {
-    const matchesQuery =
-      !participantQuery ||
-      participant.team_name.toLowerCase().includes(participantQuery) ||
-      (participant.full_name ?? "").toLowerCase().includes(participantQuery);
-    const matchesStatus =
-      participantStatus === "registered"
-        ? registeredProfileIds.has(participant.id)
-        : participantStatus === "not_registered"
-          ? !registeredProfileIds.has(participant.id)
-          : participantStatus === "disabled"
-            ? !participant.is_active
-            : true;
-    return matchesQuery && matchesStatus;
-  });
+  const adminParticipantRows: AdminParticipantRow[] = winnerProfiles.map((participant) => ({
+    fullName: participant.full_name,
+    id: participant.id,
+    isActive: participant.is_active,
+    pickCount: participantPickCounts.get(participant.id) ?? 0,
+    registered: registeredProfileIds.has(participant.id),
+    role: participant.role,
+    teamName: participant.team_name
+  }));
   const seasons = loadedSeasons;
   const activeSeason = loadedActiveSeason;
   const feedbackItems: FeedbackItemRow[] = (feedbackResponse.data ?? []) as FeedbackItemRow[];
@@ -851,7 +851,7 @@ export default async function AdminPage({ searchParams }: PageProps) {
         .from("job_runs")
         .select("job_name,status,summary,error_message,started_at,completed_at")
         .order("started_at", { ascending: false })
-        .limit(8),
+        .limit(32),
       supabase
         .from("admin_audit_events")
         .select("action,entity_type,summary,created_at")
@@ -941,13 +941,6 @@ export default async function AdminPage({ searchParams }: PageProps) {
     }
   }
 
-  const tabLinkClass = (tab: AdminTab): string =>
-    `shrink-0 whitespace-nowrap rounded-md px-3 py-2 text-sm font-medium ${
-      activeTab === tab
-        ? "bg-slate-900 text-white"
-        : "border border-slate-300 text-slate-700 hover:bg-slate-100"
-    }`;
-
   return (
     <AuthenticatedPageShell
       actions={
@@ -966,61 +959,34 @@ export default async function AdminPage({ searchParams }: PageProps) {
     >
 
       {error ? (
-        <p className="mt-6 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+        <CompactNotice className="mt-6" tone="danger">
           {error}
-        </p>
+        </CompactNotice>
       ) : null}
 
       {message ? (
-        <p
-          className="mt-6 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700"
+        <CompactNotice
+          className="mt-6"
           data-testid={activeTab === "results" ? "admin-results-save-alert" : undefined}
+          tone="success"
         >
           {message}
-        </p>
+        </CompactNotice>
       ) : null}
 
       {loadError ? (
-        <p className="mt-6 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+        <CompactNotice className="mt-6" tone="danger">
           Failed to load admin data: {loadError}
-        </p>
+        </CompactNotice>
       ) : null}
 
-      <nav
-        aria-label="Admin workspaces"
-        className="-mx-4 mt-6 flex flex-nowrap gap-2 overflow-x-auto px-4 pb-2 sm:mx-0 sm:px-0"
-      >
-        <Link className={tabLinkClass("drivers")} data-testid="admin-tab-drivers" href="/admin?tab=drivers">
-          Drivers
-        </Link>
-        <Link
-          className={tabLinkClass("participants")}
-          data-testid="admin-tab-participants"
-          href="/admin?tab=participants"
-        >
-          Participants
-        </Link>
-        <Link className={tabLinkClass("races")} data-testid="admin-tab-races" href="/admin?tab=races">
-          Races
-        </Link>
-        <Link className={tabLinkClass("results")} data-testid="admin-tab-results" href="/admin?tab=results">
-          Race Results
-        </Link>
-        <Link className={tabLinkClass("feedback")} data-testid="admin-tab-feedback" href="/admin?tab=feedback">
-          Feedback
-        </Link>
-        <Link className={tabLinkClass("health")} href="/admin?tab=health">
-          System Health
-        </Link>
-        <Link className={tabLinkClass("recovery")} href="/admin?tab=recovery">
-          Recovery
-        </Link>
-      </nav>
+      <AdminWorkspaceNav activeTab={activeTab} />
 
       {activeTab === "health" ? (
         <AdminSystemHealth
           activeSeasonName={activeSeason?.display_name ?? null}
           auditRows={healthAuditRows}
+          cleanupTestFlowDataAction={cleanupTestFlowDataAction}
           emailEnabled={process.env.PICK_EMAILS_ENABLED?.toLowerCase() === "true"}
           healthContract={healthContract}
           jobRuns={healthJobRuns}
@@ -1053,189 +1019,28 @@ export default async function AdminPage({ searchParams }: PageProps) {
       ) : null}
 
       {activeTab === "participants" ? (
-        <section className="mt-6 rounded-lg border border-slate-200 bg-white p-4 sm:p-6">
-          <div className="flex flex-wrap items-end justify-between gap-3">
-            <div>
-              <h2 className="text-xl font-semibold text-slate-900">Participants</h2>
-              <p className="mt-1 text-sm text-slate-600">
-                Manage permanent account eligibility separately from registration for the active
-                season. Returning participants keep the same login each year.
-              </p>
-            </div>
-            <p className="text-sm font-semibold text-slate-700">
-              {activeParticipants.length} registered ·{" "}
-              {winnerProfiles.length} total
-            </p>
-          </div>
-
-          <form
-            action="/admin"
-            className="mt-4 grid gap-2 rounded-md border border-slate-200 bg-slate-50 p-3 sm:grid-cols-[minmax(0,1fr)_auto_auto]"
-            method="get"
-          >
-            <input name="tab" type="hidden" value="participants" />
-            <label className="block">
-              <span className="sr-only">Search participants</span>
-              <input
-                className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
-                defaultValue={queryStringParam(params.participant_q) ?? ""}
-                name="participant_q"
-                placeholder="Search name or team"
-                type="search"
-              />
-            </label>
-            <select
-              className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm"
-              defaultValue={participantStatus}
-              name="participant_status"
-            >
-              <option value="all">All accounts</option>
-              <option value="registered">Registered</option>
-              <option value="not_registered">Not registered</option>
-              <option value="disabled">Participation disabled</option>
-            </select>
-            <button
-              className="rounded-md bg-slate-900 px-3 py-2 text-sm font-semibold text-white hover:bg-slate-700"
-              type="submit"
-            >
-              Apply
-            </button>
-          </form>
-
-          <p className="mt-3 text-xs text-slate-500">
-            Showing {visibleParticipants.length} of {winnerProfiles.length} accounts.
-          </p>
-
-          <div className="mt-5 grid gap-2">
-            {visibleParticipants.length === 0 ? (
-              <p className="rounded-md border border-dashed border-slate-300 px-3 py-3 text-sm text-slate-600">
-                No participant accounts match these filters.
-              </p>
-            ) : visibleParticipants.map((participant) => (
-              <details
-                className="rounded-md border border-slate-200 bg-white"
-                key={participant.id}
-              >
-                <summary className="cursor-pointer px-3 py-3">
-                  <div className="flex min-w-0 items-center justify-between gap-3">
-                    <div className="min-w-0">
-                      <p className="truncate text-sm font-semibold text-slate-900">
-                        {participant.team_name}
-                      </p>
-                      <p className="truncate text-xs text-slate-500">
-                        {participant.full_name || "Name not set"} · {participant.role} ·{" "}
-                        {participantPickCounts.get(participant.id) ?? 0} submitted race
-                        {(participantPickCounts.get(participant.id) ?? 0) === 1 ? "" : "s"}
-                      </p>
-                    </div>
-                    <div className="flex shrink-0 flex-wrap justify-end gap-1.5">
-                      <span
-                        className={`rounded-full border px-2 py-0.5 text-xs font-semibold ${
-                          participant.is_active
-                            ? "border-cyan-200 bg-cyan-50 text-cyan-800"
-                            : "border-red-200 bg-red-50 text-red-700"
-                        }`}
-                      >
-                        {participant.is_active
-                          ? "Participation enabled"
-                          : "Participation disabled"}
-                      </span>
-                      <span
-                        className={`rounded-full border px-2 py-0.5 text-xs font-semibold ${
-                          registeredProfileIds.has(participant.id)
-                            ? "border-emerald-200 bg-emerald-50 text-emerald-700"
-                            : "border-slate-200 bg-slate-50 text-slate-600"
-                        }`}
-                      >
-                        {registeredProfileIds.has(participant.id)
-                          ? `${activeSeason?.season_year ?? "Season"} registered`
-                          : "Not registered"}
-                      </span>
-                    </div>
-                  </div>
-                </summary>
-                <form
-                  action={updateParticipantAction}
-                  className="grid gap-3 border-t border-slate-200 p-3 sm:grid-cols-2 lg:grid-cols-[1fr_1fr_auto_auto_auto]"
-                >
-                  <input name="profile_id" type="hidden" value={participant.id} />
-                  <label className="block">
-                    <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-600">
-                      Name
-                    </span>
-                    <input
-                      required
-                      className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
-                      defaultValue={participant.full_name ?? ""}
-                      maxLength={100}
-                      name="full_name"
-                    />
-                  </label>
-                  <label className="block">
-                    <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-600">
-                      Team name
-                    </span>
-                    <input
-                      required
-                      className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
-                      defaultValue={participant.team_name}
-                      maxLength={100}
-                      name="team_name"
-                    />
-                  </label>
-                  <label className="flex items-center gap-2 self-end rounded-md border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700">
-                    <input
-                      defaultChecked={participant.is_active}
-                      name="account_eligible"
-                      type="checkbox"
-                    />
-                    Participation enabled
-                  </label>
-                  <label className="flex items-center gap-2 self-end rounded-md border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700">
-                    <input
-                      defaultChecked={registeredProfileIds.has(participant.id)}
-                      name="season_registered"
-                      type="checkbox"
-                    />
-                    Registered {activeSeason?.season_year ?? "this season"}
-                  </label>
-                  {(participantPickCounts.get(participant.id) ?? 0) > 0 ? (
-                    <label className="flex items-center gap-2 self-end rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs font-medium text-red-800 sm:col-span-2 lg:col-span-5">
-                      <input name="force_removal" type="checkbox" />
-                      Allow forced removal from scoring despite{" "}
-                      {participantPickCounts.get(participant.id)} submitted race
-                      {participantPickCounts.get(participant.id) === 1 ? "" : "s"}. Leave this
-                      unchecked for normal profile edits.
-                    </label>
-                  ) : null}
-                  <SubmitButton
-                    className="self-end rounded-md bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-700"
-                    pendingLabel="Saving..."
-                  >
-                    Save
-                  </SubmitButton>
-                </form>
-              </details>
-            ))}
-          </div>
-        </section>
+        <AdminParticipantsWorkspace
+          activeSeasonYear={activeSeason?.season_year ?? null}
+          initialQuery={participantQuery}
+          initialStatus={participantStatus}
+          participants={adminParticipantRows}
+        />
       ) : null}
 
       {activeTab === "drivers" ? (
-        <section className="mt-6 rounded-lg border border-slate-200 bg-white p-6">
-        <h2 className="text-xl font-semibold text-slate-900">Drivers</h2>
-        <p className="mt-2 text-sm text-slate-600">
-          Opening order comes from the prior final standings. Current-season points and groups then
-          update automatically from published race results.
-        </p>
+        <section className="mt-6 rounded-lg border border-slate-200 bg-white p-4 sm:p-6">
+        <AdminWorkspaceHeader
+          description="Opening order comes from the prior final standings. Published results update current points and groups."
+          title="Drivers"
+        />
 
-        <details className="mt-5 rounded-md border border-slate-200 bg-slate-50">
-          <summary className="cursor-pointer px-4 py-3 text-sm font-semibold text-slate-900">
-            Preseason seed tools
-          </summary>
+        <Disclosure
+          className="mt-5 bg-slate-50"
+          description="Import the prior championship order before the first published race."
+          summary="Preseason seed tools"
+        >
           <form
             action={importChampionshipStandingsAction}
-            className="border-t border-slate-200 p-4"
             data-testid="admin-standings-import-form"
           >
             <input name="tab" type="hidden" value="drivers" />
@@ -1283,7 +1088,7 @@ export default async function AdminPage({ searchParams }: PageProps) {
               Import opening seed
             </SubmitButton>
           </form>
-        </details>
+        </Disclosure>
 
         <form
           action={createDriverAction}
@@ -1291,44 +1096,41 @@ export default async function AdminPage({ searchParams }: PageProps) {
           data-testid="admin-driver-create-form"
         >
           <input name="tab" type="hidden" value="drivers" />
-          <label className="block md:col-span-2">
-            <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-600">
-              Driver name
-            </span>
+          <FormField className="md:col-span-3" label="Driver name">
             <input
               required
-              className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+              className={fieldControlClassName()}
               data-testid="admin-driver-create-name"
               maxLength={100}
               name="driver_name"
               type="text"
             />
-          </label>
+          </FormField>
 
-          <label className="block">
-            <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-600">
-              Image upload
-            </span>
+          <FormField className="md:col-span-2" label="Driver image">
             <input
               accept="image/png,image/jpeg,image/webp,image/gif,image/avif"
-              className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+              className={fieldControlClassName("text-xs")}
               data-testid="admin-driver-create-image-file"
               name="image_file"
               type="file"
             />
-          </label>
+          </FormField>
 
-          <label className="block">
-            <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-600">
-              Image URL (fallback)
-            </span>
-            <input
-              className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
-              data-testid="admin-driver-create-image-url"
-              name="image_url"
-              type="url"
-            />
-          </label>
+          <Disclosure
+            className="md:col-span-5"
+            description="Use a direct URL only when an image file cannot be uploaded."
+            summary="Advanced image option"
+          >
+            <FormField label="Image URL fallback">
+              <input
+                className={fieldControlClassName()}
+                data-testid="admin-driver-create-image-url"
+                name="image_url"
+                type="url"
+              />
+            </FormField>
+          </Disclosure>
 
           <div className="md:col-span-5 flex items-end justify-between gap-3">
             <label className="inline-flex items-center gap-2 text-sm text-slate-700">
@@ -1336,7 +1138,7 @@ export default async function AdminPage({ searchParams }: PageProps) {
               Active
             </label>
             <SubmitButton
-              className="rounded-md bg-slate-900 px-3 py-2 text-sm font-semibold text-white hover:bg-slate-700"
+              className={actionControlClassName("primary")}
               data-testid="admin-driver-create-submit"
               pendingLabel="Adding..."
             >
@@ -1351,9 +1153,10 @@ export default async function AdminPage({ searchParams }: PageProps) {
 
         <div className="mt-5 grid gap-3">
           {drivers.length === 0 ? (
-            <p className="rounded-md border border-dashed border-slate-300 bg-slate-50 px-3 py-3 text-sm text-slate-600">
-              No drivers yet.
-            </p>
+            <EmptyState
+              description="Add the first driver above or import the preseason opening seed."
+              title="No drivers yet"
+            />
           ) : (
             drivers.map((driver) => (
               <details key={driver.id} className="rounded-md border border-slate-200 bg-white">
@@ -1379,15 +1182,9 @@ export default async function AdminPage({ searchParams }: PageProps) {
                         </p>
                       </div>
                     </div>
-                    <span
-                      className={`rounded-full border px-2 py-0.5 text-xs font-semibold ${
-                        driver.is_active
-                          ? "border-emerald-300 bg-emerald-50 text-emerald-800"
-                          : "border-slate-300 bg-slate-50 text-slate-600"
-                      }`}
-                    >
+                    <StatusChip tone={driver.is_active ? "success" : "neutral"}>
                       {driver.is_active ? "Active" : "Inactive"}
-                    </span>
+                    </StatusChip>
                   </div>
                 </summary>
 
@@ -1400,38 +1197,42 @@ export default async function AdminPage({ searchParams }: PageProps) {
                     <input name="driver_id" type="hidden" value={String(driver.id)} />
                     <input name="tab" type="hidden" value="drivers" />
 
-                    <input
-                      required
-                      className="w-full rounded-md border border-slate-300 px-2 py-2 text-sm md:col-span-3"
-                      defaultValue={driver.driver_name}
-                      maxLength={100}
-                      name="driver_name"
-                      placeholder="Driver name"
-                      type="text"
-                    />
+                    <FormField className="md:col-span-3" label="Driver name">
+                      <input
+                        required
+                        className={fieldControlClassName("px-2 py-2")}
+                        defaultValue={driver.driver_name}
+                        maxLength={100}
+                        name="driver_name"
+                        type="text"
+                      />
+                    </FormField>
 
-                    <input
-                      accept="image/png,image/jpeg,image/webp,image/gif,image/avif"
-                      className="w-full rounded-md border border-slate-300 px-2 py-2 text-xs md:col-span-2"
-                      name="image_file"
-                      type="file"
-                    />
+                    <FormField className="md:col-span-2" label="Replace image">
+                      <input
+                        accept="image/png,image/jpeg,image/webp,image/gif,image/avif"
+                        className={fieldControlClassName("px-2 py-2 text-xs")}
+                        name="image_file"
+                        type="file"
+                      />
+                    </FormField>
 
-                    <input
-                      className="w-full rounded-md border border-slate-300 px-2 py-2 text-sm md:col-span-3"
-                      defaultValue={driver.image_url ?? ""}
-                      name="image_url"
-                      placeholder="Image URL (optional)"
-                      type="url"
-                    />
+                    <FormField className="md:col-span-3" label="Image URL fallback">
+                      <input
+                        className={fieldControlClassName("px-2 py-2")}
+                        defaultValue={driver.image_url ?? ""}
+                        name="image_url"
+                        type="url"
+                      />
+                    </FormField>
 
-                    <label className="inline-flex items-center gap-2 text-sm text-slate-700 md:col-span-1">
+                    <label className="inline-flex min-h-11 items-center gap-2 self-end text-sm text-slate-700 md:col-span-1">
                       <input defaultChecked={driver.is_active} name="is_active" type="checkbox" />
                       Active
                     </label>
 
                     <SubmitButton
-                      className="w-full rounded-md bg-slate-900 px-2 py-2 text-sm font-semibold text-white hover:bg-slate-700 md:col-span-1"
+                      className={actionControlClassName("primary", "w-full self-end px-2 py-2 md:col-span-1")}
                       data-testid={`admin-driver-save-${driver.id}`}
                       pendingLabel="Saving..."
                     >
@@ -1494,11 +1295,11 @@ export default async function AdminPage({ searchParams }: PageProps) {
           title="Races"
         />
 
-        <details className="mt-5 rounded-md border border-slate-200 bg-slate-50">
-          <summary className="cursor-pointer px-4 py-3 text-sm font-semibold text-slate-900">
-            Season management · {activeSeason ? `${activeSeason.season_year} active` : "No active season"}
-          </summary>
-          <div className="border-t border-slate-200 p-4">
+        <Disclosure
+          className="mt-5 bg-slate-50"
+          description="Create seasons, configure invite codes and rules, then activate a prepared season."
+          summary={`Season management · ${activeSeason ? `${activeSeason.season_year} active` : "No active season"}`}
+        >
             <div className="grid gap-2">
               {seasons.map((season) => (
                 <div
@@ -1675,8 +1476,7 @@ export default async function AdminPage({ searchParams }: PageProps) {
               The code is stored securely and never displayed again. Existing registered
               participants remain registered if the code changes.
             </p>
-          </div>
-        </details>
+        </Disclosure>
 
         <form
           action={createRaceAction}
@@ -1795,65 +1595,63 @@ export default async function AdminPage({ searchParams }: PageProps) {
             </select>
           </label>
 
-          <label className="block md:col-span-2">
-            <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-600">
-              Shared pick deadline (optional)
-            </span>
-            <select
-              className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
-              defaultValue=""
-              name="pick_window_partner_id"
-            >
-              <option value="">Standalone race</option>
-              {races
-                .filter(
-                  (race) =>
-                    !race.is_archived &&
-                    !race.field_frozen_at &&
-                    normalizeRacePickFormat(race.pick_format) === "standard" &&
-                    (racesByPickWindow.get(race.pick_window_key)?.length ?? 0) === 1
-                )
-                .map((race) => (
-                  <option key={race.id} value={race.id}>
-                    {seasonById.get(race.season_id)?.season_year ?? "-"} · R{race.round_number} ·{" "}
-                    {race.race_name}
-                  </option>
-                ))}
-            </select>
-            <span className="mt-1 block text-xs text-slate-500">
-              For a doubleheader, select the consecutive race that already exists. Its qualifying
-              time becomes the shared deadline for both forms.
-            </span>
-          </label>
+          <Disclosure
+            className="md:col-span-6"
+            description="Doubleheader deadlines and optional race-title media."
+            summary="Advanced scheduling and media"
+          >
+            <div className="grid gap-3 md:grid-cols-2">
+              <FormField
+                description="For a doubleheader, choose the consecutive race that already exists."
+                label="Shared pick deadline"
+              >
+                <select
+                  className={fieldControlClassName()}
+                  defaultValue=""
+                  name="pick_window_partner_id"
+                >
+                  <option value="">Standalone race</option>
+                  {races
+                    .filter(
+                      (race) =>
+                        !race.is_archived &&
+                        !race.field_frozen_at &&
+                        normalizeRacePickFormat(race.pick_format) === "standard" &&
+                        (racesByPickWindow.get(race.pick_window_key)?.length ?? 0) === 1
+                    )
+                    .map((race) => (
+                      <option key={race.id} value={race.id}>
+                        {seasonById.get(race.season_id)?.season_year ?? "-"} · R{race.round_number} ·{" "}
+                        {race.race_name}
+                      </option>
+                    ))}
+                </select>
+              </FormField>
 
-          <label className="block">
-            <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-600">
-              Title image upload
-            </span>
-            <input
-              accept="image/png,image/jpeg,image/webp,image/gif,image/avif"
-              className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
-              data-testid="admin-race-create-image-file"
-              name="title_image_file"
-              type="file"
-            />
-          </label>
+              <FormField label="Title image upload">
+                <input
+                  accept="image/png,image/jpeg,image/webp,image/gif,image/avif"
+                  className={fieldControlClassName("text-xs")}
+                  data-testid="admin-race-create-image-file"
+                  name="title_image_file"
+                  type="file"
+                />
+              </FormField>
 
-          <label className="block md:col-span-2">
-            <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-600">
-              Title image URL (fallback)
-            </span>
-            <input
-              className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
-              data-testid="admin-race-create-image-url"
-              name="title_image_url"
-              type="url"
-            />
-          </label>
+              <FormField className="md:col-span-2" label="Title image URL fallback">
+                <input
+                  className={fieldControlClassName()}
+                  data-testid="admin-race-create-image-url"
+                  name="title_image_url"
+                  type="url"
+                />
+              </FormField>
+            </div>
+          </Disclosure>
 
           <div className="md:col-span-6">
             <SubmitButton
-              className="rounded-md bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-700"
+              className={actionControlClassName("primary")}
               data-testid="admin-race-create-submit"
               pendingLabel="Adding..."
             >
@@ -1926,9 +1724,10 @@ export default async function AdminPage({ searchParams }: PageProps) {
 
         <div className="mt-5 grid gap-3">
           {races.length === 0 ? (
-            <p className="rounded-md border border-dashed border-slate-300 bg-slate-50 px-3 py-3 text-sm text-slate-600">
-              No races yet.
-            </p>
+            <EmptyState
+              description="Add the first race for the selected season using the form above."
+              title="No races scheduled"
+            />
           ) : (
             races.map((race) => (
               <details key={`race-edit-${race.id}`} className="rounded-md border border-slate-200 bg-white">
@@ -1957,55 +1756,33 @@ export default async function AdminPage({ searchParams }: PageProps) {
                     </div>
                     <div className="flex flex-wrap items-center gap-2">
                       {normalizeRacePickFormat(race.pick_format) === "indy_500" ? (
-                        <span className="rounded-full border border-cyan-300 bg-cyan-50 px-2 py-0.5 text-xs font-semibold text-cyan-800">
+                        <StatusChip tone="info">
                           Indy 500
-                        </span>
-                      ) : (
-                        <span className="rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-xs font-semibold text-slate-600">
-                          Standard
-                        </span>
-                      )}
+                        </StatusChip>
+                      ) : null}
                       {pickWindowPartnerByRaceId.has(race.id) ? (
-                        <span
-                          className="rounded-full border border-cyan-300 bg-cyan-50 px-2 py-0.5 text-xs font-semibold text-cyan-800"
+                        <StatusChip
+                          tone="info"
                           title={`Shares a pick deadline with ${pickWindowPartnerByRaceId.get(race.id)?.race_name ?? "another race"}`}
                         >
                           Shared deadline
-                        </span>
+                        </StatusChip>
                       ) : null}
-                      {race.field_frozen_at ? (
-                        <span className="rounded-full border border-blue-200 bg-blue-50 px-2 py-0.5 text-xs font-semibold text-blue-800">
-                          Field frozen
-                        </span>
-                      ) : (
-                        <span className="rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-xs font-semibold text-slate-600">
-                          Field editable
-                        </span>
-                      )}
                       {race.is_archived ? (
-                        <span className="rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 text-xs font-semibold text-amber-800">
+                        <StatusChip tone="warning">
                           Archived
-                        </span>
+                        </StatusChip>
                       ) : (
-                        <span className="rounded-full border border-emerald-300 bg-emerald-50 px-2 py-0.5 text-xs font-semibold text-emerald-800">
-                          Active
-                        </span>
+                        <StatusChip tone={race.results_status === "published" ? "success" : "warning"}>
+                          Results {race.results_status === "published" ? "published" : "draft"}
+                        </StatusChip>
                       )}
-                      <span
-                        className={`rounded-full border px-2 py-0.5 text-xs font-semibold ${
-                          race.results_status === "published"
-                            ? "border-emerald-300 bg-emerald-50 text-emerald-800"
-                            : "border-amber-300 bg-amber-50 text-amber-800"
-                        }`}
-                      >
-                        Results {race.results_status === "published" ? "Published" : "Draft"}
-                      </span>
                     </div>
                   </div>
                 </summary>
 
                 <div className="border-t border-slate-200 p-3">
-                  <dl className="grid gap-2 text-sm sm:grid-cols-2 lg:grid-cols-4">
+                  <dl className="grid gap-2 text-sm sm:grid-cols-2 lg:grid-cols-5">
                     <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2">
                       <dt className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
                         Qualifying
@@ -2038,6 +1815,14 @@ export default async function AdminPage({ searchParams }: PageProps) {
                     </div>
                     <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2">
                       <dt className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                        Pick field
+                      </dt>
+                      <dd className="mt-0.5 font-medium text-slate-900">
+                        {race.field_frozen_at ? "Frozen" : "Editable"}
+                      </dd>
+                    </div>
+                    <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2">
+                      <dt className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
                         Archive
                       </dt>
                       <dd className="mt-0.5 font-medium text-slate-900">
@@ -2054,84 +1839,96 @@ export default async function AdminPage({ searchParams }: PageProps) {
                   <input name="race_id" type="hidden" value={String(race.id)} />
                   <input name="tab" type="hidden" value="races" />
 
-                  <select
-                    required
-                    className="w-full rounded-md border border-slate-300 px-2 py-2 text-sm md:col-span-1"
-                    defaultValue={String(race.season_id)}
-                    disabled={Boolean(
-                      race.field_frozen_at || pickWindowPartnerByRaceId.has(race.id)
-                    )}
-                    name="season_id"
-                  >
-                    {seasons.map((season) => (
-                      <option key={season.id} value={season.id}>
-                        {season.season_year}
-                      </option>
-                    ))}
-                  </select>
+                  <FormField className="md:col-span-1" label="Season">
+                    <select
+                      required
+                      className={fieldControlClassName("px-2 py-2")}
+                      defaultValue={String(race.season_id)}
+                      disabled={Boolean(
+                        race.field_frozen_at || pickWindowPartnerByRaceId.has(race.id)
+                      )}
+                      name="season_id"
+                    >
+                      {seasons.map((season) => (
+                        <option key={season.id} value={season.id}>
+                          {season.season_year}
+                        </option>
+                      ))}
+                    </select>
+                  </FormField>
 
-                  <input
-                    required
-                    className="w-full rounded-md border border-slate-300 px-2 py-2 text-sm md:col-span-1"
-                    defaultValue={race.round_number}
-                    disabled={Boolean(
-                      race.field_frozen_at || pickWindowPartnerByRaceId.has(race.id)
-                    )}
-                    max={99}
-                    min={1}
-                    name="round_number"
-                    placeholder="Round"
-                    type="number"
-                  />
+                  <FormField className="md:col-span-1" label="Round">
+                    <input
+                      required
+                      className={fieldControlClassName("px-2 py-2")}
+                      defaultValue={race.round_number}
+                      disabled={Boolean(
+                        race.field_frozen_at || pickWindowPartnerByRaceId.has(race.id)
+                      )}
+                      max={99}
+                      min={1}
+                      name="round_number"
+                      type="number"
+                    />
+                  </FormField>
 
-                  <input
-                    required
-                    className="w-full rounded-md border border-slate-300 px-2 py-2 text-sm md:col-span-3"
-                    defaultValue={race.race_name}
-                    maxLength={200}
-                    name="race_name"
-                    placeholder="Race name"
-                    type="text"
-                  />
+                  <FormField className="md:col-span-3" label="Race name">
+                    <input
+                      required
+                      className={fieldControlClassName("px-2 py-2")}
+                      defaultValue={race.race_name}
+                      maxLength={200}
+                      name="race_name"
+                      type="text"
+                    />
+                  </FormField>
 
-                  <input
-                    required
-                    className="w-full rounded-md border border-slate-300 px-2 py-2 text-sm md:col-span-2"
-                    defaultValue={formatDateTimeLocalInput(race.qualifying_start_at)}
-                    disabled={pickWindowPartnerByRaceId.has(race.id)}
-                    name="qualifying_start_at"
-                    type="datetime-local"
-                  />
+                  <FormField className="md:col-span-2" label="Qualifying start">
+                    <input
+                      required
+                      className={fieldControlClassName("px-2 py-2")}
+                      defaultValue={formatDateTimeLocalInput(race.qualifying_start_at)}
+                      disabled={pickWindowPartnerByRaceId.has(race.id)}
+                      name="qualifying_start_at"
+                      type="datetime-local"
+                    />
+                  </FormField>
 
-                  <input
-                    required
-                    className="w-full rounded-md border border-slate-300 px-2 py-2 text-sm md:col-span-2"
-                    defaultValue={formatDateTimeLocalInput(race.race_date)}
-                    name="race_date"
-                    type="datetime-local"
-                  />
+                  <FormField className="md:col-span-2" label="Race start">
+                    <input
+                      required
+                      className={fieldControlClassName("px-2 py-2")}
+                      defaultValue={formatDateTimeLocalInput(race.race_date)}
+                      name="race_date"
+                      type="datetime-local"
+                    />
+                  </FormField>
 
-                  <input
-                    required
-                    className="w-full rounded-md border border-slate-300 px-2 py-2 text-sm md:col-span-1"
-                    defaultValue={String(race.payout)}
-                    min={0}
-                    name="payout"
-                    step="0.01"
-                    type="number"
-                  />
+                  <FormField className="md:col-span-1" label="Payout">
+                    <input
+                      required
+                      className={fieldControlClassName("px-2 py-2")}
+                      defaultValue={String(race.payout)}
+                      min={0}
+                      name="payout"
+                      step="0.01"
+                      type="number"
+                    />
+                  </FormField>
 
-                  <select
-                    className="w-full rounded-md border border-slate-300 px-2 py-2 text-sm md:col-span-2"
-                    defaultValue={normalizeRacePickFormat(race.pick_format)}
-                    disabled={Boolean(
-                      race.field_frozen_at || pickWindowPartnerByRaceId.has(race.id)
-                    )}
-                    name="pick_format"
-                  >
-                    <option value="standard">Standard rules</option>
-                    <option value="indy_500">Indianapolis 500 rules</option>
-                  </select>
+                  <FormField className="md:col-span-2" label="Pick rules">
+                    <select
+                      className={fieldControlClassName("px-2 py-2")}
+                      defaultValue={normalizeRacePickFormat(race.pick_format)}
+                      disabled={Boolean(
+                        race.field_frozen_at || pickWindowPartnerByRaceId.has(race.id)
+                      )}
+                      name="pick_format"
+                    >
+                      <option value="standard">Standard rules</option>
+                      <option value="indy_500">Indianapolis 500 rules</option>
+                    </select>
+                  </FormField>
 
                   {race.field_frozen_at || pickWindowPartnerByRaceId.has(race.id) ? (
                     <>
@@ -2164,23 +1961,26 @@ export default async function AdminPage({ searchParams }: PageProps) {
                     </>
                   ) : null}
 
-                  <input
-                    accept="image/png,image/jpeg,image/webp,image/gif,image/avif"
-                    className="w-full rounded-md border border-slate-300 px-2 py-2 text-xs md:col-span-2"
-                    name="title_image_file"
-                    type="file"
-                  />
+                  <FormField className="md:col-span-3" label="Replace title image">
+                    <input
+                      accept="image/png,image/jpeg,image/webp,image/gif,image/avif"
+                      className={fieldControlClassName("px-2 py-2 text-xs")}
+                      name="title_image_file"
+                      type="file"
+                    />
+                  </FormField>
 
-                  <input
-                    className="w-full rounded-md border border-slate-300 px-2 py-2 text-sm md:col-span-2"
-                    defaultValue={race.title_image_url ?? ""}
-                    name="title_image_url"
-                    placeholder="Title image URL (optional)"
-                    type="url"
-                  />
+                  <FormField className="md:col-span-3" label="Title image URL fallback">
+                    <input
+                      className={fieldControlClassName("px-2 py-2")}
+                      defaultValue={race.title_image_url ?? ""}
+                      name="title_image_url"
+                      type="url"
+                    />
+                  </FormField>
 
                   <SubmitButton
-                    className="rounded-md bg-slate-900 px-3 py-2 text-sm font-semibold text-white hover:bg-slate-700 md:col-span-1"
+                    className={actionControlClassName("primary", "self-end md:col-span-2")}
                     data-testid={`admin-race-save-${race.id}`}
                     pendingLabel="Saving..."
                   >
@@ -2307,13 +2107,13 @@ export default async function AdminPage({ searchParams }: PageProps) {
 
       {activeTab === "results" ? (
         <section
-          className="mt-6 rounded-lg border border-slate-200 bg-white p-6"
+          className="mt-6 rounded-lg border border-slate-200 bg-white p-4 sm:p-6"
           key={`results-workspace-${selectedResultRace?.id ?? "empty"}`}
         >
-        <h2 className="text-xl font-semibold text-slate-900">Race Results</h2>
-        <p className="mt-2 text-sm text-slate-600">
-          Select one race, validate its official results, then publish or correct that race.
-        </p>
+        <AdminWorkspaceHeader
+          description="Select one race, validate its official results, then publish or correct that race."
+          title="Race Results"
+        />
 
         <div className="mt-4 rounded-md border border-slate-200 bg-slate-50 p-3">
           <form
@@ -2376,46 +2176,7 @@ export default async function AdminPage({ searchParams }: PageProps) {
           ) : null}
         </div>
 
-        {currentSeasonRaces.length > 0 ? (
-          <nav
-            aria-label="Season result status"
-            className="mt-3 flex gap-1.5 overflow-x-auto pb-1"
-          >
-            {currentSeasonRaces.map((race) => {
-              const isSelected = race.id === selectedResultRace?.id;
-              return (
-                <Link
-                  aria-current={isSelected ? "page" : undefined}
-                  className={`shrink-0 rounded-md border px-2.5 py-1.5 text-xs font-semibold ${
-                    isSelected
-                      ? "border-slate-900 bg-slate-900 text-white"
-                      : race.results_status === "published"
-                        ? "border-emerald-200 bg-emerald-50 text-emerald-800 hover:bg-emerald-100"
-                        : "border-amber-200 bg-amber-50 text-amber-800 hover:bg-amber-100"
-                  }`}
-                  href={`/admin?tab=results&result_race_id=${race.id}`}
-                  key={`results-status-${race.id}`}
-                  title={`${race.race_name}: ${race.results_status}`}
-                >
-                  R{race.round_number} ·{" "}
-                  {race.results_status === "published" ? "Posted" : "Draft"}
-                </Link>
-              );
-            })}
-          </nav>
-        ) : null}
-
-        <div className="mt-5 grid gap-2 text-sm md:grid-cols-4">
-          {["Qualifying setup", "Bulk preview", "Publish results", "Audit"].map((step, index) => (
-            <div key={step} className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2">
-              <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
-                Step {index + 1}
-              </p>
-              <p className="mt-0.5 font-semibold text-slate-900">{step}</p>
-            </div>
-          ))}
-        </div>
-
+        {activeIndy500Races.length > 0 ? (
         <details className="mt-5 rounded-md border border-cyan-200 bg-cyan-50">
           <summary className="cursor-pointer px-4 py-3 text-sm font-semibold text-slate-900">
             Indianapolis 500 qualifying order
@@ -2476,6 +2237,7 @@ export default async function AdminPage({ searchParams }: PageProps) {
             </SubmitButton>
           </form>
         </details>
+        ) : null}
 
         <AdminResultsImportForm
           action={importIndycarResultsAction}
@@ -2778,7 +2540,16 @@ export default async function AdminPage({ searchParams }: PageProps) {
           </form>
         </details>
 
-        <section className="mt-5 rounded-md border border-cyan-200 bg-cyan-50 p-4">
+        <Disclosure
+          className="mt-5 border-cyan-200 bg-cyan-50"
+          description="Finalize the permanent Hall of Fame snapshot after every race is published."
+          meta={
+            <StatusChip tone={canFinalizeSeason ? "success" : "neutral"}>
+              {canFinalizeSeason ? "Ready" : "Not ready"}
+            </StatusChip>
+          }
+          summary="Season closeout"
+        >
           <div className="flex flex-wrap items-start justify-between gap-4">
             <div className="min-w-0 flex-1">
               <p className="text-xs font-semibold uppercase tracking-wide text-cyan-800">
@@ -2804,7 +2575,7 @@ export default async function AdminPage({ searchParams }: PageProps) {
               </p>
               {!hallOfFameMigrationReady ? (
                 <p className="mt-2 text-xs font-semibold text-amber-800">
-                  Apply supabase/migrations/20260717_add_hall_of_fame.sql before using this control.
+                  Hall of Fame database setup is incomplete. Review System Health before using this control.
                 </p>
               ) : null}
             </div>
@@ -2825,7 +2596,7 @@ export default async function AdminPage({ searchParams }: PageProps) {
               </ConfirmSubmitButton>
             </form>
           </div>
-        </section>
+        </Disclosure>
 
         <details className="mt-5 rounded-md border border-slate-200 bg-white">
           <summary className="cursor-pointer px-3 py-3 text-sm font-semibold text-slate-900">
@@ -2913,9 +2684,10 @@ export default async function AdminPage({ searchParams }: PageProps) {
 
           <div className="mt-5 grid gap-3">
             {feedbackItems.length === 0 ? (
-              <p className="rounded-md border border-dashed border-slate-300 bg-slate-50 px-3 py-3 text-sm text-slate-600">
-                No feedback submissions match this status.
-              </p>
+              <EmptyState
+                description="Choose another status or check again after participants submit feedback."
+                title="No matching feedback"
+              />
             ) : (
               feedbackItems.map((item) => (
                 <details key={item.id} className="rounded-md border border-slate-200 bg-white">
@@ -3017,23 +2789,6 @@ export default async function AdminPage({ searchParams }: PageProps) {
             </nav>
           ) : null}
 
-          <details className="mt-5 rounded-md border border-amber-200 bg-amber-50">
-            <summary className="cursor-pointer px-4 py-3 text-sm font-semibold text-amber-900">
-              Advanced maintenance
-            </summary>
-            <form action={cleanupTestFlowDataAction} className="border-t border-amber-200 p-4">
-              <input name="tab" type="hidden" value="feedback" />
-              <ConfirmSubmitButton
-                className="rounded-md border border-amber-300 bg-white px-3 py-2 text-sm font-semibold text-amber-800 hover:bg-amber-50"
-                confirmMessage="Delete all [TEST FLOW ...] seeded races, test users, and test feedback?"
-                data-testid="admin-feedback-cleanup-test-data"
-                formNoValidate
-                type="submit"
-              >
-                Cleanup test flow data
-              </ConfirmSubmitButton>
-            </form>
-          </details>
         </section>
       ) : null}
     </AuthenticatedPageShell>

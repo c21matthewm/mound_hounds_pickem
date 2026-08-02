@@ -5,9 +5,13 @@ import {
   ActionLink,
   CompactNotice,
   ContentPanel,
+  Disclosure,
+  EmptyState,
+  FormField,
   SectionHeader,
   StatusChip,
-  actionControlClassName
+  actionControlClassName,
+  fieldControlClassName
 } from "@/components/ui-primitives";
 import { submitFeedbackAction } from "@/app/feedback/actions";
 import {
@@ -34,14 +38,6 @@ type PageProps = {
 
 const formatDateTime = (value: string): string =>
   formatLeagueDateTime(value, { dateStyle: "medium", timeStyle: "short" });
-
-const detailPreview = (value: string): string => {
-  if (value.length <= 120) {
-    return value;
-  }
-
-  return `${value.slice(0, 117)}...`;
-};
 
 export default async function FeedbackPage({ searchParams }: PageProps) {
   const params = await searchParams;
@@ -96,12 +92,9 @@ export default async function FeedbackPage({ searchParams }: PageProps) {
 
         <form action={submitFeedbackAction} className="mt-4 grid gap-4">
           <div className="grid gap-4 md:grid-cols-2">
-            <label className="block">
-              <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-600">
-                Feedback type
-              </span>
+            <FormField label="Feedback type">
               <select
-                className="w-full rounded-md border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900"
+                className={fieldControlClassName()}
                 defaultValue="bug"
                 name="feedback_type"
                 required
@@ -112,14 +105,11 @@ export default async function FeedbackPage({ searchParams }: PageProps) {
                   </option>
                 ))}
               </select>
-            </label>
+            </FormField>
 
-            <label className="block">
-              <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-600">
-                Category
-              </span>
+            <FormField label="Category">
               <select
-                className="w-full rounded-md border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900"
+                className={fieldControlClassName()}
                 defaultValue="weekly_picks"
                 name="category"
                 required
@@ -130,22 +120,19 @@ export default async function FeedbackPage({ searchParams }: PageProps) {
                   </option>
                 ))}
               </select>
-            </label>
+            </FormField>
           </div>
 
-          <label className="block">
-            <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-600">
-              Description
-            </span>
+          <FormField label="Description">
             <textarea
-              className="h-40 w-full rounded-md border border-slate-300 px-3 py-2.5 text-sm"
+              className={fieldControlClassName("h-40")}
               maxLength={4000}
               minLength={20}
               name="details"
               placeholder="Please include exact steps, what you expected to happen, what happened instead, and any relevant values."
               required
             />
-          </label>
+          </FormField>
 
           <div className="flex flex-wrap items-center justify-between gap-3">
             <p className="text-xs text-slate-500">
@@ -167,24 +154,28 @@ export default async function FeedbackPage({ searchParams }: PageProps) {
           title="Your Recent Submissions"
         />
         {myFeedback.length === 0 ? (
-          <p className="mt-3 text-sm text-slate-600">No feedback submitted yet.</p>
+          <EmptyState
+            className="mt-4"
+            description="Bug reports and improvement ideas you submit will appear here."
+            title="No feedback submitted yet"
+          />
         ) : (
           <div className="mt-3 grid gap-2">
             {myFeedback.map((item) => (
-              <article key={item.id} className="rounded-md border border-slate-200 bg-slate-50 px-3 py-3">
-                <div className="flex flex-wrap items-start justify-between gap-2">
-                  <div>
-                    <p className="text-sm font-semibold text-slate-900">
-                      {feedbackCategoryLabel(item.category)}
-                    </p>
-                    <p className="mt-0.5 text-xs text-slate-500">{formatDateTime(item.created_at)}</p>
-                  </div>
+              <Disclosure
+                description={formatDateTime(item.created_at)}
+                key={item.id}
+                meta={
                   <StatusChip>
                     {feedbackTypeLabel(item.feedback_type)}
                   </StatusChip>
-                </div>
-                <p className="mt-2 text-sm text-slate-700">{detailPreview(item.details)}</p>
-              </article>
+                }
+                summary={feedbackCategoryLabel(item.category)}
+              >
+                <p className="whitespace-pre-wrap text-sm leading-6 text-slate-700">
+                  {item.details}
+                </p>
+              </Disclosure>
             ))}
           </div>
         )}

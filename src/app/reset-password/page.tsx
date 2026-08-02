@@ -1,9 +1,16 @@
 import Link from "next/link";
 import { updatePasswordAction } from "@/app/actions/auth";
-import { MOUND_HOUND_IMAGE_PATH } from "@/lib/branding";
+import { AuthFlowShell, AuthFormPanel } from "@/components/auth-flow-shell";
 import { queryStringParam } from "@/lib/query";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
 import { SubmitButton } from "@/components/submit-button";
+import {
+  ActionLink,
+  CompactNotice,
+  FormField,
+  actionControlClassName,
+  fieldControlClassName
+} from "@/components/ui-primitives";
 
 type PageProps = {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
@@ -18,92 +25,71 @@ export default async function ResetPasswordPage({ searchParams }: PageProps) {
   } = await supabase.auth.getUser();
 
   return (
-    <main className="mx-auto flex min-h-screen max-w-lg flex-col justify-center px-6 py-16">
-      <div className="flex items-center gap-3">
-        <div
-          aria-hidden
-          className="h-14 w-14 rounded-lg border border-slate-200 bg-slate-200 bg-cover bg-center shadow-sm"
-          style={{ backgroundImage: `url('${MOUND_HOUND_IMAGE_PATH}')`, backgroundPosition: "50% 38%" }}
-        />
-        <div>
-          <p className="inline-flex w-fit rounded-full border border-blue-200 bg-blue-50 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-blue-700">
-            Mound Hounds Pick&apos;em League
-          </p>
-          <h1 className="mt-2 text-4xl font-semibold tracking-tight text-slate-950">
-            Choose new password
-          </h1>
-        </div>
-      </div>
-
-      <p className="mt-3 text-sm leading-6 text-slate-600">
-        Set a new password for your league account. After this saves, you&apos;ll sign in again with the new password.
-      </p>
+    <AuthFlowShell
+      description="Set a new password for your league account. After it saves, sign in again with the new password."
+      footer={
+        <>
+          Already reset it?{" "}
+          <Link className="font-semibold text-slate-900 underline" href="/login">
+            Sign in
+          </Link>
+        </>
+      }
+      title="Choose new password"
+    >
 
       {!user ? (
-        <div className="mt-6 rounded-lg border border-amber-200 bg-amber-50 p-5 text-sm text-amber-800">
-          <p className="font-semibold">Your reset session is not active.</p>
-          <p className="mt-2 leading-6">
+        <CompactNotice className="mt-6 p-4" tone="warning">
+          <p className="font-semibold">Your reset session is not active</p>
+          <p className="mt-1 leading-6">
             Password reset links expire after a short period. Request a fresh link, then open it from the same browser.
           </p>
-          <Link
-            className="mt-4 inline-flex rounded-md bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white hover:bg-slate-700"
-            href="/forgot-password"
-          >
-            Request a new link
-          </Link>
-        </div>
+          <ActionLink className="mt-3" href="/forgot-password">
+            Request new link
+          </ActionLink>
+        </CompactNotice>
       ) : (
         <>
           {error ? (
-            <p className="mt-4 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+            <CompactNotice className="mt-4" tone="danger">
               {error}
-            </p>
+            </CompactNotice>
           ) : null}
 
-          <form
-            action={updatePasswordAction}
-            className="mt-6 space-y-4 rounded-lg border border-slate-200 bg-white p-5 shadow-sm"
-          >
-            <label className="block">
-              <span className="mb-1 block text-sm font-medium text-slate-700">New password</span>
+          <AuthFormPanel>
+            <form action={updatePasswordAction} className="space-y-4">
+            <FormField label="New password">
               <input
                 required
-                className="w-full rounded-md border border-slate-300 px-3 py-2.5 text-sm"
                 autoComplete="new-password"
+                className={fieldControlClassName()}
                 minLength={10}
                 name="password"
                 type="password"
               />
-            </label>
+            </FormField>
 
-            <label className="block">
-              <span className="mb-1 block text-sm font-medium text-slate-700">Confirm new password</span>
+            <FormField label="Confirm new password">
               <input
                 required
-                className="w-full rounded-md border border-slate-300 px-3 py-2.5 text-sm"
                 autoComplete="new-password"
+                className={fieldControlClassName()}
                 minLength={10}
                 name="confirm_password"
                 type="password"
               />
-            </label>
+            </FormField>
 
             <SubmitButton
-              className="w-full rounded-md bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white hover:bg-slate-700"
+              className={actionControlClassName("primary", "w-full")}
               pendingLabel="Updating..."
             >
               Update password
             </SubmitButton>
-          </form>
+            </form>
+          </AuthFormPanel>
         </>
       )}
-
-      <p className="mt-5 text-sm text-slate-600">
-        Already reset it?{" "}
-        <Link className="font-semibold text-slate-900 underline" href="/login">
-          Sign in
-        </Link>
-      </p>
-    </main>
+    </AuthFlowShell>
   );
 }

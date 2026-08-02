@@ -370,14 +370,16 @@ export function PickemForm({
         </div>
       ) : null}
 
-      <fieldset className="space-y-6 disabled:opacity-80" disabled={picksLocked || isSubmitting}>
-        <section className="rounded-lg border border-slate-200 bg-white p-5 md:p-6">
-          <label className="block max-w-sm">
-            <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">
-              Average Speed Tie-breaker (MPH)
-            </span>
-            <span className="mb-3 block text-sm text-slate-600">
-              Used only if multiple teams tie for the weekly win.
+      <fieldset className="space-y-5 disabled:opacity-80" disabled={picksLocked || isSubmitting}>
+        <section className="rounded-lg border border-slate-200 bg-white px-4 py-4 md:px-5">
+          <label className="grid items-end gap-3 sm:grid-cols-[minmax(0,1fr)_15rem]">
+            <span>
+              <span className="block text-sm font-semibold text-slate-900">
+                Average Speed Tie-breaker (MPH)
+              </span>
+              <span className="mt-1 block text-xs leading-5 text-slate-500">
+                Used only if multiple teams tie for the weekly win.
+              </span>
             </span>
             <input
               required
@@ -402,7 +404,7 @@ export function PickemForm({
             key={group.groupNumber}
             className="rounded-lg border border-slate-200 bg-white p-5 md:p-6"
           >
-            <div className="flex flex-wrap items-end justify-between gap-2">
+            <div>
               <div>
                 <p className="text-xs font-semibold uppercase tracking-wide text-cyan-700">
                   Driver Group
@@ -414,7 +416,6 @@ export function PickemForm({
                   </span>
                 </h3>
               </div>
-              <p className="text-xs text-slate-500">Sorted by current championship standing.</p>
             </div>
 
             {group.drivers.length === 0 ? (
