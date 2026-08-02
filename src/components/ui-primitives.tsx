@@ -2,6 +2,7 @@ import Link from "next/link";
 import type {
   ButtonHTMLAttributes,
   ComponentPropsWithoutRef,
+  HTMLAttributes,
   ReactNode
 } from "react";
 
@@ -15,31 +16,33 @@ const STATUS_TONE_CLASSES: Record<StatusTone, string> = {
   warning: "border-amber-200 bg-amber-50 text-amber-800"
 };
 
-type StatusChipProps = {
-  children: ReactNode;
-  className?: string;
+type StatusChipProps = ComponentPropsWithoutRef<"span"> & {
   tone?: StatusTone;
 };
 
 export function StatusChip({
   children,
   className = "",
-  tone = "neutral"
+  tone = "neutral",
+  ...props
 }: StatusChipProps) {
   return (
     <span
       className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide ${STATUS_TONE_CLASSES[tone]} ${className}`}
+      {...props}
     >
       {children}
     </span>
   );
 }
 
+export type ActionVariant = "primary" | "secondary" | "quiet";
+
 type ActionLinkProps = {
   children: ReactNode;
   className?: string;
   href: string;
-  variant?: "primary" | "secondary" | "quiet";
+  variant?: ActionVariant;
 };
 
 const ACTION_BASE_CLASSES =
@@ -52,7 +55,7 @@ const ACTION_VARIANT_CLASSES = {
 };
 
 export function actionControlClassName(
-  variant: "primary" | "secondary" | "quiet" = "primary",
+  variant: ActionVariant = "primary",
   className = ""
 ): string {
   return `${ACTION_BASE_CLASSES} ${ACTION_VARIANT_CLASSES[variant]} ${className}`;
@@ -75,7 +78,7 @@ export function ActionLink({
 }
 
 type ActionAnchorProps = ComponentPropsWithoutRef<"a"> & {
-  variant?: "primary" | "secondary" | "quiet";
+  variant?: ActionVariant;
 };
 
 export function ActionAnchor({
@@ -92,7 +95,7 @@ export function ActionAnchor({
 }
 
 type ActionButtonProps = ButtonHTMLAttributes<HTMLButtonElement> & {
-  variant?: "primary" | "secondary" | "quiet";
+  variant?: ActionVariant;
 };
 
 export function ActionButton({
@@ -155,6 +158,252 @@ export function ContentPanel({
       className={`rounded-lg border border-slate-200 bg-white p-4 shadow-sm sm:p-5 ${className}`}
       {...props}
     >
+      {children}
+    </section>
+  );
+}
+
+export const FIELD_CONTROL_CLASSES =
+  "w-full rounded-md border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-950 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-500";
+
+export function fieldControlClassName(className = ""): string {
+  return `${FIELD_CONTROL_CLASSES} ${className}`;
+}
+
+type FormFieldProps = {
+  children: ReactNode;
+  className?: string;
+  description?: ReactNode;
+  label: ReactNode;
+  labelClassName?: string;
+};
+
+export function FormField({
+  children,
+  className = "",
+  description,
+  label,
+  labelClassName = ""
+}: FormFieldProps) {
+  return (
+    <label className={`block min-w-0 ${className}`}>
+      <span
+        className={`mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-600 ${labelClassName}`}
+      >
+        {label}
+      </span>
+      {children}
+      {description ? (
+        <span className="mt-1.5 block text-xs leading-5 text-slate-500">{description}</span>
+      ) : null}
+    </label>
+  );
+}
+
+export type RouteTabItem = {
+  active: boolean;
+  href: string;
+  label: string;
+  testId?: string;
+};
+
+type RouteTabsProps = {
+  ariaLabel: string;
+  className?: string;
+  items: RouteTabItem[];
+  layout?: "grid" | "scroll";
+};
+
+export function RouteTabs({
+  ariaLabel,
+  className = "",
+  items,
+  layout = "grid"
+}: RouteTabsProps) {
+  return (
+    <nav aria-label={ariaLabel} className={className}>
+      <ul
+        className={
+          layout === "scroll"
+            ? "flex w-max min-w-full gap-1 rounded-md border border-slate-200 bg-white p-1"
+            : "grid w-full grid-cols-2 gap-1 rounded-md border border-slate-200 bg-white p-1 sm:flex sm:w-fit"
+        }
+      >
+        {items.map((item) => (
+          <li className={layout === "scroll" ? "shrink-0" : "min-w-0"} key={item.href}>
+            <Link
+              aria-current={item.active ? "page" : undefined}
+              className={`flex min-h-10 items-center justify-center rounded px-3 py-2 text-center text-sm font-semibold ${
+                item.active
+                  ? "bg-slate-900 text-white shadow-sm"
+                  : "text-slate-700 hover:bg-slate-100 hover:text-slate-950"
+              }`}
+              data-testid={item.testId}
+              href={item.href}
+            >
+              {item.label}
+            </Link>
+          </li>
+        ))}
+      </ul>
+    </nav>
+  );
+}
+
+type DisclosureProps = ComponentPropsWithoutRef<"details"> & {
+  description?: ReactNode;
+  meta?: ReactNode;
+  summary: ReactNode;
+};
+
+export function Disclosure({
+  children,
+  className = "",
+  description,
+  meta,
+  summary,
+  ...props
+}: DisclosureProps) {
+  return (
+    <details
+      className={`group rounded-md border border-slate-200 bg-white ${className}`}
+      {...props}
+    >
+      <summary className="cursor-pointer px-4 py-3 marker:text-slate-400">
+        <span className="ml-1 inline-flex min-w-0 max-w-[calc(100%-1.25rem)] align-middle">
+          <span className="flex min-w-0 flex-1 flex-wrap items-center justify-between gap-2">
+            <span className="min-w-0">
+              <span className="block text-sm font-semibold text-slate-900">{summary}</span>
+              {description ? (
+                <span className="mt-0.5 block text-xs leading-5 text-slate-500">
+                  {description}
+                </span>
+              ) : null}
+            </span>
+            {meta ? <span className="shrink-0">{meta}</span> : null}
+          </span>
+        </span>
+      </summary>
+      <div className="border-t border-slate-200 p-4">{children}</div>
+    </details>
+  );
+}
+
+type EmptyStateProps = {
+  action?: ReactNode;
+  className?: string;
+  description: ReactNode;
+  title: string;
+};
+
+export function EmptyState({
+  action,
+  className = "",
+  description,
+  title
+}: EmptyStateProps) {
+  return (
+    <div
+      className={`rounded-lg border border-dashed border-slate-300 bg-slate-50 px-4 py-5 text-center ${className}`}
+    >
+      <h2 className="text-base font-semibold text-slate-900">{title}</h2>
+      <div className="mx-auto mt-1 max-w-xl text-sm leading-6 text-slate-600">{description}</div>
+      {action ? <div className="mt-4 flex justify-center">{action}</div> : null}
+    </div>
+  );
+}
+
+type PaginationProps = {
+  className?: string;
+  currentPage: number;
+  itemLabel?: string;
+  onNext: () => void;
+  onPrevious: () => void;
+  pageCount: number;
+  rangeEnd?: number;
+  rangeStart?: number;
+  totalItems?: number;
+};
+
+export function Pagination({
+  className = "",
+  currentPage,
+  itemLabel = "items",
+  onNext,
+  onPrevious,
+  pageCount,
+  rangeEnd,
+  rangeStart,
+  totalItems
+}: PaginationProps) {
+  return (
+    <nav
+      aria-label={`${itemLabel} pages`}
+      className={`flex min-h-12 items-center justify-between gap-3 border-t border-slate-200 px-3 py-2.5 ${className}`}
+    >
+      <ActionButton
+        className="min-h-9 px-3 py-1.5 text-xs"
+        disabled={currentPage <= 1}
+        onClick={onPrevious}
+        variant="secondary"
+      >
+        Previous
+      </ActionButton>
+      <div className="text-center text-xs font-medium text-slate-600">
+        <p>
+          Page {currentPage} of {pageCount}
+        </p>
+        {rangeStart !== undefined && rangeEnd !== undefined && totalItems !== undefined ? (
+          <p className="mt-0.5 text-[11px] font-normal text-slate-500">
+            {rangeStart}-{rangeEnd} of {totalItems} {itemLabel}
+          </p>
+        ) : null}
+      </div>
+      <ActionButton
+        className="min-h-9 px-3 py-1.5 text-xs"
+        disabled={currentPage >= pageCount}
+        onClick={onNext}
+        variant="secondary"
+      >
+        Next
+      </ActionButton>
+    </nav>
+  );
+}
+
+type DataSurfaceProps = Omit<HTMLAttributes<HTMLElement>, "title"> & {
+  description?: ReactNode;
+  eyebrow?: string;
+  meta?: ReactNode;
+  title: ReactNode;
+};
+
+export function DataSurface({
+  children,
+  className = "",
+  description,
+  eyebrow,
+  meta,
+  title,
+  ...props
+}: DataSurfaceProps) {
+  return (
+    <section
+      className={`overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm ${className}`}
+      {...props}
+    >
+      <header className="flex min-w-0 flex-wrap items-end justify-between gap-3 border-b border-slate-800 bg-slate-950 px-4 py-3 text-white">
+        <div className="min-w-0">
+          {eyebrow ? (
+            <p className="text-[11px] font-semibold uppercase tracking-wide text-cyan-200">
+              {eyebrow}
+            </p>
+          ) : null}
+          <h2 className="text-sm font-semibold">{title}</h2>
+          {description ? <div className="mt-0.5 text-xs text-slate-300">{description}</div> : null}
+        </div>
+        {meta ? <div className="shrink-0">{meta}</div> : null}
+      </header>
       {children}
     </section>
   );
@@ -226,20 +475,20 @@ export function DetailGrid({ className = "", items }: DetailGridProps) {
   );
 }
 
-type CompactNoticeProps = {
-  children: ReactNode;
-  className?: string;
+type CompactNoticeProps = ComponentPropsWithoutRef<"div"> & {
   tone?: StatusTone;
 };
 
 export function CompactNotice({
   children,
   className = "",
-  tone = "neutral"
+  tone = "neutral",
+  ...props
 }: CompactNoticeProps) {
   return (
     <div
       className={`rounded-md border px-3 py-2 text-sm ${STATUS_TONE_CLASSES[tone]} ${className}`}
+      {...props}
     >
       {children}
     </div>

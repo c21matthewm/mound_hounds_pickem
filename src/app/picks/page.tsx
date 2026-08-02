@@ -421,30 +421,30 @@ export default async function PicksPage({ searchParams }: PageProps) {
               Status: {raceStatusLabel}
             </span>
           </div>
-          <div className="mt-5 grid gap-3 text-sm md:grid-cols-2 lg:grid-cols-4">
-            <div className="rounded-md border border-white/15 bg-white/10 p-3">
-              <p className="text-xs font-semibold uppercase tracking-wide text-slate-300">
+          <dl className="mt-5 grid border-y border-white/15 text-sm sm:grid-cols-2 lg:grid-cols-4 lg:divide-x lg:divide-white/15">
+            <div className="border-b border-white/15 py-3 sm:px-3 lg:border-b-0 lg:first:pl-0">
+              <dt className="text-xs font-semibold uppercase tracking-wide text-slate-300">
                 {isIndy500Pickem ? "Pick Lock (Race Start)" : "Pick Deadline"}
-              </p>
-              <p className="mt-1 font-medium">{formatRaceDate(pickLockAt)}</p>
+              </dt>
+              <dd className="mt-1 font-medium">{formatRaceDate(pickLockAt)}</dd>
             </div>
-            <div className="rounded-md border border-white/15 bg-white/10 p-3">
-              <p className="text-xs font-semibold uppercase tracking-wide text-slate-300">Race Start</p>
-              <p className="mt-1 font-medium">{formatRaceDate(selectedRace.race_date)}</p>
+            <div className="border-b border-white/15 py-3 sm:px-3 lg:border-b-0">
+              <dt className="text-xs font-semibold uppercase tracking-wide text-slate-300">Race Start</dt>
+              <dd className="mt-1 font-medium">{formatRaceDate(selectedRace.race_date)}</dd>
             </div>
-            <div className="rounded-md border border-white/15 bg-white/10 p-3">
-              <p className="text-xs font-semibold uppercase tracking-wide text-slate-300">Payout</p>
-              <p className="mt-1 font-medium">${Number(selectedRace.payout).toFixed(2)}</p>
+            <div className="border-b border-white/15 py-3 sm:border-b-0 sm:px-3">
+              <dt className="text-xs font-semibold uppercase tracking-wide text-slate-300">Payout</dt>
+              <dd className="mt-1 font-medium">${Number(selectedRace.payout).toFixed(2)}</dd>
             </div>
-            <div className="rounded-md border border-white/15 bg-white/10 p-3">
-              <p className="text-xs font-semibold uppercase tracking-wide text-slate-300">
+            <div className="py-3 sm:px-3 lg:last:pr-0">
+              <dt className="text-xs font-semibold uppercase tracking-wide text-slate-300">
                 {isIndy500Pickem ? "Pick Format" : "Timezone"}
-              </p>
-              <p className="mt-1 font-medium">
+              </dt>
+              <dd className="mt-1 font-medium">
                 {isIndy500Pickem ? "Indy 500: 8 picks" : LEAGUE_TIME_ZONE}
-              </p>
+              </dd>
             </div>
-          </div>
+          </dl>
           <p className="mt-3 text-xs text-slate-300">
             Visit the official{" "}
             <a

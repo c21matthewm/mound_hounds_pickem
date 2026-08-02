@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
+import { ActionButton, ActionLink } from "@/components/ui-primitives";
 
 export default function AppError({
   error,
@@ -25,13 +26,12 @@ export default function AppError({
           Try the request again. If it continues, contact the league admin and include what you were
           doing when the error appeared.
         </p>
-        <button
-          className="mt-5 rounded-md bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-700"
-          onClick={reset}
-          type="button"
-        >
-          Try again
-        </button>
+        <div className="mt-5 flex flex-wrap gap-2">
+          <ActionButton onClick={reset}>Try again</ActionButton>
+          <ActionLink href="/dashboard" variant="secondary">
+            Dashboard
+          </ActionLink>
+        </div>
       </section>
     </main>
   );

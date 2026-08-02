@@ -117,34 +117,9 @@ For a fresh Supabase project, run the consolidated schema:
 supabase/schema.sql
 ```
 
-For an existing project, apply any migration files in `supabase/migrations/` that have not been
-run yet. The newest migration protects race scoring by automatically snapshotting driver groups
-whenever results are inserted:
-
-```text
-supabase/migrations/20260310_auto_snapshot_race_groups_on_results_insert.sql
-```
-
-The latest Indy 500 pick-format migration is:
-
-```text
-supabase/migrations/20260528_add_indy_500_pick_format.sql
-```
-
-The production hardening and atomic result-publication migration is:
-
-```text
-supabase/migrations/20260709_harden_roles_and_result_publication.sql
-```
-
-The current season foundation and yearly enrollment migrations are:
-
-```text
-supabase/migrations/20260718_add_league_seasons_and_active_participants.sql
-supabase/migrations/20260718_add_season_enrollment_and_delivery_hardening.sql
-```
-
-The current operations, shared doubleheader, and weekly-scale migrations are:
+Then apply the migrations named at the bottom of that file in filename order. For an existing
+project, apply only migration files in `supabase/migrations/` that have not already been run.
+Migration history is intentionally not squashed or replaced by SQL Editor documents.
 
 ```text
 supabase/migrations/20260725_harden_race_and_season_operations.sql
@@ -153,8 +128,14 @@ supabase/migrations/20260729_scale_weekly_operations.sql
 supabase/migrations/20260730_atomic_picks_and_season_recovery.sql
 ```
 
-Apply all pending migrations in filename order before deploying application code that depends on
-them. The deployment and verification sequence is maintained in `DEPLOY_VERCEL.md`.
+The expected production schema version is:
+
+```text
+20260730_atomic_picks_recovery_v1
+```
+
+Reusable health, cron, and race-diagnostic queries are in `supabase/operations/`. The deployment
+sequence is maintained in `DEPLOY_VERCEL.md`.
 
 After creating your first user account, promote it to admin in Supabase SQL Editor:
 
@@ -181,7 +162,7 @@ where p.id = u.id
    save individual manual rows as drafts. Pickable standard drivers omitted from the official order
    are saved automatically as zero-point nonstarters.
 6. Draft rows stay hidden and do not affect standings. Publish a complete draft with the official
-   winning average speed to refresh championship standings/groups and schedule winner calculation.
+   winning average speed to refresh championship standings/groups and calculate the fantasy winner.
 7. Use the leaderboard tabs to review standings, locked picks by race, participant analytics, and
    finalized Hall of Fame seasons.
 8. Use **Admin > System Health** to verify the schema contract, active season, next-race result
@@ -227,8 +208,12 @@ Vercel production deploys from `main`.
 - `/rules`: in-app rules PDF viewer
 - `/admin`: admin-only participants, drivers, races, results, feedback, system health, and recovery
 - `/api/admin/season-backups`: admin-authenticated backup download/preview/restore endpoint
-- `/api/cron/fantasy-winner`: protected fantasy winner finalization cron
+- `/api/cron/fantasy-winner`: protected hourly fallback for fantasy winner finalization
 - `/api/cron/pick-reminders`: protected pick reminder cron
+
+Reusable Supabase SQL Editor queries are organized under `supabase/operations`. Applied schema
+changes remain in `supabase/migrations`; do not replace migration history with saved SQL Editor
+documents.
 
 ## Notes
 

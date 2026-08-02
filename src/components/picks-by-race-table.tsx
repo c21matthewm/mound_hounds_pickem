@@ -13,6 +13,11 @@ import {
   sortIndicator,
   type SortDirection
 } from "@/lib/table-utils";
+import {
+  ActionButton,
+  DataSurface,
+  Pagination
+} from "@/components/ui-primitives";
 
 type DriverCell = {
   driverName: string | null;
@@ -215,22 +220,18 @@ export function PicksByRaceTable({ officialWinningAverageSpeed, resultsPosted, r
 
   return (
     <>
-      <section className="mt-6 overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm">
-        <div className="border-b border-slate-200 bg-gradient-to-r from-cyan-50 to-slate-50 px-4 py-3">
-          <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-800">
-            Picks Matrix
-          </h2>
-          <p className="mt-1 text-xs text-slate-600">
-            {rows.length} teams. Pick and score columns are paired by group.
-          </p>
-        </div>
+      <DataSurface
+        className="mt-6"
+        description={`${rows.length} teams · Driver picks and points by group`}
+        title="Picks Matrix"
+      >
 
         <div className="divide-y divide-slate-200 md:hidden">
           {sortedRows.length === 0 ? (
             <p className="px-4 py-4 text-sm text-slate-600">No team picks are available.</p>
           ) : (
             paginatedRows.map((row) => (
-              <article key={`mobile-picks-${row.userId}`} className="px-4 py-3">
+              <article key={`mobile-picks-${row.userId}`} className="px-3 py-2.5">
                 <div className="flex items-start justify-between gap-3">
                   <button
                     className="min-w-0 text-left"
@@ -244,7 +245,7 @@ export function PicksByRaceTable({ officialWinningAverageSpeed, resultsPosted, r
                       {resultsPosted ? `Rank ${row.rank ?? "-"}` : "Submitted Pick"}
                     </p>
                     <h3
-                      className="mt-0.5 truncate text-base font-semibold text-slate-900 underline decoration-slate-300 underline-offset-2"
+                      className="mt-0.5 truncate text-sm font-semibold text-slate-900 underline decoration-slate-300 underline-offset-2"
                       title={row.displayName}
                     >
                       {row.displayName}
@@ -257,23 +258,41 @@ export function PicksByRaceTable({ officialWinningAverageSpeed, resultsPosted, r
                     <p className="text-xs text-slate-500">score</p>
                   </div>
                 </div>
-                <div className="mt-3 flex flex-wrap gap-1.5">
-                  <span className="rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-xs font-medium text-slate-700">
-                    Avg {formatAverageSpeed(row.averageSpeed)} MPH
-                  </span>
-                  {row.drivers.slice(0, 4).map((driver, index) => (
-                    <span
+                <div className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1.5">
+                  {row.drivers.map((driver, index) => (
+                    <div
                       key={`mobile-picks-${row.userId}-${index}`}
-                      className="rounded-full border border-slate-200 bg-white px-2 py-0.5 text-xs font-medium text-slate-700"
+                      className="grid min-w-0 grid-cols-[1.35rem_minmax(0,1fr)_auto] items-center gap-1.5 rounded-md bg-slate-50 px-2 py-1.5"
                     >
-                      G{index + 1}: {driver.driverName ?? "No pick"}
-                    </span>
+                      <span className="text-[10px] font-semibold uppercase text-slate-500">
+                        G{index + 1}
+                      </span>
+                      <span
+                        className="truncate text-xs font-medium text-slate-800"
+                        title={driver.driverName ?? "No pick submitted"}
+                      >
+                        {driver.driverName ?? "No pick"}
+                      </span>
+                      <span className="min-w-6 rounded-full bg-white px-1.5 py-0.5 text-center text-[10px] font-semibold tabular-nums text-slate-700">
+                        {resultsPosted ? (driver.points ?? "-") : "-"}
+                      </span>
+                    </div>
                   ))}
-                  {row.drivers.length > 4 ? (
-                    <span className="rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-xs font-medium text-slate-600">
-                      +{row.drivers.length - 4} groups
-                    </span>
-                  ) : null}
+                </div>
+                <div className="mt-2 flex items-center justify-between gap-3 border-t border-slate-100 pt-2">
+                  <p className="text-[11px] text-slate-500">
+                    Tiebreak: {formatAverageSpeed(row.averageSpeed)} MPH
+                  </p>
+                  <button
+                    className="min-h-8 text-xs font-semibold text-blue-700 underline underline-offset-2"
+                    onClick={(event) => {
+                      lastDialogTriggerRef.current = event.currentTarget;
+                      setSelectedRow(row);
+                    }}
+                    type="button"
+                  >
+                    View breakdown
+                  </button>
                 </div>
               </article>
             ))
@@ -309,15 +328,6 @@ export function PicksByRaceTable({ officialWinningAverageSpeed, resultsPosted, r
                   Total Score {sortIndicator("totalPoints", sortKey, sortDirection)}
                 </button>
               </th>
-              <th aria-sort={ariaSortFor("averageSpeed")} className="px-3 py-2 font-semibold">
-                <button
-                  className="inline-flex items-center gap-1"
-                  onClick={() => onSort("averageSpeed")}
-                  type="button"
-                >
-                  Average Speed (MPH) {sortIndicator("averageSpeed", sortKey, sortDirection)}
-                </button>
-              </th>
               {groupNumbers.map((groupNumber) => (
                 <Fragment key={`group-columns-${groupNumber}`}>
                   <th aria-sort={ariaSortFor(`driver${groupNumber}` as SortKey)} className="px-3 py-2 font-semibold">
@@ -342,6 +352,15 @@ export function PicksByRaceTable({ officialWinningAverageSpeed, resultsPosted, r
                   </th>
                 </Fragment>
               ))}
+              <th aria-sort={ariaSortFor("averageSpeed")} className="px-3 py-2 font-semibold">
+                <button
+                  className="inline-flex items-center gap-1"
+                  onClick={() => onSort("averageSpeed")}
+                  type="button"
+                >
+                  Tiebreak (MPH) {sortIndicator("averageSpeed", sortKey, sortDirection)}
+                </button>
+              </th>
             </tr>
           </thead>
           <tbody>
@@ -372,7 +391,6 @@ export function PicksByRaceTable({ officialWinningAverageSpeed, resultsPosted, r
                   <td className="px-3 py-2 font-semibold">
                     {resultsPosted ? (row.totalPoints ?? 0) : "-"}
                   </td>
-                  <td className="px-3 py-2">{formatAverageSpeed(row.averageSpeed)}</td>
                   {groupNumbers.map((groupNumber) => {
                     const groupCell = row.drivers[groupNumber - 1];
                     return (
@@ -394,6 +412,9 @@ export function PicksByRaceTable({ officialWinningAverageSpeed, resultsPosted, r
                       </Fragment>
                     );
                   })}
+                  <td className="px-3 py-2 text-slate-600">
+                    {formatAverageSpeed(row.averageSpeed)}
+                  </td>
                 </tr>
               ))
             )}
@@ -402,35 +423,18 @@ export function PicksByRaceTable({ officialWinningAverageSpeed, resultsPosted, r
         </div>
 
         {sortedRows.length > PAGE_SIZE ? (
-          <div className="flex items-center justify-between gap-3 border-t border-slate-200 px-4 py-3">
-            <p className="text-xs text-slate-500">
-              Teams {(visiblePage - 1) * PAGE_SIZE + 1}-
-              {Math.min(visiblePage * PAGE_SIZE, sortedRows.length)} of {sortedRows.length}
-            </p>
-            <div className="flex items-center gap-2">
-              <button
-                className="rounded-md border border-slate-300 px-2.5 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-40"
-                disabled={visiblePage <= 1}
-                onClick={() => setCurrentPage(Math.max(1, visiblePage - 1))}
-                type="button"
-              >
-                Previous
-              </button>
-              <span className="text-xs font-semibold text-slate-600">
-                {visiblePage}/{totalPages}
-              </span>
-              <button
-                className="rounded-md border border-slate-300 px-2.5 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-40"
-                disabled={visiblePage >= totalPages}
-                onClick={() => setCurrentPage(Math.min(totalPages, visiblePage + 1))}
-                type="button"
-              >
-                Next
-              </button>
-            </div>
-          </div>
+          <Pagination
+            currentPage={visiblePage}
+            itemLabel="teams"
+            onNext={() => setCurrentPage(Math.min(totalPages, visiblePage + 1))}
+            onPrevious={() => setCurrentPage(Math.max(1, visiblePage - 1))}
+            pageCount={totalPages}
+            rangeEnd={Math.min(visiblePage * PAGE_SIZE, sortedRows.length)}
+            rangeStart={(visiblePage - 1) * PAGE_SIZE + 1}
+            totalItems={sortedRows.length}
+          />
         ) : null}
-      </section>
+      </DataSurface>
 
       {selectedRow ? (
         <div
@@ -451,13 +455,13 @@ export function PicksByRaceTable({ officialWinningAverageSpeed, resultsPosted, r
                 <h3 className="text-lg font-semibold text-slate-900" id="picks-detail-title">{selectedRow.displayName}</h3>
                 <p className="mt-1 text-sm text-slate-600">Picks breakdown and tiebreak context</p>
               </div>
-              <button
-                className="rounded-md border border-slate-300 px-2 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-100"
+              <ActionButton
+                className="min-h-9 px-2.5 py-1.5 text-xs"
                 onClick={() => setSelectedRow(null)}
-                type="button"
+                variant="secondary"
               >
                 Close
-              </button>
+              </ActionButton>
             </div>
 
             <dl className="mt-3 grid gap-2 text-sm sm:grid-cols-3">
@@ -484,6 +488,33 @@ export function PicksByRaceTable({ officialWinningAverageSpeed, resultsPosted, r
                 </dd>
               </div>
             </dl>
+
+            <section className="mt-4">
+              <h4 className="text-sm font-semibold text-slate-900">Per-Driver Scoring</h4>
+              <div className="mt-2 overflow-x-auto rounded-md border border-slate-200">
+                <table className="min-w-full text-left text-sm">
+                  <caption className="sr-only">Selected team driver picks and points</caption>
+                  <thead className="bg-slate-50 text-slate-700">
+                    <tr>
+                      <th className="px-3 py-2 font-semibold">Group</th>
+                      <th className="px-3 py-2 font-semibold">Driver</th>
+                      <th className="px-3 py-2 font-semibold">Points</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {selectedRow.drivers.map((driver, index) => (
+                      <tr key={`${selectedRow.userId}-modal-driver-${index + 1}`} className="border-t border-slate-200">
+                        <td className="px-3 py-2">Group {index + 1}</td>
+                        <td className="px-3 py-2">{driver.driverName ?? "No pick submitted"}</td>
+                        <td className="px-3 py-2 font-semibold">
+                          {resultsPosted ? (driver.points ?? "-") : "-"}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </section>
 
             <section className="mt-4 rounded-md border border-slate-200 bg-slate-50 p-3">
               <h4 className="text-sm font-semibold text-slate-900">Tiebreak Comparison</h4>
@@ -548,33 +579,6 @@ export function PicksByRaceTable({ officialWinningAverageSpeed, resultsPosted, r
                   </div>
                 </>
               )}
-            </section>
-
-            <section className="mt-4">
-              <h4 className="text-sm font-semibold text-slate-900">Per-Driver Scoring</h4>
-              <div className="mt-2 overflow-x-auto rounded-md border border-slate-200">
-                <table className="min-w-full text-left text-sm">
-                  <caption className="sr-only">Selected team driver picks and points</caption>
-                  <thead className="bg-slate-50 text-slate-700">
-                    <tr>
-                      <th className="px-3 py-2 font-semibold">Group</th>
-                      <th className="px-3 py-2 font-semibold">Driver</th>
-                      <th className="px-3 py-2 font-semibold">Points</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {selectedRow.drivers.map((driver, index) => (
-                      <tr key={`${selectedRow.userId}-modal-driver-${index + 1}`} className="border-t border-slate-200">
-                        <td className="px-3 py-2">Group {index + 1}</td>
-                        <td className="px-3 py-2">{driver.driverName ?? "No pick submitted"}</td>
-                        <td className="px-3 py-2">
-                          {resultsPosted ? (driver.points ?? "-") : "-"}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
             </section>
           </section>
         </div>

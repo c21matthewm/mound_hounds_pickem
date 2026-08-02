@@ -1,7 +1,14 @@
 import { redirect } from "next/navigation";
 import { setSeasonParticipationAction } from "@/app/actions/auth";
+import { AuthFlowShell, AuthFormPanel } from "@/components/auth-flow-shell";
 import { ProfileButton } from "@/components/profile-button";
 import { SubmitButton } from "@/components/submit-button";
+import {
+  CompactNotice,
+  FormField,
+  actionControlClassName,
+  fieldControlClassName
+} from "@/components/ui-primitives";
 import { isProfileComplete, type ProfileRow } from "@/lib/profile";
 import { queryStringParam, sanitizeNextPath } from "@/lib/query";
 import { loadActiveLeagueSeason } from "@/lib/seasons";
@@ -52,42 +59,41 @@ export default async function SeasonRegistrationPage({ searchParams }: PageProps
   }
 
   return (
-    <main className="mx-auto flex min-h-screen max-w-xl flex-col justify-center px-5 py-12 sm:px-6">
-      <header className="flex items-start justify-between gap-4">
-        <div>
-          <p className="text-xs font-semibold uppercase tracking-wide text-cyan-700">
-            {activeSeason.displayName}
-          </p>
-          <h1 className="mt-2 text-3xl font-semibold text-slate-950">Season registration</h1>
-          <p className="mt-2 text-sm leading-6 text-slate-600">
-            Your account and team stay with you each year. Confirm whether {profile.team_name} is
-            joining the {activeSeason.seasonYear} league field.
-          </p>
-        </div>
-        <ProfileButton />
-      </header>
+    <AuthFlowShell
+      action={<ProfileButton />}
+      description={
+        <>
+          Your account and team stay with you each year. Confirm whether{" "}
+          <span className="font-semibold text-slate-800">{profile.team_name}</span> is joining the{" "}
+          {activeSeason.seasonYear} league field.
+        </>
+      }
+      eyebrow={activeSeason.displayName}
+      maxWidth="max-w-xl"
+      title="Season registration"
+    >
 
       {error ? (
-        <p className="mt-5 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+        <CompactNotice className="mt-5" tone="danger">
           {error}
-        </p>
+        </CompactNotice>
       ) : null}
 
       {message ? (
-        <p className="mt-5 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
+        <CompactNotice className="mt-5" tone="success">
           {message}
-        </p>
+        </CompactNotice>
       ) : null}
 
       {!profile.is_active ? (
-        <section className="mt-6 border-y border-slate-200 py-5">
+        <CompactNotice className="mt-6 p-4" tone="warning">
           <h2 className="font-semibold text-slate-900">Account participation is unavailable</h2>
           <p className="mt-1 text-sm text-slate-600">
             Contact the league administrator if you believe this is incorrect.
           </p>
-        </section>
+        </CompactNotice>
       ) : (
-        <section className="mt-6 border-y border-slate-200 py-5">
+        <AuthFormPanel>
           {participation?.status === "declined" ? (
             <p className="mb-4 text-sm text-slate-600">
               You previously skipped this season. You can still join before submitting picks.
@@ -95,33 +101,31 @@ export default async function SeasonRegistrationPage({ searchParams }: PageProps
           ) : null}
           <form action={setSeasonParticipationAction} className="grid gap-3 sm:grid-cols-2">
             <input name="next" type="hidden" value={next} />
-            <label className="block sm:col-span-2">
-              <span className="mb-1 block text-sm font-medium text-slate-700">
-                Season invite code
-              </span>
+            <FormField
+              className="sm:col-span-2"
+              description="The code confirms that this permanent account belongs in the private league."
+              label="Season invite code"
+            >
               <input
                 required
                 autoCapitalize="none"
                 autoComplete="off"
-                className="w-full rounded-md border border-slate-300 px-3 py-2.5 text-sm disabled:bg-slate-100"
+                className={fieldControlClassName()}
                 disabled={!activeSeason.registrationCodeConfiguredAt}
                 maxLength={64}
                 minLength={8}
                 name="invite_code"
                 type="text"
               />
-              <span className="mt-1 block text-xs text-slate-500">
-                The code confirms that this permanent account belongs in the private league.
-              </span>
-            </label>
+            </FormField>
             {!activeSeason.registrationCodeConfiguredAt ? (
-              <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800 sm:col-span-2">
+              <CompactNotice className="sm:col-span-2" tone="warning">
                 Registration is waiting for the league administrator to configure this season&apos;s
                 invite code.
-              </p>
+              </CompactNotice>
             ) : null}
             <SubmitButton
-              className="rounded-md bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white hover:bg-slate-700"
+              className={actionControlClassName("primary")}
               disabled={!activeSeason.registrationCodeConfiguredAt}
               name="decision"
               pendingLabel="Joining season..."
@@ -131,7 +135,7 @@ export default async function SeasonRegistrationPage({ searchParams }: PageProps
             </SubmitButton>
             {!participation ? (
               <SubmitButton
-                className="rounded-md border border-slate-300 px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-100"
+                className={actionControlClassName("secondary")}
                 formNoValidate
                 name="decision"
                 pendingLabel="Saving decision..."
@@ -141,8 +145,8 @@ export default async function SeasonRegistrationPage({ searchParams }: PageProps
               </SubmitButton>
             ) : null}
           </form>
-        </section>
+        </AuthFormPanel>
       )}
-    </main>
+    </AuthFlowShell>
   );
 }

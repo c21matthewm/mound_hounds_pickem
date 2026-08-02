@@ -20,6 +20,7 @@ export function PicksRaceSelect({ races, selectedRaceId }: Props) {
       <select
         className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900"
         defaultValue={selectedRaceId ? String(selectedRaceId) : ""}
+        id="leaderboard-race-select"
         name="race_id"
         onChange={(event) => event.currentTarget.form?.requestSubmit()}
       >

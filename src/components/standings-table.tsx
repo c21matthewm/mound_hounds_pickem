@@ -8,6 +8,7 @@ import {
   sortIndicator,
   type SortDirection
 } from "@/lib/table-utils";
+import { DataSurface, Pagination } from "@/components/ui-primitives";
 
 export type StandingsTableRaceColumn = {
   raceId: number;
@@ -117,19 +118,12 @@ export function StandingsTable({
   const firstVisible = sortedRows.length === 0 ? 0 : (currentPage - 1) * PAGE_SIZE + 1;
   const lastVisible = Math.min(currentPage * PAGE_SIZE, sortedRows.length);
   return (
-    <section
-      className="mt-6 overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm"
+    <DataSurface
+      className="mt-6"
       data-testid="standings-table"
+      description={`${firstVisible}-${lastVisible} of ${sortedRows.length} teams`}
+      title={seasonYear ? `${seasonYear} Standings` : "Season Standings"}
     >
-      <div className="border-b border-slate-200 bg-slate-950 px-4 py-3 text-white">
-        <h2 className="text-sm font-semibold">
-          {seasonYear ? `${seasonYear} Standings` : "Season Standings"}
-        </h2>
-        <p className="mt-0.5 text-xs text-slate-300">
-          {firstVisible}-{lastVisible} of {sortedRows.length} teams
-        </p>
-      </div>
-
       <div className="grid grid-cols-[2.25rem_2.75rem_minmax(0,1fr)_4.25rem] gap-1.5 border-b border-slate-200 bg-slate-50 px-3 py-1.5 text-[10px] font-semibold uppercase text-slate-500 md:hidden">
         <span className="text-right">Rank</span>
         <span className="text-center">+/-</span>
@@ -287,28 +281,17 @@ export function StandingsTable({
       </div>
 
       {sortedRows.length > PAGE_SIZE ? (
-        <div className="flex items-center justify-between gap-3 border-t border-slate-200 px-3 py-2.5">
-          <button
-            className="rounded-md border border-slate-300 px-3 py-1.5 text-xs font-semibold text-slate-700 disabled:opacity-40"
-            disabled={currentPage === 1}
-            onClick={() => setPage((previous) => Math.max(1, previous - 1))}
-            type="button"
-          >
-            Previous
-          </button>
-          <p className="text-xs font-medium text-slate-600">
-            Page {currentPage} of {pageCount}
-          </p>
-          <button
-            className="rounded-md border border-slate-300 px-3 py-1.5 text-xs font-semibold text-slate-700 disabled:opacity-40"
-            disabled={currentPage === pageCount}
-            onClick={() => setPage((previous) => Math.min(pageCount, previous + 1))}
-            type="button"
-          >
-            Next
-          </button>
-        </div>
+        <Pagination
+          currentPage={currentPage}
+          itemLabel="teams"
+          onNext={() => setPage((previous) => Math.min(pageCount, previous + 1))}
+          onPrevious={() => setPage((previous) => Math.max(1, previous - 1))}
+          pageCount={pageCount}
+          rangeEnd={lastVisible}
+          rangeStart={firstVisible}
+          totalItems={sortedRows.length}
+        />
       ) : null}
-    </section>
+    </DataSurface>
   );
 }

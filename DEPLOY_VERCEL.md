@@ -446,86 +446,16 @@ Without the auth header, production should return `401`.
 Vercel Hobby only supports daily cron frequency, so use Supabase `pg_cron` + `pg_net` for frequent
 jobs.
 
-Run once in Supabase SQL Editor:
+Use the single canonical operator query:
 
-```sql
-create extension if not exists pg_cron;
-create extension if not exists pg_net;
+```text
+supabase/operations/02_configure_cron_jobs.sql
 ```
 
-Fantasy winner job:
-
-```sql
-do $$
-declare
-  existing_job_id bigint;
-begin
-  select j.jobid into existing_job_id
-  from cron.job j
-  where j.jobname = 'fantasy_winner_5min';
-
-  if existing_job_id is not null then
-    perform cron.unschedule(existing_job_id);
-  end if;
-end;
-$$;
-
-select cron.schedule(
-  'fantasy_winner_5min',
-  '*/5 * * * *',
-  $$
-  select net.http_post(
-    url := 'https://moundhoundspickem.app/api/cron/fantasy-winner',
-    headers := jsonb_build_object(
-      'authorization', 'Bearer YOUR_CRON_SECRET',
-      'content-type', 'application/json'
-    ),
-    body := '{}'::jsonb
-  );
-  $$
-);
-```
-
-Pick reminder job:
-
-```sql
-do $$
-declare
-  existing_job_id bigint;
-begin
-  select j.jobid into existing_job_id
-  from cron.job j
-  where j.jobname = 'pick_reminders_5min';
-
-  if existing_job_id is not null then
-    perform cron.unschedule(existing_job_id);
-  end if;
-end;
-$$;
-
-select cron.schedule(
-  'pick_reminders_5min',
-  '*/5 * * * *',
-  $$
-  select net.http_post(
-    url := 'https://moundhoundspickem.app/api/cron/pick-reminders',
-    headers := jsonb_build_object(
-      'authorization', 'Bearer YOUR_CRON_SECRET',
-      'content-type', 'application/json'
-    ),
-    body := '{}'::jsonb
-  );
-  $$
-);
-```
-
-Verify jobs:
-
-```sql
-select jobid, jobname, schedule, active
-from cron.job
-order by jobid desc;
-```
+It removes duplicate legacy jobs, schedules fantasy-winner recovery hourly, and either schedules
+or removes the five-minute reminder job based on its `enable_pick_reminders` setting. Follow the
+secret-rotation and unsaved-query instructions in `supabase/operations/README.md` before running
+it. Do not keep separate cron setup queries in Supabase SQL Editor.
 
 ## 8. GitHub Production Smoke E2E
 
