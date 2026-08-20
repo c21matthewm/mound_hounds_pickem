@@ -61,7 +61,7 @@ export function PickSubmissionSnapshot({
             {savedPicks.map((item) => (
               <span
                 key={`saved-pick-${item.groupNumber}`}
-                className="rounded border border-slate-200 bg-slate-50 px-1.5 py-0.5 text-[11px] font-medium text-slate-700"
+                className="rounded ui-panel-muted border border-slate-200 bg-slate-50 px-1.5 py-0.5 text-[11px] font-medium text-slate-700"
               >
                 G{item.groupNumber} · {item.driverName}
               </span>

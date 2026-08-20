@@ -10,7 +10,16 @@ async function handleCronRequest(request: Request) {
   }
 
   try {
-    const result = await withJobRun("fantasy-winner", finalizeDueRaceWinners);
+    const result = await withJobRun("fantasy-winner", finalizeDueRaceWinners, {
+      completionForResult: (summary) =>
+        summary.failedRaceCount > 0
+          ? {
+              errorMessage: `${summary.failedRaceCount} race winner calculation(s) failed.`,
+              status: "degraded"
+            }
+          : { status: "succeeded" },
+      shouldRecordResult: (summary) => summary.processedRaceCount > 0
+    });
     return NextResponse.json({
       ok: true,
       ...result

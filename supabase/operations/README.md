@@ -23,7 +23,7 @@ query is only an editor document; deleting it does not remove functions, tables,
 that were already created in the database.
 
 After `01_verify_production_health.sql` reports schema
-`20260730_atomic_picks_recovery_v1`, the old saved migration bundles and one-off Race 2/Race 8
+`20260818_recovery_jobs_security_v1`, the old saved migration bundles and one-off Race 2/Race 8
 diagnostic queries can be deleted from the Supabase SQL Editor. Their canonical copies remain in
 `supabase/migrations` and Git history.
 

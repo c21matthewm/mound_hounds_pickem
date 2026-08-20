@@ -14,7 +14,7 @@ export function HallOfFameYearSelect({ selectedYear, years }: Props) {
           Season
         </span>
         <select
-          className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-900"
+          className="rounded-md ui-control-border border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-900"
           defaultValue={String(selectedYear)}
           name="year"
           onChange={(event) => event.currentTarget.form?.requestSubmit()}

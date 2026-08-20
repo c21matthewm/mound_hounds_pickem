@@ -11,7 +11,7 @@ export default function AppLoading() {
       <div className="mt-8 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
         {Array.from({ length: 6 }, (_, index) => (
           <div
-            className="h-24 animate-pulse rounded-md border border-slate-200 bg-white"
+            className="h-24 animate-pulse rounded-md ui-panel border border-slate-200 bg-white"
             key={index}
           />
         ))}

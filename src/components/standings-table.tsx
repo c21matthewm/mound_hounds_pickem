@@ -49,9 +49,9 @@ const ChangeBadge = ({ value }: { value: number }) => (
   <span
     className={`inline-flex h-4 min-w-6 items-center justify-center rounded-full border px-1 text-[9px] font-bold leading-none tabular-nums ${
       value > 0
-        ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+        ? "ui-status-success border-emerald-200 bg-emerald-50 text-emerald-700"
         : value < 0
-          ? "border-red-200 bg-red-50 text-red-700"
+          ? "ui-status-danger border-red-200 bg-red-50 text-red-700"
           : "border-slate-200 bg-slate-100 text-slate-500"
     }`}
   >

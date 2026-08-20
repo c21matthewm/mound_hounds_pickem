@@ -51,7 +51,7 @@ Mound Hounds Pick'em is a private INDYCAR fantasy league app. Participants submi
 ## Data Model
 
 The consolidated database definition is `supabase/schema.sql`; migrations for existing projects are in `supabase/migrations/`.
-Indy 500 features require `supabase/migrations/20260528_add_indy_500_pick_format.sql`. Role protection and atomic draft/published results require `supabase/migrations/20260709_harden_roles_and_result_publication.sql`. Explicit seasons require `supabase/migrations/20260718_add_league_seasons_and_active_participants.sql`; yearly enrollment and resilient reminder delivery require `supabase/migrations/20260718_add_season_enrollment_and_delivery_hardening.sql`; invite-code, race-field, audit, and job-heartbeat hardening requires `supabase/migrations/20260725_harden_race_and_season_operations.sql`; shared doubleheader pick deadlines require `supabase/migrations/20260726_add_shared_pick_windows.sql`; bounded reminder queues and degraded job health require `supabase/migrations/20260729_scale_weekly_operations.sql`; atomic pick versions and guided season recovery require `supabase/migrations/20260730_atomic_picks_and_season_recovery.sql`.
+Indy 500 features require `supabase/migrations/20260528_add_indy_500_pick_format.sql`. Role protection and atomic draft/published results require `supabase/migrations/20260709_harden_roles_and_result_publication.sql`. Explicit seasons require `supabase/migrations/20260718_add_league_seasons_and_active_participants.sql`; yearly enrollment and resilient reminder delivery require `supabase/migrations/20260718_add_season_enrollment_and_delivery_hardening.sql`; invite-code, race-field, audit, and job-heartbeat hardening requires `supabase/migrations/20260725_harden_race_and_season_operations.sql`; shared doubleheader pick deadlines require `supabase/migrations/20260726_add_shared_pick_windows.sql`; bounded reminder queues and degraded job health require `supabase/migrations/20260729_scale_weekly_operations.sql`; atomic pick versions and guided season recovery require `supabase/migrations/20260730_atomic_picks_and_season_recovery.sql`; bounded recovery storage, sparse job history, and registration-attempt protection require `supabase/migrations/20260818_bound_recovery_jobs_and_registration.sql`.
 
 - `profiles`: permanent Supabase auth identities with full name, unique team name, optional phone/carrier, role, and account eligibility.
 - `league_seasons`: explicit upcoming/active/completed seasons. Only one can be active.
@@ -111,7 +111,7 @@ Key database triggers:
 - Admin data loading is tab-scoped. The Results workspace defaults to the next unpublished race and loads picks, result rows, race-driver groups, imports, and scoring audit data for only that selected race.
 - Race management loads one selected season at a time. Recovery creates portable downloads,
   automatic post-publication snapshots, previews, checksum validation, and transactional restore.
-- System Health reports the schema contract, active season, registration count, next-race gate, delivery toggles, reminder queue totals, degraded cron runs, targeted failed-delivery retries, and admin audit history.
+- Race Week reports the schema contract, active season, registration count, next-race gate, delivery toggles, reminder queue totals, degraded cron runs, targeted failed-delivery retries, and admin audit history.
 
 ## Cron And Notifications
 

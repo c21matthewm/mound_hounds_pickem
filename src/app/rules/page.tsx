@@ -42,7 +42,7 @@ export default async function RulesPage() {
             </ActionAnchor>
           </div>
 
-          <div className="mt-4 h-[70vh] overflow-hidden rounded-md border border-slate-200 bg-slate-50">
+          <div className="mt-4 h-[70vh] overflow-hidden rounded-md ui-panel-muted border border-slate-200 bg-slate-50">
             <iframe
               className="h-full w-full"
               src={`${rulesPdfPath}#view=FitH`}

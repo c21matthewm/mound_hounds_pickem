@@ -153,23 +153,25 @@ admin must explicitly authorize forced removal; normal profile edits do not remo
 
 ## System health and schema contract
 
-Open **Admin > System Health** after a migration, deployment, season rollover, or notification
+Open **Admin > Race Week** after a migration, deployment, season rollover, or notification
 configuration change. Confirm:
 
-- schema version is `20260730_atomic_picks_recovery_v1` and the database contract reports healthy;
+- schema version is `20260818_recovery_jobs_security_v1` and the database contract reports healthy;
 - the expected season is active and the registered-team count is reasonable;
 - the next race and previous-results gate are correct;
 - pick email/SMS enabled states match Vercel;
 - reminder queue counts progress from pending/retrying to sent without permanent failures;
 - use **Retry permanent failures** only after correcting the provider or recipient problem;
-- both scheduled jobs show recent heartbeat rows, even when no email or winner was due;
+- both scheduled jobs show a current heartbeat; the separate event list stays intentionally sparse
+  and records only useful work, degraded runs, and failures;
 - recent admin audit entries match intentional participant, race, result, and season changes.
 
 The latest matching database migrations are
 `supabase/migrations/20260725_harden_race_and_season_operations.sql`,
 `supabase/migrations/20260726_add_shared_pick_windows.sql`, and
 `supabase/migrations/20260729_scale_weekly_operations.sql`, and
-`supabase/migrations/20260730_atomic_picks_and_season_recovery.sql`. Run them in filename order in
+`supabase/migrations/20260730_atomic_picks_and_season_recovery.sql`, and
+`supabase/migrations/20260818_bound_recovery_jobs_and_registration.sql`. Run them in filename order in
 Supabase SQL Editor before deploying this application version. They are additive and keep existing
 2026 registrations intact. After they succeed, set the 2026 invite code in the admin interface
 before accepting any new 2026 participants.
@@ -180,10 +182,11 @@ Open **Admin > Recovery** and select **Create & Download Backup** before results
 season rollover, or unusual database work. Store the downloaded JSON outside Supabase and Vercel,
 and retain at least the three newest files.
 
-Result publication and high-risk admin operations also create internal restore points. If recovery
-is needed, use the guided preview in the Recovery tab; it compares row counts, requires the season
-year, and creates a separate safety point before restoring. Do not manually paste backup contents
-into database tables. The permanent incident procedure and backup limitations are in
+Result publication and high-risk admin operations also create bounded internal restore points. If
+recovery is needed, use the guided preview in the Recovery tab; it compares season-owned rows,
+requires the season year, and creates a separate safety point before restoring. Permanent account
+identity fields are validated but are not overwritten. Do not manually paste backup contents into
+database tables. The permanent incident procedure and backup limitations are in
 `docs/SEASON_RECOVERY.md`.
 
 ## Doubleheader Setup

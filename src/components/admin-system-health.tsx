@@ -1,6 +1,7 @@
 import { ConfirmSubmitButton } from "@/components/confirm-submit-button";
 import { SubmitButton } from "@/components/submit-button";
 import {
+  ActionLink,
   AdminWorkspaceHeader,
   CompactNotice,
   Disclosure,
@@ -48,15 +49,19 @@ type AdminSystemHealthProps = {
   activeSeasonName: string | null;
   auditRows: AdminAuditHealthRow[];
   cleanupTestFlowDataAction: (formData: FormData) => void | Promise<void>;
+  currentTime: number;
   emailEnabled: boolean;
   healthContract: {
     healthy: boolean;
     missing: string[];
     version: string;
   } | null;
+  jobEvents: AdminJobRunHealthRow[];
   jobRuns: AdminJobRunHealthRow[];
   nextRace: {
     expectedPickCount: number;
+    fieldFrozen: boolean;
+    pickLockAt: string;
     pickCount: number;
     previousResultsStatus: string;
     raceName: string;
@@ -71,7 +76,7 @@ type AdminSystemHealthProps = {
   smsEnabled: boolean;
 };
 
-const EXPECTED_SCHEMA_VERSION = "20260730_atomic_picks_recovery_v1";
+const EXPECTED_SCHEMA_VERSION = "20260818_recovery_jobs_security_v1";
 
 const formatHealthTime = (value: string): string =>
   formatLeagueDateTime(value, { dateStyle: "medium", timeStyle: "short" });
@@ -80,8 +85,10 @@ export function AdminSystemHealth({
   activeSeasonName,
   auditRows,
   cleanupTestFlowDataAction,
+  currentTime,
   emailEnabled,
   healthContract,
+  jobEvents,
   jobRuns,
   nextRace,
   registeredTeamCount,
@@ -115,20 +122,122 @@ export function AdminSystemHealth({
   );
   const failedJobCount = latestJobRuns.filter((run) => run.status === "failed").length;
   const degradedJobCount = latestJobRuns.filter((run) => run.status === "degraded").length;
+  const heartbeatAgeLimitMs: Record<AdminJobRunHealthRow["job_name"], number> = {
+    "fantasy-winner": 3 * 60 * 60 * 1000,
+    "pick-reminders": 20 * 60 * 1000
+  };
+  const expectedJobNames: AdminJobRunHealthRow["job_name"][] = emailEnabled
+    ? ["fantasy-winner", "pick-reminders"]
+    : ["fantasy-winner"];
+  const staleJobNames = expectedJobNames.filter((jobName) => {
+    const run = latestJobRunByName.get(jobName);
+    return (
+      !run ||
+      !Number.isFinite(Date.parse(run.started_at)) ||
+      currentTime - Date.parse(run.started_at) > heartbeatAgeLimitMs[jobName]
+    );
+  });
   const permanentReminderFailures = reminderQueue?.permanentFailed ?? 0;
-  const actionNeeded = !schemaReady || failedJobCount > 0 || permanentReminderFailures > 0;
+  const previousResultsReady = nextRace?.previousResultsStatus.startsWith("Ready:") ?? false;
+  const submissionsComplete = Boolean(
+    nextRace && nextRace.expectedPickCount > 0 && nextRace.pickCount >= nextRace.expectedPickCount
+  );
+  const actionNeeded =
+    !schemaReady ||
+    !activeSeasonName ||
+    failedJobCount > 0 ||
+    degradedJobCount > 0 ||
+    staleJobNames.length > 0 ||
+    Boolean(nextRace && !previousResultsReady) ||
+    permanentReminderFailures > 0;
+  const raceWeekSteps = [
+    {
+      detail: activeSeasonName ?? "Activate or create a season.",
+      href: "/admin?tab=races",
+      label: "Active season",
+      ready: Boolean(activeSeasonName)
+    },
+    {
+      detail: nextRace?.fieldFrozen
+        ? "The driver field is frozen for this pick window."
+        : "Open the form or reminder workflow to freeze the field.",
+      href: "/admin?tab=races",
+      label: "Race field",
+      ready: Boolean(nextRace?.fieldFrozen)
+    },
+    {
+      detail: nextRace?.previousResultsStatus ?? "No upcoming race is scheduled.",
+      href: "/admin?tab=results",
+      label: "Previous results",
+      ready: previousResultsReady || !nextRace
+    },
+    {
+      detail: nextRace
+        ? `${nextRace.pickCount}/${nextRace.expectedPickCount} race submissions saved.`
+        : "No active pick window.",
+      href: "/admin?tab=participants",
+      label: "Participant picks",
+      ready: submissionsComplete || !nextRace
+    },
+    {
+      detail: emailEnabled
+        ? permanentReminderFailures > 0
+          ? `${permanentReminderFailures} delivery failure(s) need attention.`
+          : "Email delivery is enabled with no permanent failure."
+        : "Email delivery is currently disabled.",
+      href: "/admin?tab=health#technical-details",
+      label: "Reminders",
+      ready: emailEnabled && permanentReminderFailures === 0
+    }
+  ];
 
   return (
     <section className="mt-6">
       <AdminWorkspaceHeader
-        description="Current-season readiness and exceptions that need attention."
+        description="A single checklist for picks, reminders, results, and system readiness."
         meta={
           <StatusChip tone={actionNeeded ? "danger" : "success"}>
             {actionNeeded ? "Action needed" : "System ready"}
           </StatusChip>
         }
-        title="System Health"
+        title="Race Week Operations"
       />
+
+      <div className="mt-5 grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
+        {raceWeekSteps.map((step, index) => (
+          <ActionLink
+            className="min-h-0 items-start justify-start gap-3 px-3 py-3 text-left"
+            href={step.href}
+            key={step.label}
+            variant="secondary"
+          >
+            <span
+              className={`inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-xs font-bold ${
+                step.ready
+                  ? "bg-emerald-100 text-emerald-800"
+                  : "bg-amber-100 text-amber-800"
+              }`}
+            >
+              {step.ready ? "OK" : index + 1}
+            </span>
+            <span className="min-w-0">
+              <span className="block font-semibold text-slate-950">{step.label}</span>
+              <span className="mt-0.5 block text-xs font-normal leading-5 text-slate-600">
+                {step.detail}
+              </span>
+            </span>
+          </ActionLink>
+        ))}
+      </div>
+
+      <div className="mt-3 flex flex-wrap gap-2">
+        <ActionLink href="/admin?tab=results" variant="primary">
+          Open race results
+        </ActionLink>
+        <ActionLink href="/admin?tab=recovery" variant="secondary">
+          Create safety backup
+        </ActionLink>
+      </div>
 
       <MetricStrip
         className="mt-4 sm:grid-cols-2 lg:grid-cols-4"
@@ -157,6 +266,13 @@ export function AdminSystemHealth({
         </CompactNotice>
       ) : null}
 
+      {staleJobNames.length > 0 ? (
+        <CompactNotice className="mt-3" tone="warning">
+          Missing or stale heartbeat: {staleJobNames.join(", ")}. Verify the Supabase cron job
+          before the next race deadline.
+        </CompactNotice>
+      ) : null}
+
       <div className="mt-5 grid gap-5 border-y border-slate-200 py-5 lg:grid-cols-2 lg:divide-x lg:divide-slate-200">
         <section className="lg:pr-5">
           <h3 className="font-semibold text-slate-900">Next race</h3>
@@ -169,6 +285,9 @@ export function AdminSystemHealth({
             <>
               <p className="mt-1 text-xs text-slate-500">
                 {nextRace.pickCount}/{nextRace.expectedPickCount} submitted
+              </p>
+              <p className="mt-1 text-xs text-slate-500">
+                Locks {formatHealthTime(nextRace.pickLockAt)}
               </p>
               <p className="mt-2 text-sm font-medium text-slate-700">
                 {nextRace.previousResultsStatus}
@@ -218,13 +337,14 @@ export function AdminSystemHealth({
         className="mt-5"
         description="Schema versions, delivery attempts, scheduled jobs, and recent admin events."
         meta={
-          failedJobCount > 0 || degradedJobCount > 0 ? (
+          failedJobCount > 0 || degradedJobCount > 0 || staleJobNames.length > 0 ? (
             <StatusChip tone="warning">
-              {failedJobCount + degradedJobCount} job exception
-              {failedJobCount + degradedJobCount === 1 ? "" : "s"}
+              {failedJobCount + degradedJobCount + staleJobNames.length} job issue
+              {failedJobCount + degradedJobCount + staleJobNames.length === 1 ? "" : "s"}
             </StatusChip>
           ) : null
         }
+        id="technical-details"
         summary="Technical details"
       >
         <dl className="grid gap-3 text-sm sm:grid-cols-3">
@@ -263,6 +383,42 @@ export function AdminSystemHealth({
                 ))}
               </div>
             )}
+            {jobEvents.length > 0 ? (
+              <div className="mt-4 border-t border-slate-200 pt-3">
+                <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                  Recent work and exceptions
+                </p>
+                <div className="mt-2 grid gap-2">
+                  {jobEvents.slice(0, 5).map((run) => (
+                    <div
+                      className="flex items-start justify-between gap-3 text-sm"
+                      key={`event-${run.job_name}-${run.started_at}`}
+                    >
+                      <div>
+                        <p className="font-medium text-slate-800">{run.job_name}</p>
+                        <p className="text-xs text-slate-500">{formatHealthTime(run.started_at)}</p>
+                        {run.error_message ? (
+                          <p className="mt-0.5 line-clamp-2 text-xs text-red-700">
+                            {run.error_message}
+                          </p>
+                        ) : null}
+                      </div>
+                      <StatusChip
+                        tone={
+                          run.status === "failed"
+                            ? "danger"
+                            : run.status === "degraded"
+                              ? "warning"
+                              : "success"
+                        }
+                      >
+                        {run.status}
+                      </StatusChip>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ) : null}
           </section>
 
           <section>

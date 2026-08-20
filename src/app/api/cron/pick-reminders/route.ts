@@ -24,7 +24,12 @@ async function handleCronRequest(request: Request) {
               status: "degraded"
             }
           : { status: "succeeded" };
-      }
+      },
+      shouldRecordResult: (summary) =>
+        summary.batchDeliveryCount > 0 ||
+        summary.emailFailed > 0 ||
+        summary.smsFailed > 0 ||
+        summary.queuePermanentFailed > 0
     });
     return NextResponse.json({
       ok: true,

@@ -5,7 +5,7 @@ with checks as (
     'schema'::text as check_group,
     'schema_version'::text as check_name,
     case
-      when metadata.value = '20260730_atomic_picks_recovery_v1' then 'PASS'
+      when metadata.value = '20260818_recovery_jobs_security_v1' then 'PASS'
       else 'WARN'
     end as status,
     coalesce(metadata.value, 'missing') as details
@@ -28,8 +28,12 @@ with checks as (
       ('atomic_pick_save', 'public.save_weekly_pick(bigint,numeric,bigint[])'),
       ('shared_pick_window_validation', 'public.validate_shared_pick_window()'),
       ('reminder_delivery_claim', 'public.claim_pick_reminder_delivery(bigint,uuid,text,text,text)'),
-      ('season_backup', 'public.create_season_restore_point(bigint,text,text)'),
-      ('season_restore', 'public.restore_season_from_restore_point(uuid,integer)')
+      ('registration_rate_limit', 'public.consume_registration_attempt(text[],integer,integer)'),
+      ('job_heartbeat_start', 'public.start_job_status(text)'),
+      ('job_heartbeat_finish', 'public.finish_job_status(text,uuid,text,jsonb,text,boolean)'),
+      ('season_backup', 'public.create_season_restore_point_v2(bigint,text,text,text)'),
+      ('season_restore_preview', 'public.preview_season_restore_point(uuid)'),
+      ('season_restore', 'public.restore_season_from_restore_point_v2(uuid,integer)')
   ) required(name, signature)
 
   union all
@@ -126,6 +130,96 @@ with checks as (
     end
   from cron.job job
   where job.jobname = 'pick_reminders_5min'
+
+  union all
+
+  select
+    'storage',
+    'job_run_history',
+    case
+      when count(*) filter (
+        where status = 'succeeded'
+          and started_at < timezone('utc', now()) - interval '30 days'
+      ) = 0
+        and count(*) filter (
+          where status in ('degraded', 'failed')
+            and started_at < timezone('utc', now()) - interval '90 days'
+        ) = 0 then 'PASS'
+      else 'WARN'
+    end,
+    format('retained_events=%s', count(*))
+  from public.job_runs
+
+  union all
+
+  select
+    'jobs',
+    expected.job_name || '_heartbeat',
+    case
+      when status.job_name is null then 'WARN'
+      when status.status in ('degraded', 'failed') then 'WARN'
+      when status.last_started_at < timezone('utc', now()) - expected.maximum_age then 'WARN'
+      else 'PASS'
+    end,
+    case
+      when status.job_name is null then 'no heartbeat recorded'
+      else format(
+        'status=%s, last_started_at=%s, run_count=%s',
+        status.status,
+        status.last_started_at,
+        status.run_count
+      )
+    end
+  from (
+    values
+      ('fantasy-winner'::text, interval '3 hours'),
+      ('pick-reminders'::text, interval '20 minutes')
+  ) expected(job_name, maximum_age)
+  left join public.job_status status on status.job_name = expected.job_name
+
+  union all
+
+  select
+    'storage',
+    'restore_point_retention',
+    case
+      when metrics.duplicate_race_checkpoints = 0
+        and metrics.oversized_correction_seasons = 0 then 'PASS'
+      else 'WARN'
+    end,
+    format(
+      'points=%s, size_mb=%s, duplicate_checkpoints=%s, oversized_correction_seasons=%s',
+      metrics.restore_points,
+      round(metrics.total_bytes / 1048576.0, 2),
+      metrics.duplicate_race_checkpoints,
+      metrics.oversized_correction_seasons
+    )
+  from (
+    select
+      count(*) as restore_points,
+      coalesce(sum(snapshot_bytes), 0) as total_bytes,
+      (
+        select count(*)
+        from (
+          select season_id, retention_key
+          from public.season_restore_points
+          where source = 'result_checkpoint'
+          group by season_id, retention_key
+          having count(*) > 1
+        ) duplicate_keys
+      ) as duplicate_race_checkpoints,
+      (
+        select count(*)
+        from (
+          select season_id
+          from public.season_restore_points
+          where source in ('automatic', 'pre_correction')
+          group by season_id
+          having count(*) > 5
+        ) oversized_seasons
+      ) as oversized_correction_seasons
+    from public.season_restore_points
+  ) metrics
 )
 select check_group, check_name, status, details
 from checks

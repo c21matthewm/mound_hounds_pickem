@@ -17,13 +17,13 @@ const ADMIN_WORKSPACES: Array<{
   tab: AdminWorkspaceTab;
   testId?: string;
 }> = [
-  { label: "Drivers", tab: "drivers", testId: "admin-tab-drivers" },
+  { label: "Race Week", tab: "health" },
   { label: "Participants", tab: "participants", testId: "admin-tab-participants" },
   { label: "Races", tab: "races", testId: "admin-tab-races" },
+  { label: "Drivers", tab: "drivers", testId: "admin-tab-drivers" },
   { label: "Race Results", tab: "results", testId: "admin-tab-results" },
-  { label: "Feedback", tab: "feedback", testId: "admin-tab-feedback" },
-  { label: "System Health", tab: "health" },
-  { label: "Recovery", tab: "recovery" }
+  { label: "Recovery", tab: "recovery" },
+  { label: "Feedback", tab: "feedback", testId: "admin-tab-feedback" }
 ];
 
 type AdminWorkspaceNavProps = {
@@ -40,7 +40,7 @@ export function AdminWorkspaceNav({ activeTab }: AdminWorkspaceNavProps) {
           Admin workspace
         </span>
         <select
-          className="w-full rounded-md border border-slate-300 bg-white px-3 py-2.5 text-base font-semibold text-slate-900"
+          className="w-full rounded-md ui-control-border border border-slate-300 bg-white px-3 py-2.5 text-base font-semibold text-slate-900"
           onChange={(event) => router.push(`/admin?tab=${event.target.value}`)}
           value={activeTab}
         >

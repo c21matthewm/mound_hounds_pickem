@@ -377,8 +377,8 @@ export default async function PicksPage({ searchParams }: PageProps) {
                   <span
                     className={`shrink-0 rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${
                       isSaved
-                        ? "border-emerald-200 bg-emerald-50 text-emerald-800"
-                        : "border-amber-200 bg-amber-50 text-amber-800"
+                        ? "ui-status-success border-emerald-200 bg-emerald-50 text-emerald-800"
+                        : "ui-status-warning border-amber-200 bg-amber-50 text-amber-800"
                     }`}
                   >
                     {isSaved ? "Saved" : "Needs picks"}
@@ -394,7 +394,7 @@ export default async function PicksPage({ searchParams }: PageProps) {
         </section>
       ) : null}
 
-      <section className="mt-6 overflow-hidden rounded-lg border border-slate-200 bg-white">
+      <section className="mt-6 overflow-hidden rounded-lg ui-panel border border-slate-200 bg-white">
         {selectedRace.title_image_url ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img

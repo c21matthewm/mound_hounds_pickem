@@ -89,7 +89,7 @@ export function AdminParticipantsWorkspace({
         title="Participants"
       />
 
-      <div className="mt-4 grid gap-3 rounded-md border border-slate-200 bg-slate-50 p-3 sm:grid-cols-[minmax(0,1fr)_14rem]">
+      <div className="mt-4 grid gap-3 rounded-md ui-panel-muted border border-slate-200 bg-slate-50 p-3 sm:grid-cols-[minmax(0,1fr)_14rem]">
         <FormField label="Search accounts">
           <input
             className={fieldControlClassName()}
@@ -186,7 +186,7 @@ export function AdminParticipantsWorkspace({
                   Registered {activeSeasonYear ?? "this season"}
                 </label>
                 {participant.pickCount > 0 ? (
-                  <label className="flex items-start gap-2 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs font-medium text-red-800 sm:col-span-2 lg:col-span-5">
+                  <label className="flex items-start gap-2 rounded-md border ui-status-danger border-red-200 bg-red-50 px-3 py-2 text-xs font-medium text-red-800 sm:col-span-2 lg:col-span-5">
                     <input className="mt-0.5" name="force_removal" type="checkbox" />
                     Allow forced removal from scoring despite {participant.pickCount} submitted race
                     {participant.pickCount === 1 ? "" : "s"}. Leave unchecked for normal edits.

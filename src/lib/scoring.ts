@@ -309,7 +309,7 @@ export const buildLeagueScoringSnapshot = (
 ): Promise<LeagueScoringSnapshot> =>
   buildSeasonScoringSnapshot(seasonId).then((model) => model.leaderboardSnapshot);
 
-export async function buildPicksByRaceSnapshot(
+async function buildPicksByRaceSnapshotUncached(
   seasonId: number,
   selectedRaceIdInput?: number
 ): Promise<PicksByRaceSnapshot> {
@@ -511,6 +511,18 @@ export async function buildPicksByRaceSnapshot(
     selectedRace
   };
 }
+
+const buildCachedPicksByRaceSnapshot = unstable_cache(
+  buildPicksByRaceSnapshotUncached,
+  ["picks-by-race-snapshot-v1"],
+  { revalidate: 60, tags: [SCORING_CACHE_TAG] }
+);
+
+export const buildPicksByRaceSnapshot = (
+  seasonId: number,
+  selectedRaceIdInput?: number
+): Promise<PicksByRaceSnapshot> =>
+  buildCachedPicksByRaceSnapshot(seasonId, selectedRaceIdInput);
 
 export async function buildParticipantAnalyticsSnapshotUncached(
   userId: string,

@@ -371,7 +371,7 @@ export function PickemForm({
       ) : null}
 
       <fieldset className="space-y-5 disabled:opacity-80" disabled={picksLocked || isSubmitting}>
-        <section className="rounded-lg border border-slate-200 bg-white px-4 py-4 md:px-5">
+        <section className="rounded-lg ui-panel border border-slate-200 bg-white px-4 py-4 md:px-5">
           <label className="grid items-end gap-3 sm:grid-cols-[minmax(0,1fr)_15rem]">
             <span>
               <span className="block text-sm font-semibold text-slate-900">
@@ -383,7 +383,7 @@ export function PickemForm({
             </span>
             <input
               required
-              className="w-full rounded-md border border-slate-300 px-3 py-2.5 text-sm"
+              className="w-full rounded-md ui-control-border border border-slate-300 px-3 py-2.5 text-sm"
               min={1}
               max={300}
               name="average_speed"
@@ -402,7 +402,7 @@ export function PickemForm({
           <section
             id={`driver-group-${group.groupNumber}`}
             key={group.groupNumber}
-            className="rounded-lg border border-slate-200 bg-white p-5 md:p-6"
+            className="rounded-lg ui-panel border border-slate-200 bg-white p-5 md:p-6"
           >
             <div>
               <div>
@@ -461,7 +461,7 @@ export function PickemForm({
                         // eslint-disable-next-line @next/next/no-img-element
                         <img
                           alt={driver.driverName}
-                          className="h-14 w-14 rounded-md border border-slate-300 object-cover"
+                          className="h-14 w-14 rounded-md ui-control-border border border-slate-300 object-cover"
                           decoding="async"
                           height={56}
                           loading="lazy"
@@ -507,7 +507,7 @@ export function PickemForm({
         ))}
 
         <button
-          className="rounded-md bg-slate-900 px-5 py-3 text-sm font-semibold text-white hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
+          className="rounded-md ui-action-primary bg-slate-900 px-5 py-3 text-sm font-semibold text-white hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
           disabled={!canSubmit || isSubmitting}
           type="submit"
         >
@@ -519,8 +519,13 @@ export function PickemForm({
         </button>
 
         {showMobileActionBar ? (
-          <div className="fixed inset-x-3 bottom-[4.35rem] z-30 md:hidden">
-            <div className="mx-auto max-w-md rounded-lg border border-slate-200 bg-white/95 px-2.5 py-1.5 shadow-[0_18px_45px_-28px_rgba(15,23,42,0.9)] backdrop-blur">
+          <div
+            className="fixed inset-x-3 z-30 md:hidden"
+            style={{
+              bottom: "calc(max(0.75rem, env(safe-area-inset-bottom)) + 3.5rem)"
+            }}
+          >
+            <div className="ui-panel ui-panel-translucent mx-auto max-w-md rounded-lg border border-slate-200 bg-white/95 px-2.5 py-1.5 shadow-[0_18px_45px_-28px_rgba(15,23,42,0.9)] backdrop-blur">
               <div className="flex items-center justify-between gap-2">
                 <p className="shrink-0 text-xs font-semibold text-slate-800">
                   {selectedGroupCount}/{groupNumbers.length} groups
@@ -531,7 +536,7 @@ export function PickemForm({
                       {missingGroupNumbers.map((groupNumber) => (
                         <a
                           key={`missing-group-${groupNumber}`}
-                          className="rounded-md border border-amber-200 bg-amber-50 px-2 py-0.5 text-[11px] font-semibold text-amber-800"
+                          className="rounded-md border ui-status-warning border-amber-200 bg-amber-50 px-2 py-0.5 text-[11px] font-semibold text-amber-800"
                           href={`#driver-group-${groupNumber}`}
                         >
                           G{groupNumber}
@@ -545,7 +550,7 @@ export function PickemForm({
                   )}
                 </div>
                 <button
-                  className="shrink-0 rounded-md bg-slate-900 px-2.5 py-1.5 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
+                  className="shrink-0 rounded-md ui-action-primary bg-slate-900 px-2.5 py-1.5 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
                   disabled={!canSubmit || isSubmitting}
                   type="submit"
                 >

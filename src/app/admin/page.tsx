@@ -1,7 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import Link from "next/link";
 import {
-  cleanupTestFlowDataAction,
   activateLeagueSeasonAction,
   createLeagueSeasonAction,
   createDriverAction,
@@ -13,7 +12,6 @@ import {
   importIndy500QualifyingOrderAction,
   importIndycarResultsAction,
   publishSavedRaceResultsAction,
-  retryFailedPickRemindersAction,
   setLeagueSeasonInviteCodeAction,
   setLeagueSeasonRulesDocumentAction,
   setRaceArchivedAction,
@@ -21,9 +19,13 @@ import {
   setRaceWinnerAction,
   updateRaceAction,
   updateDriverAction,
-  updateFeedbackStatusAction,
   upsertResultAction
 } from "@/app/admin/actions";
+import {
+  cleanupTestFlowDataAction,
+  retryFailedPickRemindersAction,
+  updateFeedbackStatusAction
+} from "@/app/admin/maintenance-actions";
 import {
   AdminParticipantsWorkspace,
   type AdminParticipantRow
@@ -56,6 +58,7 @@ import {
   fieldControlClassName
 } from "@/components/ui-primitives";
 import { requireAdmin } from "@/lib/admin";
+import { createAdminRequestToken } from "@/lib/admin-request-token";
 import { feedbackCategoryLabel, feedbackTypeLabel } from "@/lib/feedback";
 import { getPreviousRaceResultsGate } from "@/lib/pickem-results-gate";
 import {
@@ -193,6 +196,7 @@ type FeedbackItemRow = {
 };
 
 type HealthRaceRow = {
+  field_frozen_at: string | null;
   id: number;
   pick_format: RacePickFormat;
   pick_window_key: string;
@@ -262,7 +266,7 @@ const parseAdminTab = (value: string | undefined): AdminTab => {
     return value;
   }
 
-  return "drivers";
+  return "health";
 };
 
 const parsePositiveQueryInteger = (value: string | undefined): number | null => {
@@ -578,7 +582,11 @@ export default async function AdminPage({ searchParams }: PageProps) {
   const feedbackPage = parsePositiveQueryInteger(queryStringParam(params.feedback_page)) ?? 1;
   const feedbackPageSize = 20;
 
-  const { profile, supabase } = await requireAdmin();
+  const { profile, supabase, user } = await requireAdmin();
+  const recoveryRequestToken =
+    activeTab === "recovery"
+      ? createAdminRequestToken(user.id, "season-recovery")
+      : "";
 
   const seasonsResponse = await supabase
     .from("league_seasons")
@@ -623,10 +631,16 @@ export default async function AdminPage({ searchParams }: PageProps) {
       ? loadAdminFeedback(supabase, feedbackStatus, feedbackPage, feedbackPageSize)
       : emptyCountResponse,
     loadedActiveSeason && (activeTab === "participants" || activeTab === "races" || activeTab === "results" || activeTab === "health")
-      ? supabase
-          .from("season_participants")
-          .select("profile_id,status")
-          .eq("season_id", loadedActiveSeason.id)
+      ? activeTab === "health"
+        ? supabase
+            .from("season_participants")
+            .select("profile_id,status,profiles!inner(is_active)")
+            .eq("season_id", loadedActiveSeason.id)
+            .eq("profiles.is_active", true)
+        : supabase
+            .from("season_participants")
+            .select("profile_id,status")
+            .eq("season_id", loadedActiveSeason.id)
       : emptyResponse,
     loadedActiveSeason && activeTab === "participants"
       ? paginatedAdminLoad<ParticipantPickCountRow>("participant pick counts", (from, to) =>
@@ -643,11 +657,11 @@ export default async function AdminPage({ searchParams }: PageProps) {
       ? supabase
           .from("season_restore_points")
           .select(
-            "id,season_id,season_year,label,source,schema_version,format_version,row_counts,checksum,created_at"
+            "id,season_id,season_year,label,source,retention_key,snapshot_bytes,schema_version,format_version,row_counts,checksum,created_at"
           )
           .eq("season_id", loadedActiveSeason.id)
           .order("created_at", { ascending: false })
-          .limit(30)
+          .limit(1000)
       : emptyResponse
   ]);
 
@@ -813,6 +827,7 @@ export default async function AdminPage({ searchParams }: PageProps) {
   let healthReminderRows: AdminReminderHealthRow[] = [];
   let healthReminderQueue: AdminReminderQueueHealth | null = null;
   let healthJobRuns: AdminJobRunHealthRow[] = [];
+  let healthJobEvents: AdminJobRunHealthRow[] = [];
   let healthAuditRows: AdminAuditHealthRow[] = [];
   let healthContract: {
     healthy: boolean;
@@ -825,7 +840,8 @@ export default async function AdminPage({ searchParams }: PageProps) {
       metadataResponse,
       reminderResponse,
       nextRaceResponse,
-      jobRunsResponse,
+      jobStatusResponse,
+      jobEventsResponse,
       auditResponse,
       healthContractResponse
     ] = await Promise.all([
@@ -839,19 +855,22 @@ export default async function AdminPage({ searchParams }: PageProps) {
         ? supabase
             .from("races")
             .select(
-              "id,race_name,pick_format,pick_window_key,qualifying_start_at,race_date,results_status,season_id,round_number"
+              "id,race_name,pick_format,pick_window_key,qualifying_start_at,race_date,results_status,season_id,round_number,field_frozen_at"
             )
             .eq("season_id", activeSeason.id)
             .eq("is_archived", false)
             .order("round_number", { ascending: true })
             .returns<HealthRaceRow[]>()
-        : Promise.resolve({ data: [], error: null })
-      ,
+        : Promise.resolve({ data: [], error: null }),
+      supabase
+        .from("job_status")
+        .select("job_name,status,summary,error_message,last_started_at,last_completed_at")
+        .order("last_started_at", { ascending: false }),
       supabase
         .from("job_runs")
         .select("job_name,status,summary,error_message,started_at,completed_at")
         .order("started_at", { ascending: false })
-        .limit(32),
+        .limit(12),
       supabase
         .from("admin_audit_events")
         .select("action,entity_type,summary,created_at")
@@ -864,7 +883,8 @@ export default async function AdminPage({ searchParams }: PageProps) {
       metadataResponse.error ||
       reminderResponse.error ||
       nextRaceResponse.error ||
-      jobRunsResponse.error ||
+      jobStatusResponse.error ||
+      jobEventsResponse.error ||
       auditResponse.error ||
       healthContractResponse.error
     ) {
@@ -872,7 +892,8 @@ export default async function AdminPage({ searchParams }: PageProps) {
         metadataResponse.error?.message ??
           reminderResponse.error?.message ??
           nextRaceResponse.error?.message ??
-          jobRunsResponse.error?.message ??
+          jobStatusResponse.error?.message ??
+          jobEventsResponse.error?.message ??
           auditResponse.error?.message ??
           healthContractResponse.error?.message ??
           "Failed loading system health."
@@ -881,7 +902,15 @@ export default async function AdminPage({ searchParams }: PageProps) {
 
     healthSchemaVersion = metadataResponse.data?.value ?? null;
     healthReminderRows = (reminderResponse.data ?? []) as AdminReminderHealthRow[];
-    healthJobRuns = (jobRunsResponse.data ?? []) as AdminJobRunHealthRow[];
+    healthJobRuns = (jobStatusResponse.data ?? []).map((row) => ({
+      completed_at: row.last_completed_at,
+      error_message: row.error_message,
+      job_name: row.job_name,
+      started_at: row.last_started_at,
+      status: row.status,
+      summary: row.summary
+    })) as AdminJobRunHealthRow[];
+    healthJobEvents = (jobEventsResponse.data ?? []) as AdminJobRunHealthRow[];
     healthAuditRows = (auditResponse.data ?? []) as AdminAuditHealthRow[];
     healthContract =
       healthContractResponse.data &&
@@ -901,10 +930,13 @@ export default async function AdminPage({ searchParams }: PageProps) {
         Date.parse(pickLockAtForRace(healthNextRace)) - currentTime
       );
       const [{ count }, gate, queueResponse] = await Promise.all([
-        supabase
-          .from("picks")
-          .select("id", { count: "exact", head: true })
-          .in("race_id", healthNextRaces.map((race) => race.id)),
+        registeredProfileIds.size > 0
+          ? supabase
+              .from("picks")
+              .select("id", { count: "exact", head: true })
+              .in("race_id", healthNextRaces.map((race) => race.id))
+              .in("user_id", Array.from(registeredProfileIds))
+          : Promise.resolve({ count: 0, data: null, error: null }),
         getPreviousRaceResultsGate(supabase, healthNextRace),
         reminderWindow
           ? supabase
@@ -987,11 +1019,15 @@ export default async function AdminPage({ searchParams }: PageProps) {
           activeSeasonName={activeSeason?.display_name ?? null}
           auditRows={healthAuditRows}
           cleanupTestFlowDataAction={cleanupTestFlowDataAction}
+          currentTime={currentTime}
           emailEnabled={process.env.PICK_EMAILS_ENABLED?.toLowerCase() === "true"}
           healthContract={healthContract}
+          jobEvents={healthJobEvents}
           jobRuns={healthJobRuns}
           nextRace={healthNextRace ? {
             expectedPickCount: registeredProfileIds.size * healthNextRaces.length,
+            fieldFrozen: healthNextRaces.every((race) => Boolean(race.field_frozen_at)),
+            pickLockAt: pickLockAtForRace(healthNextRace),
             pickCount: healthPickCount,
             previousResultsStatus: healthPreviousResultsStatus,
             raceName: pickWindowDisplayName(healthNextRaces, healthNextRace.race_name),
@@ -1014,6 +1050,7 @@ export default async function AdminPage({ searchParams }: PageProps) {
               ? { id: activeSeason.id, seasonYear: activeSeason.season_year }
               : null
           }
+          requestToken={recoveryRequestToken}
           restorePoints={restorePoints}
         />
       ) : null}
@@ -1028,7 +1065,7 @@ export default async function AdminPage({ searchParams }: PageProps) {
       ) : null}
 
       {activeTab === "drivers" ? (
-        <section className="mt-6 rounded-lg border border-slate-200 bg-white p-4 sm:p-6">
+        <section className="mt-6 rounded-lg ui-panel border border-slate-200 bg-white p-4 sm:p-6">
         <AdminWorkspaceHeader
           description="Opening order comes from the prior final standings. Published results update current points and groups."
           title="Drivers"
@@ -1055,7 +1092,7 @@ export default async function AdminPage({ searchParams }: PageProps) {
               </span>
               <select
                 required
-                className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+                className="w-full rounded-md ui-control-border border border-slate-300 px-3 py-2 text-sm"
                 defaultValue={
                   seasons.find((season) => season.status === "upcoming")?.id ??
                   activeSeason?.id ??
@@ -1075,13 +1112,13 @@ export default async function AdminPage({ searchParams }: PageProps) {
             </label>
             <textarea
               required
-              className="mt-3 h-36 w-full rounded-md border border-slate-300 px-3 py-2 font-mono text-xs"
+              className="mt-3 h-36 w-full rounded-md ui-control-border border border-slate-300 px-3 py-2 font-mono text-xs"
               data-testid="admin-standings-import-input"
               name="standings_paste"
               placeholder={"1\tAlex Palou\tHonda\t711\t0\t17\t8\t6\t14\t15\t778"}
             />
             <SubmitButton
-              className="mt-3 rounded-md bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-700"
+              className="mt-3 rounded-md ui-action-primary bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-700"
               data-testid="admin-standings-import-submit"
               pendingLabel="Synchronizing..."
             >
@@ -1092,7 +1129,7 @@ export default async function AdminPage({ searchParams }: PageProps) {
 
         <form
           action={createDriverAction}
-          className="mt-5 grid gap-3 rounded-md border border-slate-200 bg-slate-50 p-4 md:grid-cols-5"
+          className="mt-5 grid gap-3 rounded-md ui-panel-muted border border-slate-200 bg-slate-50 p-4 md:grid-cols-5"
           data-testid="admin-driver-create-form"
         >
           <input name="tab" type="hidden" value="drivers" />
@@ -1159,7 +1196,7 @@ export default async function AdminPage({ searchParams }: PageProps) {
             />
           ) : (
             drivers.map((driver) => (
-              <details key={driver.id} className="rounded-md border border-slate-200 bg-white">
+              <details key={driver.id} className="rounded-md ui-panel border border-slate-200 bg-white">
                 <summary className="cursor-pointer px-3 py-3">
                   <div className="inline-flex w-full flex-wrap items-center justify-between gap-3 align-middle">
                     <div className="flex min-w-0 items-center gap-3">
@@ -1167,7 +1204,7 @@ export default async function AdminPage({ searchParams }: PageProps) {
                       // eslint-disable-next-line @next/next/no-img-element
                       <img
                         alt={driver.driver_name}
-                        className="h-10 w-10 rounded-full border border-slate-300 object-cover"
+                        className="h-10 w-10 rounded-full ui-control-border border border-slate-300 object-cover"
                         src={driver.image_url}
                       />
                     ) : (
@@ -1262,7 +1299,7 @@ export default async function AdminPage({ searchParams }: PageProps) {
       ) : null}
 
       {activeTab === "races" ? (
-        <section className="mt-6 rounded-lg border border-slate-200 bg-white p-4 sm:p-6">
+        <section className="mt-6 rounded-lg ui-panel border border-slate-200 bg-white p-4 sm:p-6">
         <AdminWorkspaceHeader
           description={`Create and manage race weeks. Times use ${LEAGUE_TIME_ZONE}.`}
           meta={
@@ -1273,7 +1310,7 @@ export default async function AdminPage({ searchParams }: PageProps) {
                   Viewing season
                 </span>
                 <select
-                  className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm"
+                  className="rounded-md ui-control-border border border-slate-300 bg-white px-3 py-2 text-sm"
                   defaultValue={selectedRaceSeason ? String(selectedRaceSeason.id) : ""}
                   name="race_season_id"
                 >
@@ -1285,7 +1322,7 @@ export default async function AdminPage({ searchParams }: PageProps) {
                 </select>
               </label>
               <button
-                className="rounded-md border border-slate-300 px-3 py-2 text-sm font-semibold"
+                className="rounded-md ui-control-border border border-slate-300 px-3 py-2 text-sm font-semibold"
                 type="submit"
               >
                 View
@@ -1303,7 +1340,7 @@ export default async function AdminPage({ searchParams }: PageProps) {
             <div className="grid gap-2">
               {seasons.map((season) => (
                 <div
-                  className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-slate-200 bg-white px-3 py-2"
+                  className="flex flex-wrap items-center justify-between gap-3 rounded-md ui-panel border border-slate-200 bg-white px-3 py-2"
                   key={season.id}
                 >
                   <div>
@@ -1328,7 +1365,7 @@ export default async function AdminPage({ searchParams }: PageProps) {
                             Rules PDF path / URL
                           </span>
                           <input
-                            className="w-52 rounded-md border border-slate-300 px-2.5 py-2 text-xs"
+                            className="w-52 rounded-md ui-control-border border border-slate-300 px-2.5 py-2 text-xs"
                             defaultValue={season.rules_document_url ?? ""}
                             name="rules_document_url"
                             placeholder="/docs/2027-rules.pdf"
@@ -1336,7 +1373,7 @@ export default async function AdminPage({ searchParams }: PageProps) {
                           />
                         </label>
                         <SubmitButton
-                          className="rounded-md border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-800 hover:bg-slate-100"
+                          className="rounded-md ui-control-border border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-800 hover:bg-slate-100"
                           pendingLabel="Saving..."
                         >
                           Save rules
@@ -1359,7 +1396,7 @@ export default async function AdminPage({ searchParams }: PageProps) {
                             required
                             autoCapitalize="none"
                             autoComplete="off"
-                            className="w-44 rounded-md border border-slate-300 px-2.5 py-2 text-xs"
+                            className="w-44 rounded-md ui-control-border border border-slate-300 px-2.5 py-2 text-xs"
                             maxLength={64}
                             minLength={8}
                             name="invite_code"
@@ -1374,7 +1411,7 @@ export default async function AdminPage({ searchParams }: PageProps) {
                             required
                             autoCapitalize="none"
                             autoComplete="off"
-                            className="w-44 rounded-md border border-slate-300 px-2.5 py-2 text-xs"
+                            className="w-44 rounded-md ui-control-border border border-slate-300 px-2.5 py-2 text-xs"
                             maxLength={64}
                             minLength={8}
                             name="invite_code_confirmation"
@@ -1382,7 +1419,7 @@ export default async function AdminPage({ searchParams }: PageProps) {
                           />
                         </label>
                         <SubmitButton
-                          className="rounded-md border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-800 hover:bg-slate-100"
+                          className="rounded-md ui-control-border border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-800 hover:bg-slate-100"
                           pendingLabel="Saving..."
                         >
                           Save code
@@ -1393,7 +1430,7 @@ export default async function AdminPage({ searchParams }: PageProps) {
                       <form action={activateLeagueSeasonAction}>
                         <input name="season_id" type="hidden" value={season.id} />
                         <ConfirmSubmitButton
-                          className="rounded-md bg-slate-900 px-3 py-2 text-xs font-semibold text-white hover:bg-slate-700 disabled:bg-slate-400"
+                          className="rounded-md ui-action-primary bg-slate-900 px-3 py-2 text-xs font-semibold text-white hover:bg-slate-700 disabled:bg-slate-400"
                           confirmMessage={`Activate ${season.season_year}? The current season must already be saved to the Hall of Fame. Driver points will reset to zero while final ranking order is retained for opening groups.`}
                           disabled={
                             !season.registration_code_configured_at ||
@@ -1408,7 +1445,7 @@ export default async function AdminPage({ searchParams }: PageProps) {
                     ) : null}
                     {!season.roster_configured_at && season.status !== "completed" ? (
                       <Link
-                        className="rounded-md border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-800 hover:bg-slate-100"
+                        className="rounded-md ui-control-border border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-800 hover:bg-slate-100"
                         href="/admin?tab=drivers"
                       >
                         Configure roster
@@ -1424,7 +1461,7 @@ export default async function AdminPage({ searchParams }: PageProps) {
                   New season year
                 </span>
                 <input
-                  className="w-36 rounded-md border border-slate-300 px-3 py-2 text-sm"
+                  className="w-36 rounded-md ui-control-border border border-slate-300 px-3 py-2 text-sm"
                   max={2100}
                   min={2000}
                   name="season_year"
@@ -1441,7 +1478,7 @@ export default async function AdminPage({ searchParams }: PageProps) {
                   required
                   autoCapitalize="none"
                   autoComplete="off"
-                  className="w-48 rounded-md border border-slate-300 px-3 py-2 text-sm"
+                  className="w-48 rounded-md ui-control-border border border-slate-300 px-3 py-2 text-sm"
                   maxLength={64}
                   minLength={8}
                   name="invite_code"
@@ -1457,7 +1494,7 @@ export default async function AdminPage({ searchParams }: PageProps) {
                   required
                   autoCapitalize="none"
                   autoComplete="off"
-                  className="w-48 rounded-md border border-slate-300 px-3 py-2 text-sm"
+                  className="w-48 rounded-md ui-control-border border border-slate-300 px-3 py-2 text-sm"
                   maxLength={64}
                   minLength={8}
                   name="invite_code_confirmation"
@@ -1466,7 +1503,7 @@ export default async function AdminPage({ searchParams }: PageProps) {
                 />
               </label>
               <SubmitButton
-                className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-800 hover:bg-slate-100"
+                className="rounded-md ui-control-border border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-800 hover:bg-slate-100"
                 pendingLabel="Creating..."
               >
                 Create season
@@ -1490,7 +1527,7 @@ export default async function AdminPage({ searchParams }: PageProps) {
             </span>
             <select
               required
-              className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+              className="w-full rounded-md ui-control-border border border-slate-300 px-3 py-2 text-sm"
               defaultValue={activeSeason ? String(activeSeason.id) : ""}
               name="season_id"
             >
@@ -1511,7 +1548,7 @@ export default async function AdminPage({ searchParams }: PageProps) {
             </span>
             <input
               required
-              className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+              className="w-full rounded-md ui-control-border border border-slate-300 px-3 py-2 text-sm"
               defaultValue={
                 selectedRaceSeason?.id === activeSeason?.id && currentSeasonRaces.length > 0
                   ? Math.max(...currentSeasonRaces.map((race) => race.round_number)) + 1
@@ -1531,7 +1568,7 @@ export default async function AdminPage({ searchParams }: PageProps) {
             </span>
             <input
               required
-              className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+              className="w-full rounded-md ui-control-border border border-slate-300 px-3 py-2 text-sm"
               data-testid="admin-race-create-name"
               maxLength={200}
               name="race_name"
@@ -1545,7 +1582,7 @@ export default async function AdminPage({ searchParams }: PageProps) {
             </span>
             <input
               required
-              className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+              className="w-full rounded-md ui-control-border border border-slate-300 px-3 py-2 text-sm"
               data-testid="admin-race-create-qualifying"
               name="qualifying_start_at"
               type="datetime-local"
@@ -1558,7 +1595,7 @@ export default async function AdminPage({ searchParams }: PageProps) {
             </span>
             <input
               required
-              className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+              className="w-full rounded-md ui-control-border border border-slate-300 px-3 py-2 text-sm"
               data-testid="admin-race-create-start"
               name="race_date"
               type="datetime-local"
@@ -1571,7 +1608,7 @@ export default async function AdminPage({ searchParams }: PageProps) {
             </span>
             <input
               required
-              className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+              className="w-full rounded-md ui-control-border border border-slate-300 px-3 py-2 text-sm"
               data-testid="admin-race-create-payout"
               min={0}
               name="payout"
@@ -1585,7 +1622,7 @@ export default async function AdminPage({ searchParams }: PageProps) {
               Pick rules
             </span>
             <select
-              className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+              className="w-full rounded-md ui-control-border border border-slate-300 px-3 py-2 text-sm"
               data-testid="admin-race-create-pick-format"
               defaultValue="standard"
               name="pick_format"
@@ -1660,7 +1697,7 @@ export default async function AdminPage({ searchParams }: PageProps) {
           </div>
         </form>
 
-        <details className="mt-6 rounded-md border border-slate-200 bg-slate-50">
+        <details className="mt-6 rounded-md ui-panel-muted border border-slate-200 bg-slate-50">
           <summary className="cursor-pointer px-4 py-3 text-sm font-semibold text-slate-900">
             Advanced winner tools
           </summary>
@@ -1676,7 +1713,7 @@ export default async function AdminPage({ searchParams }: PageProps) {
               </span>
               <select
                 required
-                className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+                className="w-full rounded-md ui-control-border border border-slate-300 px-3 py-2 text-sm"
                 data-testid="admin-race-winner-race-select"
                 name="race_id"
               >
@@ -1694,7 +1731,7 @@ export default async function AdminPage({ searchParams }: PageProps) {
                 Fantasy winner
               </span>
               <select
-                className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+                className="w-full rounded-md ui-control-border border border-slate-300 px-3 py-2 text-sm"
                 data-testid="admin-race-winner-profile-select"
                 name="winner_profile_id"
               >
@@ -1709,7 +1746,7 @@ export default async function AdminPage({ searchParams }: PageProps) {
 
             <div className="flex items-end">
               <SubmitButton
-                className="w-full rounded-md bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-700"
+                className="w-full rounded-md ui-action-primary bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-700"
                 data-testid="admin-race-winner-submit"
                 pendingLabel="Saving..."
               >
@@ -1730,7 +1767,7 @@ export default async function AdminPage({ searchParams }: PageProps) {
             />
           ) : (
             races.map((race) => (
-              <details key={`race-edit-${race.id}`} className="rounded-md border border-slate-200 bg-white">
+              <details key={`race-edit-${race.id}`} className="rounded-md ui-panel border border-slate-200 bg-white">
                 <summary className="cursor-pointer px-3 py-3">
                   <div className="inline-flex w-full flex-wrap items-center justify-between gap-3 align-middle">
                     <div className="flex min-w-0 items-center gap-3">
@@ -1783,7 +1820,7 @@ export default async function AdminPage({ searchParams }: PageProps) {
 
                 <div className="border-t border-slate-200 p-3">
                   <dl className="grid gap-2 text-sm sm:grid-cols-2 lg:grid-cols-5">
-                    <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2">
+                    <div className="rounded-md ui-panel-muted border border-slate-200 bg-slate-50 px-3 py-2">
                       <dt className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
                         Qualifying
                       </dt>
@@ -1791,7 +1828,7 @@ export default async function AdminPage({ searchParams }: PageProps) {
                         {formatDateTime(race.qualifying_start_at)}
                       </dd>
                     </div>
-                    <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2">
+                    <div className="rounded-md ui-panel-muted border border-slate-200 bg-slate-50 px-3 py-2">
                       <dt className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
                         Fantasy Winner
                       </dt>
@@ -1801,7 +1838,7 @@ export default async function AdminPage({ searchParams }: PageProps) {
                           : "Not set"}
                       </dd>
                     </div>
-                    <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2">
+                    <div className="rounded-md ui-panel-muted border border-slate-200 bg-slate-50 px-3 py-2">
                       <dt className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
                         Winner Status
                       </dt>
@@ -1813,7 +1850,7 @@ export default async function AdminPage({ searchParams }: PageProps) {
                             : "Awaiting results"}
                       </dd>
                     </div>
-                    <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2">
+                    <div className="rounded-md ui-panel-muted border border-slate-200 bg-slate-50 px-3 py-2">
                       <dt className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
                         Pick field
                       </dt>
@@ -1821,7 +1858,7 @@ export default async function AdminPage({ searchParams }: PageProps) {
                         {race.field_frozen_at ? "Frozen" : "Editable"}
                       </dd>
                     </div>
-                    <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2">
+                    <div className="rounded-md ui-panel-muted border border-slate-200 bg-slate-50 px-3 py-2">
                       <dt className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
                         Archive
                       </dt>
@@ -1947,7 +1984,7 @@ export default async function AdminPage({ searchParams }: PageProps) {
                         value={normalizeRacePickFormat(race.pick_format)}
                       />
                       {race.field_frozen_at ? (
-                        <label className="flex items-center gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-900 md:col-span-6">
+                        <label className="flex items-center gap-2 rounded-md border ui-status-warning border-amber-200 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-900 md:col-span-6">
                           <input name="allow_schedule_correction" type="checkbox" />
                           Confirm a qualifying/race-time correction if submitted picks already
                           exist. Leave unchecked for name, payout, or image changes.
@@ -2001,7 +2038,7 @@ export default async function AdminPage({ searchParams }: PageProps) {
                           Shared pick deadline
                         </span>
                         <select
-                          className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+                          className="w-full rounded-md ui-control-border border border-slate-300 px-3 py-2 text-sm"
                           defaultValue={
                             pickWindowPartnerByRaceId.get(race.id)?.id
                               ? String(pickWindowPartnerByRaceId.get(race.id)?.id)
@@ -2107,7 +2144,7 @@ export default async function AdminPage({ searchParams }: PageProps) {
 
       {activeTab === "results" ? (
         <section
-          className="mt-6 rounded-lg border border-slate-200 bg-white p-4 sm:p-6"
+          className="mt-6 rounded-lg ui-panel border border-slate-200 bg-white p-4 sm:p-6"
           key={`results-workspace-${selectedResultRace?.id ?? "empty"}`}
         >
         <AdminWorkspaceHeader
@@ -2115,7 +2152,7 @@ export default async function AdminPage({ searchParams }: PageProps) {
           title="Race Results"
         />
 
-        <div className="mt-4 rounded-md border border-slate-200 bg-slate-50 p-3">
+        <div className="mt-4 rounded-md ui-panel-muted border border-slate-200 bg-slate-50 p-3">
           <form
             action="/admin"
             className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto]"
@@ -2127,7 +2164,7 @@ export default async function AdminPage({ searchParams }: PageProps) {
                 Results workspace
               </span>
               <select
-                className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm"
+                className="w-full rounded-md ui-control-border border border-slate-300 bg-white px-3 py-2 text-sm"
                 defaultValue={selectedResultRace ? String(selectedResultRace.id) : ""}
                 name="result_race_id"
               >
@@ -2143,7 +2180,7 @@ export default async function AdminPage({ searchParams }: PageProps) {
               </select>
             </label>
             <button
-              className="self-end rounded-md bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-700"
+              className="self-end rounded-md ui-action-primary bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-700"
               type="submit"
             >
               Open race
@@ -2159,16 +2196,16 @@ export default async function AdminPage({ searchParams }: PageProps) {
                 <span
                   className={`rounded-full border px-2 py-0.5 font-semibold ${
                     selectedResultRace.results_status === "published"
-                      ? "border-emerald-200 bg-emerald-50 text-emerald-800"
-                      : "border-amber-200 bg-amber-50 text-amber-800"
+                      ? "ui-status-success border-emerald-200 bg-emerald-50 text-emerald-800"
+                      : "ui-status-warning border-amber-200 bg-amber-50 text-amber-800"
                   }`}
                 >
                   {selectedResultRace.results_status === "published" ? "Published" : "Draft"}
                 </span>
-                <span className="rounded-full border border-slate-200 bg-white px-2 py-0.5 font-semibold text-slate-700">
+                <span className="rounded-full ui-panel border border-slate-200 bg-white px-2 py-0.5 font-semibold text-slate-700">
                   {pickRows.length} picks
                 </span>
-                <span className="rounded-full border border-slate-200 bg-white px-2 py-0.5 font-semibold text-slate-700">
+                <span className="rounded-full ui-panel border border-slate-200 bg-white px-2 py-0.5 font-semibold text-slate-700">
                   {results.length} result rows
                 </span>
               </div>
@@ -2220,7 +2257,7 @@ export default async function AdminPage({ searchParams }: PageProps) {
                 </span>
                 <textarea
                   required
-                  className="h-32 w-full rounded-md border border-slate-300 px-3 py-2 font-mono text-xs"
+                  className="h-32 w-full rounded-md ui-control-border border border-slate-300 px-3 py-2 font-mono text-xs"
                   data-testid="admin-indy-qualifying-paste"
                   name="qualifying_order_paste"
                   placeholder={"1\t10\tAlex Palou\n2\t5\tPato O'Ward\n3\t2\tJosef Newgarden"}
@@ -2228,7 +2265,7 @@ export default async function AdminPage({ searchParams }: PageProps) {
               </label>
             </div>
             <SubmitButton
-              className="mt-3 rounded-md bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-700"
+              className="mt-3 rounded-md ui-action-primary bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-700"
               data-testid="admin-indy-qualifying-submit"
               disabled={activeIndy500Races.length === 0}
               pendingLabel="Importing..."
@@ -2266,13 +2303,13 @@ export default async function AdminPage({ searchParams }: PageProps) {
         />
 
         <details
-          className="mt-5 rounded-lg border border-slate-200 bg-slate-50"
+          className="mt-5 rounded-lg ui-panel-muted border border-slate-200 bg-slate-50"
           data-testid="admin-scoring-audit"
         >
           <summary className="cursor-pointer px-4 py-3 text-sm font-semibold text-slate-900">
             <span className="inline-flex w-full flex-wrap items-center justify-between gap-3 align-middle">
               <span>Scoring Audit</span>
-            <span className="rounded-md border border-slate-300 bg-white px-2 py-1 text-xs font-semibold text-slate-700">
+            <span className="rounded-md ui-control-border border border-slate-300 bg-white px-2 py-1 text-xs font-semibold text-slate-700">
               {scoringAudits.length} race{scoringAudits.length === 1 ? "" : "s"}
             </span>
             </span>
@@ -2288,7 +2325,7 @@ export default async function AdminPage({ searchParams }: PageProps) {
             <div className="mt-3 grid gap-3">
               {scoringAudits.map((audit, auditIndex) => (
                 <details
-                  className="rounded-md border border-slate-200 bg-white"
+                  className="rounded-md ui-panel border border-slate-200 bg-white"
                   data-testid={`admin-scoring-audit-race-${audit.raceId}`}
                   key={`scoring-audit-${audit.raceId}`}
                   open={auditIndex === 0}
@@ -2318,7 +2355,7 @@ export default async function AdminPage({ searchParams }: PageProps) {
 
                   <div className="border-t border-slate-200 p-3">
                     <dl className="grid gap-2 text-sm sm:grid-cols-2 lg:grid-cols-4">
-                      <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2">
+                      <div className="rounded-md ui-panel-muted border border-slate-200 bg-slate-50 px-3 py-2">
                         <dt className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
                           Results
                         </dt>
@@ -2326,7 +2363,7 @@ export default async function AdminPage({ searchParams }: PageProps) {
                           {audit.resultCount} rows
                         </dd>
                       </div>
-                      <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2">
+                      <div className="rounded-md ui-panel-muted border border-slate-200 bg-slate-50 px-3 py-2">
                         <dt className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
                           Picks
                         </dt>
@@ -2334,7 +2371,7 @@ export default async function AdminPage({ searchParams }: PageProps) {
                           {audit.submittedPickCount} submitted / {audit.noPickCount} fallback
                         </dd>
                       </div>
-                      <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2">
+                      <div className="rounded-md ui-panel-muted border border-slate-200 bg-slate-50 px-3 py-2">
                         <dt className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
                           Range
                         </dt>
@@ -2342,7 +2379,7 @@ export default async function AdminPage({ searchParams }: PageProps) {
                           {audit.lowestPossibleScore}-{audit.highestPossibleScore}
                         </dd>
                       </div>
-                      <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2">
+                      <div className="rounded-md ui-panel-muted border border-slate-200 bg-slate-50 px-3 py-2">
                         <dt className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
                           Official Avg Speed
                         </dt>
@@ -2354,7 +2391,7 @@ export default async function AdminPage({ searchParams }: PageProps) {
 
                     <div className="mt-3 max-h-80 overflow-auto rounded-md border border-slate-200">
                       <table className="min-w-full text-left text-xs">
-                        <thead className="bg-slate-50 text-slate-700">
+                        <thead className="ui-table-head bg-slate-50 text-slate-700">
                           <tr>
                             <th className="px-2 py-1.5 font-semibold">Rank</th>
                             <th className="px-2 py-1.5 font-semibold">Team</th>
@@ -2406,7 +2443,7 @@ export default async function AdminPage({ searchParams }: PageProps) {
           </div>
         </details>
 
-        <details className="mt-5 rounded-md border border-slate-200 bg-white">
+        <details className="mt-5 rounded-md ui-panel border border-slate-200 bg-white">
           <summary className="cursor-pointer px-4 py-3 text-sm font-semibold text-slate-900">
             Manual result entry
           </summary>
@@ -2422,7 +2459,7 @@ export default async function AdminPage({ searchParams }: PageProps) {
               value={String(selectedResultRace?.id ?? "")}
             />
             <input name="race_id" type="hidden" value={String(selectedResultRace?.id ?? "")} />
-            <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2">
+            <div className="rounded-md ui-panel-muted border border-slate-200 bg-slate-50 px-3 py-2">
               <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Race</p>
               <p className="mt-1 text-sm font-semibold text-slate-900">
                 {selectedResultRace
@@ -2437,7 +2474,7 @@ export default async function AdminPage({ searchParams }: PageProps) {
               </span>
               <select
                 required
-                className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+                className="w-full rounded-md ui-control-border border border-slate-300 px-3 py-2 text-sm"
                 data-testid="admin-results-manual-driver-select"
                 name="driver_id"
               >
@@ -2456,7 +2493,7 @@ export default async function AdminPage({ searchParams }: PageProps) {
               </span>
               <input
                 required
-                className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+                className="w-full rounded-md ui-control-border border border-slate-300 px-3 py-2 text-sm"
                 data-testid="admin-results-manual-points"
                 min={0}
                 name="points"
@@ -2465,7 +2502,7 @@ export default async function AdminPage({ searchParams }: PageProps) {
               />
             </label>
 
-            <label className="flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-900 md:col-span-4">
+            <label className="flex items-start gap-2 rounded-md border ui-status-warning border-amber-200 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-900 md:col-span-4">
               <input className="mt-0.5" name="confirm_results_correction" type="checkbox" />
               Check only when intentionally editing a published race. The race will return to
               draft until the complete corrected field is republished.
@@ -2473,7 +2510,7 @@ export default async function AdminPage({ searchParams }: PageProps) {
 
             <div className="flex items-end">
               <SubmitButton
-                className="w-full rounded-md bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-700"
+                className="w-full rounded-md ui-action-primary bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-700"
                 data-testid="admin-results-manual-submit"
                 pendingLabel="Saving draft..."
               >
@@ -2493,7 +2530,7 @@ export default async function AdminPage({ searchParams }: PageProps) {
               value={String(selectedResultRace?.id ?? "")}
             />
             <input name="race_id" type="hidden" value={String(selectedResultRace?.id ?? "")} />
-            <div className="rounded-md border border-slate-200 bg-white px-3 py-2">
+            <div className="rounded-md ui-panel border border-slate-200 bg-white px-3 py-2">
               <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
                 Complete draft race
               </p>
@@ -2513,7 +2550,7 @@ export default async function AdminPage({ searchParams }: PageProps) {
               </span>
               <input
                 required
-                className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+                className="w-full rounded-md ui-control-border border border-slate-300 px-3 py-2 text-sm"
                 max={300}
                 min={0.001}
                 name="official_winning_average_speed"
@@ -2523,13 +2560,13 @@ export default async function AdminPage({ searchParams }: PageProps) {
             </label>
             <div className="flex items-end">
               <SubmitButton
-                className="w-full rounded-md bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-700"
+                className="w-full rounded-md ui-action-primary bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-700"
                 pendingLabel="Publishing..."
               >
                 Publish complete draft
               </SubmitButton>
             </div>
-            <label className="flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-900 md:col-span-3">
+            <label className="flex items-start gap-2 rounded-md border ui-status-warning border-amber-200 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-900 md:col-span-3">
               <input className="mt-0.5" name="confirm_results_correction" type="checkbox" />
               Check only when intentionally republishing an already published race.
             </label>
@@ -2575,7 +2612,7 @@ export default async function AdminPage({ searchParams }: PageProps) {
               </p>
               {!hallOfFameMigrationReady ? (
                 <p className="mt-2 text-xs font-semibold text-amber-800">
-                  Hall of Fame database setup is incomplete. Review System Health before using this control.
+                  Hall of Fame database setup is incomplete. Review Race Week before using this control.
                 </p>
               ) : null}
             </div>
@@ -2583,7 +2620,7 @@ export default async function AdminPage({ searchParams }: PageProps) {
               <input name="tab" type="hidden" value="results" />
               <input name="season_id" type="hidden" value={String(activeSeason?.id ?? "")} />
               <ConfirmSubmitButton
-                className="rounded-md bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
+                className="rounded-md ui-action-primary bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
                 confirmMessage={
                   savedHallOfFameSeason
                     ? `Replace the saved ${activeSeason?.season_year} Hall of Fame standings with the current final calculation?`
@@ -2598,13 +2635,13 @@ export default async function AdminPage({ searchParams }: PageProps) {
           </div>
         </Disclosure>
 
-        <details className="mt-5 rounded-md border border-slate-200 bg-white">
+        <details className="mt-5 rounded-md ui-panel border border-slate-200 bg-white">
           <summary className="cursor-pointer px-3 py-3 text-sm font-semibold text-slate-900">
             Saved result rows ({sortedResults.length})
           </summary>
           <div className="max-h-96 overflow-auto border-t border-slate-200">
             <table className="min-w-full text-left text-sm">
-              <thead className="bg-slate-50 text-slate-700">
+              <thead className="ui-table-head bg-slate-50 text-slate-700">
                 <tr>
                   <th className="px-3 py-2 font-semibold">Race</th>
                   <th className="px-3 py-2 font-semibold">Driver</th>
@@ -2642,7 +2679,7 @@ export default async function AdminPage({ searchParams }: PageProps) {
       ) : null}
 
       {activeTab === "feedback" ? (
-        <section className="mt-6 rounded-lg border border-slate-200 bg-white p-4 sm:p-6">
+        <section className="mt-6 rounded-lg ui-panel border border-slate-200 bg-white p-4 sm:p-6">
           <AdminWorkspaceHeader
             description="Review participant bug reports and improvement ideas in manageable batches."
             meta={
@@ -2664,7 +2701,7 @@ export default async function AdminPage({ searchParams }: PageProps) {
                 Status
               </span>
               <select
-                className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm"
+                className="w-full rounded-md ui-control-border border border-slate-300 bg-white px-3 py-2 text-sm"
                 defaultValue={feedbackStatus}
                 name="feedback_status"
               >
@@ -2675,7 +2712,7 @@ export default async function AdminPage({ searchParams }: PageProps) {
               </select>
             </label>
             <button
-              className="min-h-10 rounded-md border border-slate-300 px-3 py-2 text-sm font-semibold"
+              className="min-h-10 rounded-md ui-control-border border border-slate-300 px-3 py-2 text-sm font-semibold"
               type="submit"
             >
               Apply
@@ -2690,7 +2727,7 @@ export default async function AdminPage({ searchParams }: PageProps) {
               />
             ) : (
               feedbackItems.map((item) => (
-                <details key={item.id} className="rounded-md border border-slate-200 bg-white">
+                <details key={item.id} className="rounded-md ui-panel border border-slate-200 bg-white">
                   <summary className="cursor-pointer px-3 py-3">
                     <div className="inline-flex w-full flex-wrap items-center justify-between gap-3 align-middle">
                       <div className="min-w-0">
@@ -2733,7 +2770,7 @@ export default async function AdminPage({ searchParams }: PageProps) {
                           Workflow status
                         </span>
                         <select
-                          className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm"
+                          className="w-full rounded-md ui-control-border border border-slate-300 bg-white px-3 py-2 text-sm"
                           defaultValue={item.status}
                           name="status"
                         >
@@ -2743,7 +2780,7 @@ export default async function AdminPage({ searchParams }: PageProps) {
                         </select>
                       </label>
                       <SubmitButton
-                        className="min-h-10 rounded-md border border-slate-300 px-3 py-2 text-sm font-semibold"
+                        className="min-h-10 rounded-md ui-control-border border border-slate-300 px-3 py-2 text-sm font-semibold"
                         pendingLabel="Updating..."
                       >
                         Update status
@@ -2767,7 +2804,7 @@ export default async function AdminPage({ searchParams }: PageProps) {
             >
               <Link
                 aria-disabled={feedbackPage <= 1}
-                className={`rounded-md border border-slate-300 px-3 py-2 text-sm font-semibold ${
+                className={`rounded-md ui-control-border border border-slate-300 px-3 py-2 text-sm font-semibold ${
                   feedbackPage <= 1 ? "pointer-events-none opacity-50" : ""
                 }`}
                 href={feedbackPageHref(feedbackPage - 1)}
@@ -2779,7 +2816,7 @@ export default async function AdminPage({ searchParams }: PageProps) {
               </span>
               <Link
                 aria-disabled={feedbackPage >= feedbackPageCount}
-                className={`rounded-md border border-slate-300 px-3 py-2 text-sm font-semibold ${
+                className={`rounded-md ui-control-border border border-slate-300 px-3 py-2 text-sm font-semibold ${
                   feedbackPage >= feedbackPageCount ? "pointer-events-none opacity-50" : ""
                 }`}
                 href={feedbackPageHref(feedbackPage + 1)}

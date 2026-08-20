@@ -18,7 +18,7 @@ export function PicksRaceSelect({ races, selectedRaceId }: Props) {
     <form action="/leaderboard" method="get">
       <input name="tab" type="hidden" value="picks" />
       <select
-        className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900"
+        className="w-full rounded-md ui-control-border border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900"
         defaultValue={selectedRaceId ? String(selectedRaceId) : ""}
         id="leaderboard-race-select"
         name="race_id"

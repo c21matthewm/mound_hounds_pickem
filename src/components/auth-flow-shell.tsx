@@ -58,7 +58,7 @@ type AuthFormPanelProps = {
 
 export function AuthFormPanel({ children, className = "" }: AuthFormPanelProps) {
   return (
-    <div className={`mt-6 rounded-lg border border-slate-200 bg-white p-5 shadow-sm ${className}`}>
+    <div className={`mt-6 rounded-lg ui-panel border border-slate-200 bg-white p-5 shadow-sm ${className}`}>
       {children}
     </div>
   );

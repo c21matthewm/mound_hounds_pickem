@@ -5,6 +5,8 @@ import { redirect } from "next/navigation";
 import { sanitizeNextPath } from "@/lib/query";
 import { loadActiveLeagueSeason } from "@/lib/seasons";
 import { invalidateScoringCache } from "@/lib/scoring-cache";
+import { consumeRegistrationAttempt } from "@/lib/registration-rate-limit";
+import { resolveAuthOrigin } from "@/lib/site-url";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
 import { createServiceRoleSupabaseClient } from "@/lib/supabase/service-role";
 
@@ -36,21 +38,7 @@ const friendlyAuthError = (message: string): string => {
 
 const getOrigin = async (): Promise<string> => {
   const requestHeaders = await headers();
-  const explicitOrigin = requestHeaders.get("origin");
-  if (explicitOrigin) {
-    return explicitOrigin;
-  }
-
-  const forwardedHost = requestHeaders.get("x-forwarded-host");
-  const host = requestHeaders.get("host");
-  const resolvedHost = forwardedHost ?? host;
-  if (resolvedHost) {
-    const forwardedProto = requestHeaders.get("x-forwarded-proto");
-    const proto = forwardedProto ?? (resolvedHost.includes("localhost") ? "http" : "https");
-    return `${proto}://${resolvedHost}`;
-  }
-
-  return process.env.NEXT_PUBLIC_SITE_URL ?? "http://localhost:3000";
+  return resolveAuthOrigin({ requestOrigin: requestHeaders.get("origin") });
 };
 
 export async function signInAction(formData: FormData) {
@@ -110,6 +98,23 @@ export async function signUpAction(formData: FormData) {
   }
 
   const serviceSupabase = createServiceRoleSupabaseClient();
+  let registrationAttemptAllowed = false;
+  try {
+    registrationAttemptAllowed = await consumeRegistrationAttempt({
+      email,
+      supabase: serviceSupabase
+    });
+  } catch (rateLimitError) {
+    console.error(
+      "[auth] registration rate limit failed:",
+      rateLimitError instanceof Error ? rateLimitError.message : rateLimitError
+    );
+    errorRedirect("/signup", "Registration could not be verified. Please try again shortly.");
+  }
+  if (!registrationAttemptAllowed) {
+    errorRedirect("/signup", "Too many registration attempts. Wait 15 minutes and try again.");
+  }
+
   const { data: inviteCodeValid, error: inviteCodeError } = await serviceSupabase.rpc(
     "validate_season_invite_code",
     {
@@ -334,6 +339,28 @@ export async function setSeasonParticipationAction(formData: FormData) {
     const selectedActiveSeason = activeSeason!;
 
     const serviceSupabase = createServiceRoleSupabaseClient();
+    let registrationAttemptAllowed = false;
+    try {
+      registrationAttemptAllowed = await consumeRegistrationAttempt({
+        profileId: currentUser.id,
+        supabase: serviceSupabase
+      });
+    } catch (rateLimitError) {
+      console.error(
+        "[auth] season registration rate limit failed:",
+        rateLimitError instanceof Error ? rateLimitError.message : rateLimitError
+      );
+      errorRedirect(
+        "/season-registration",
+        "Season registration could not be verified. Please try again shortly."
+      );
+    }
+    if (!registrationAttemptAllowed) {
+      errorRedirect(
+        "/season-registration",
+        "Too many invite-code attempts. Wait 15 minutes and try again."
+      );
+    }
     const result = await serviceSupabase.rpc("register_profile_for_season_with_code", {
       p_invite_code: inviteCode,
       p_profile_id: currentUser.id,

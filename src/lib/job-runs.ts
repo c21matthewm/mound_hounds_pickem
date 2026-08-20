@@ -10,6 +10,7 @@ type JobRunOptions<T> = {
     errorMessage?: string | null;
     status: CompletedJobStatus;
   };
+  shouldRecordResult?: (result: T) => boolean;
 };
 
 const asSummary = (value: unknown): Record<string, unknown> => {
@@ -26,7 +27,7 @@ export async function withJobRun<T>(
   options: JobRunOptions<T> = {}
 ): Promise<T> {
   const supabase = createServiceRoleSupabaseClient();
-  const { data: jobRunId, error: startError } = await supabase.rpc("start_job_run", {
+  const { data: jobRunToken, error: startError } = await supabase.rpc("start_job_status", {
     p_job_name: jobName
   });
 
@@ -41,10 +42,13 @@ export async function withJobRun<T>(
       status: "succeeded" as const
     };
 
-    if (typeof jobRunId === "number") {
-      const { error: finishError } = await supabase.rpc("finish_job_run", {
+    if (typeof jobRunToken === "string") {
+      const { error: finishError } = await supabase.rpc("finish_job_status", {
         p_error_message: completion.errorMessage ?? null,
-        p_job_run_id: jobRunId,
+        p_job_name: jobName,
+        p_record_event:
+          completion.status !== "succeeded" || Boolean(options.shouldRecordResult?.(result)),
+        p_run_token: jobRunToken,
         p_status: completion.status,
         p_summary: asSummary(result)
       });
@@ -57,10 +61,12 @@ export async function withJobRun<T>(
   } catch (error) {
     const message = error instanceof Error ? error.message : `Unknown ${jobName} failure.`;
 
-    if (typeof jobRunId === "number") {
-      const { error: finishError } = await supabase.rpc("finish_job_run", {
+    if (typeof jobRunToken === "string") {
+      const { error: finishError } = await supabase.rpc("finish_job_status", {
         p_error_message: message,
-        p_job_run_id: jobRunId,
+        p_job_name: jobName,
+        p_record_event: true,
+        p_run_token: jobRunToken,
         p_status: "failed",
         p_summary: {}
       });

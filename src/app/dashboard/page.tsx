@@ -71,7 +71,7 @@ export default async function DashboardPage({ searchParams }: PageProps) {
 
       <section aria-label="Current race status" className="mt-5">
         <div className="flex min-w-0 items-start gap-3">
-          <div className="shrink-0 rounded-lg border border-slate-200 bg-white p-1 shadow-sm">
+          <div className="shrink-0 rounded-lg ui-panel border border-slate-200 bg-white p-1 shadow-sm">
             <div
               aria-hidden
               className="h-[88px] w-[88px] rounded-md bg-slate-200 bg-cover bg-center"
@@ -82,7 +82,7 @@ export default async function DashboardPage({ searchParams }: PageProps) {
             />
           </div>
 
-          <div className="min-w-0 flex-1 overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm">
+          <div className="min-w-0 flex-1 overflow-hidden rounded-lg ui-panel border border-slate-200 bg-white shadow-sm">
             <div className="p-3 sm:p-4">
               <div className="flex min-w-0 items-start justify-between gap-2 sm:gap-3">
                 <div className="flex min-w-0 flex-wrap items-center gap-2">

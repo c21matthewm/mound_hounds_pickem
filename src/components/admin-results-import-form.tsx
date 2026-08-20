@@ -88,7 +88,7 @@ type Props = {
 
 const buildInputKey = (raceId: string, rawPaste: string): string => `${raceId}::${rawPaste}`;
 
-const summaryCardClassName = "rounded-md border border-slate-200 bg-white px-3 py-3 shadow-sm";
+const summaryCardClassName = "rounded-md ui-panel border border-slate-200 bg-white px-3 py-3 shadow-sm";
 
 const formatScore = (value: number | null): string => (value === null ? "Incomplete" : String(value));
 
@@ -363,7 +363,7 @@ export function AdminResultsImportForm({
   return (
     <form
       action={action}
-      className="mt-5 rounded-md border border-slate-200 bg-slate-50 p-4"
+      className="mt-5 rounded-md ui-panel-muted border border-slate-200 bg-slate-50 p-4"
       data-testid="admin-results-import-form"
     >
       <input name="tab" type="hidden" value="results" />
@@ -375,7 +375,7 @@ export function AdminResultsImportForm({
       </p>
 
       <div className="mt-3 grid gap-3 md:grid-cols-4">
-        <div className="rounded-md border border-slate-200 bg-white px-3 py-2 md:col-span-1">
+        <div className="rounded-md ui-panel border border-slate-200 bg-white px-3 py-2 md:col-span-1">
           <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Race</p>
           <p
             className="mt-1 text-sm font-semibold text-slate-900"
@@ -395,7 +395,7 @@ export function AdminResultsImportForm({
           </span>
           <textarea
             required
-            className="h-40 w-full rounded-md border border-slate-300 px-3 py-2 font-mono text-xs"
+            className="h-40 w-full rounded-md ui-control-border border border-slate-300 px-3 py-2 font-mono text-xs"
             data-testid="admin-results-import-paste"
             name="results_paste"
             onChange={(event) => setRawPaste(event.target.value)}
@@ -409,7 +409,7 @@ export function AdminResultsImportForm({
 
       <div className="mt-3 flex flex-wrap items-center gap-2">
         <button
-          className="rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-100"
+          className="rounded-md ui-control-border border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-100"
           data-testid="admin-results-import-preview"
           onClick={runPreview}
           type="button"
@@ -417,7 +417,7 @@ export function AdminResultsImportForm({
           Preview mapping
         </button>
         <SubmitButton
-          className="rounded-md bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
+          className="rounded-md ui-action-primary bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
           data-testid="admin-results-import-submit"
           disabled={!canPublish}
           pendingLabel="Publishing..."
@@ -436,7 +436,7 @@ export function AdminResultsImportForm({
       </div>
 
       {selectedRace?.resultsStatus === "published" ? (
-        <label className="mt-3 flex items-start gap-2 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs font-medium text-red-800">
+        <label className="mt-3 flex items-start gap-2 rounded-md border ui-status-danger border-red-200 bg-red-50 px-3 py-2 text-xs font-medium text-red-800">
           <input className="mt-0.5" name="confirm_results_correction" required type="checkbox" />
           Confirm that this is an intentional correction replacing already published results.
           Standings will be recalculated immediately.
@@ -444,13 +444,13 @@ export function AdminResultsImportForm({
       ) : null}
 
       {previewError ? (
-        <p className="mt-3 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+        <p className="mt-3 rounded-md border ui-status-danger border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
           {previewError}
         </p>
       ) : null}
 
       {previewState ? (
-        <section className="mt-4 rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+        <section className="mt-4 rounded-lg ui-panel border border-slate-200 bg-white p-4 shadow-sm">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
               <h4 className="text-base font-semibold text-slate-900">
@@ -462,7 +462,7 @@ export function AdminResultsImportForm({
                   : "Standard format: 6 championship-standing groups."}
               </p>
             </div>
-            <span className="rounded-full border border-slate-300 bg-slate-50 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-slate-700">
+            <span className="rounded-full ui-control-border border border-slate-300 bg-slate-50 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-slate-700">
               {previewState.groupCount} groups
             </span>
           </div>
@@ -537,32 +537,32 @@ export function AdminResultsImportForm({
           </dl>
 
           {previewState.missingScoreGroups.length > 0 ? (
-            <p className="mt-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+            <p className="mt-3 rounded-md border ui-status-warning border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
               Highest/lowest possible scores need at least one mapped result in each pick group.
               Missing group(s): {previewState.missingScoreGroups.join(", ")}.
             </p>
           ) : null}
 
           {!previewState.positionsValid ? (
-            <p className="mt-3 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
+            <p className="mt-3 rounded-md border ui-status-danger border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
               Finishing positions must be unique and contiguous from 1 through the final official row.
             </p>
           ) : null}
 
           {previewState.missingOfficialGroups.length > 0 ? (
-            <p className="mt-3 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
+            <p className="mt-3 rounded-md border ui-status-danger border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
               The official order has no participating driver from group(s): {previewState.missingOfficialGroups.join(", ")}.
             </p>
           ) : null}
 
           {previewState.zeroPointDriverNames.length > MAX_STANDARD_NONSTARTERS ? (
-            <p className="mt-3 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
+            <p className="mt-3 rounded-md border ui-status-danger border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
               More than {MAX_STANDARD_NONSTARTERS} snapshotted drivers are missing. Review the pasted table before publishing.
             </p>
           ) : null}
 
           {previewState.zeroPointDriverNames.length > 0 ? (
-            <div className="mt-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+            <div className="mt-3 rounded-md border ui-status-warning border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
               <p className="font-semibold">
                 These pickable drivers are absent from the official finishing order and will receive 0 points.
               </p>
@@ -571,13 +571,13 @@ export function AdminResultsImportForm({
           ) : null}
 
           {previewState.unmatchedDriverNames.length > 0 ? (
-            <p className="mt-3 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
+            <p className="mt-3 rounded-md border ui-status-danger border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
               Unmatched drivers: {previewState.unmatchedDriverNames.join(", ")}
             </p>
           ) : null}
 
           {previewState.noPickTeamNames.length > 0 ? (
-            <div className="mt-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+            <div className="mt-3 rounded-md border ui-status-warning border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
               <p className="font-semibold">No-pick users will receive the lowest possible score.</p>
               <p className="mt-1">
                 {previewState.noPickTeamNames.slice(0, 12).join(", ")}
@@ -590,7 +590,7 @@ export function AdminResultsImportForm({
 
           <div className="mt-4 max-h-72 overflow-auto rounded border border-slate-200">
             <table className="min-w-full text-left text-xs">
-              <thead className="bg-slate-50 text-slate-700">
+              <thead className="ui-table-head bg-slate-50 text-slate-700">
                 <tr>
                   <th className="px-2 py-1.5 font-semibold">Line</th>
                   <th className="px-2 py-1.5 font-semibold">Position</th>

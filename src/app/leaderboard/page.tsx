@@ -325,7 +325,7 @@ export default async function LeaderboardPage({ searchParams }: PageProps) {
           />
         ) : (
           <>
-            <section className="mt-6 overflow-hidden rounded-lg border border-slate-200 bg-white">
+            <section className="mt-6 overflow-hidden rounded-lg ui-panel border border-slate-200 bg-white">
               <div className="bg-slate-950 p-5 text-white sm:p-6">
                 <p className="text-xs font-semibold uppercase tracking-[0.2em] text-cyan-200">
                   Personal Analytics
@@ -591,7 +591,7 @@ export default async function LeaderboardPage({ searchParams }: PageProps) {
                   <div className="grid gap-2 md:hidden">
                     {season.entries.map((entry) => (
                       <div
-                        className="flex items-center justify-between gap-3 rounded-md border border-slate-200 bg-slate-50 px-3 py-2"
+                        className="flex items-center justify-between gap-3 rounded-md ui-panel-muted border border-slate-200 bg-slate-50 px-3 py-2"
                         key={`${season.seasonId}-${entry.teamName}`}
                       >
                         <div className="flex min-w-0 items-center gap-3">
@@ -611,7 +611,7 @@ export default async function LeaderboardPage({ searchParams }: PageProps) {
 
                   <div className="hidden overflow-x-auto rounded-md border border-slate-200 md:block">
                     <table className="min-w-full text-left text-sm">
-                      <thead className="bg-slate-50 text-slate-700">
+                      <thead className="ui-table-head bg-slate-50 text-slate-700">
                         <tr>
                           <th className="w-24 px-3 py-2 font-semibold">Final Rank</th>
                           <th className="px-3 py-2 font-semibold">Team</th>
