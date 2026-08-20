@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { revalidatePath } from "next/cache";
+import { verifyAdminRequestToken } from "@/lib/admin-request-token";
 import { invalidateScoringCache } from "@/lib/scoring-cache";
+import { canonicalSiteOrigin } from "@/lib/site-url";
 import {
   SEASON_BACKUP_FORMAT,
   SEASON_BACKUP_FORMAT_VERSION,
@@ -14,7 +16,11 @@ export const dynamic = "force-dynamic";
 const MAX_REQUEST_BYTES = 8 * 1024 * 1024;
 
 type AdminContext =
-  | { ok: true; supabase: Awaited<ReturnType<typeof createServerSupabaseClient>> }
+  | {
+      ok: true;
+      supabase: Awaited<ReturnType<typeof createServerSupabaseClient>>;
+      userId: string;
+    }
   | { ok: false; response: NextResponse };
 
 const requireApiAdmin = async (): Promise<AdminContext> => {
@@ -44,7 +50,7 @@ const requireApiAdmin = async (): Promise<AdminContext> => {
     };
   }
 
-  return { ok: true, supabase };
+  return { ok: true, supabase, userId: user.id };
 };
 
 const errorMessage = (error: unknown): string =>
@@ -53,11 +59,20 @@ const errorMessage = (error: unknown): string =>
 const isSameOriginRequest = (request: Request): boolean => {
   const origin = request.headers.get("origin");
   if (!origin) {
-    return true;
+    return false;
   }
 
   try {
-    return new URL(origin).host === new URL(request.url).host;
+    const expectedOrigin =
+      process.env.NODE_ENV === "production"
+        ? canonicalSiteOrigin()
+        : new URL(request.url).origin;
+    const fetchSite = request.headers.get("sec-fetch-site");
+    return (
+      new URL(origin).origin === expectedOrigin &&
+      (!fetchSite || fetchSite === "same-origin") &&
+      request.headers.get("x-mound-hounds-request") === "season-recovery"
+    );
   } catch {
     return false;
   }
@@ -162,6 +177,19 @@ export async function POST(request: Request) {
   try {
     const body = await parseRequestBody(request);
     const action = typeof body.action === "string" ? body.action : "";
+    const requestToken = typeof body.requestToken === "string" ? body.requestToken : "";
+    if (
+      !verifyAdminRequestToken({
+        purpose: "season-recovery",
+        token: requestToken,
+        userId: admin.userId
+      })
+    ) {
+      return NextResponse.json(
+        { error: "This recovery page expired. Refresh the page before continuing." },
+        { status: 403 }
+      );
+    }
 
     if (action === "create") {
       const seasonId = Number(body.seasonId);
@@ -173,8 +201,9 @@ export async function POST(request: Request) {
         typeof body.label === "string" && body.label.trim()
           ? body.label.trim().slice(0, 160)
           : `Manual backup ${new Date().toISOString()}`;
-      const { data, error } = await admin.supabase.rpc("create_season_restore_point", {
+      const { data, error } = await admin.supabase.rpc("create_season_restore_point_v2", {
         p_label: label,
+        p_retention_key: null,
         p_season_id: seasonId,
         p_source: "manual"
       });
@@ -230,7 +259,7 @@ export async function POST(request: Request) {
         );
       }
 
-      const { data, error } = await admin.supabase.rpc("restore_season_from_restore_point", {
+      const { data, error } = await admin.supabase.rpc("restore_season_from_restore_point_v2", {
         p_confirmation_year: confirmationYear,
         p_restore_point_id: restorePointId
       });

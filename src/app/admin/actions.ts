@@ -12,6 +12,7 @@ import {
 import { finalizeRaceWinnerNow } from "@/lib/fantasy-winner";
 import { deleteManagedRaceTitleImage, uploadRaceTitleImage } from "@/lib/race-images";
 import { requireAdmin } from "@/lib/admin";
+import { recordAdminAudit } from "@/lib/admin-audit";
 import { normalizeDriverName, parseIndycarResultsPaste } from "@/lib/indycar-results";
 import { parseQualifyingOrderPaste } from "@/lib/qualifying-order";
 import {
@@ -20,12 +21,8 @@ import {
   isValidAverageSpeedMph,
   isRacePickFormat,
   normalizeRacePickFormat,
-  pickLockAtForRace,
   type RacePickFormat
 } from "@/lib/race-format";
-import { getReminderWindow } from "@/lib/reminder-windows";
-import { REMINDER_MAX_ATTEMPTS } from "@/lib/reminder-queue";
-import { createServiceRoleSupabaseClient } from "@/lib/supabase/service-role";
 import { withMigrationHint } from "@/lib/supabase/migration-errors";
 import { invalidateScoringCache } from "@/lib/scoring-cache";
 import { buildLeagueScoringSnapshotUncached } from "@/lib/scoring";
@@ -35,7 +32,6 @@ import { getLeagueYear, parseLeagueDateTimeLocalInput } from "@/lib/timezone";
 const asText = (value: FormDataEntryValue | null): string =>
   typeof value === "string" ? value.trim() : "";
 
-const TEST_FLOW_PREFIX = "[TEST FLOW ";
 const MAX_DRIVER_NAME_LENGTH = 100;
 const MAX_PROFILE_NAME_LENGTH = 100;
 const MAX_RACE_NAME_LENGTH = 200;
@@ -131,44 +127,45 @@ const adminMutationRedirect = (
   return adminRedirect(key, value, tab, resultRaceId);
 };
 
-const recordAdminAudit = async (
-  supabase: SupabaseClient,
-  event: {
-    action: string;
-    afterState?: Record<string, unknown> | null;
-    beforeState?: Record<string, unknown> | null;
-    entityId: string;
-    entityType: string;
-    summary: string;
-  }
-): Promise<void> => {
-  const { error } = await supabase.rpc("write_admin_audit_event", {
-    p_action: event.action,
-    p_after_state: event.afterState ?? null,
-    p_before_state: event.beforeState ?? null,
-    p_entity_id: event.entityId,
-    p_entity_type: event.entityType,
-    p_summary: event.summary
-  });
-
-  if (error) {
-    console.error("[audit] Failed recording admin event:", error.message);
-  }
-};
-
 const createSeasonSafetySnapshot = async (
   supabase: SupabaseClient,
   seasonId: number,
-  label: string
+  label: string,
+  source: "pre_correction" | "pre_rollover" | "result_checkpoint",
+  retentionKey: string
 ): Promise<void> => {
-  const { error } = await supabase.rpc("create_season_restore_point", {
+  const { error } = await supabase.rpc("create_season_restore_point_v2", {
     p_label: label.slice(0, 160),
+    p_retention_key: retentionKey.slice(0, 120),
     p_season_id: seasonId,
-    p_source: "automatic"
+    p_source: source
   });
 
   if (error) {
     throw new Error(withMigrationHint(error.message, SEASON_RECOVERY_MIGRATION_FILE));
+  }
+};
+
+const createPublishedRaceCheckpoint = async (
+  supabase: SupabaseClient,
+  race: { id: number; raceName: string; roundNumber: number; seasonId: number },
+  winnerOutcome: WinnerFinalizationOutcome
+): Promise<string | null> => {
+  try {
+    await createSeasonSafetySnapshot(
+      supabase,
+      race.seasonId,
+      `Finalized R${race.roundNumber}: ${race.raceName}${
+        winnerOutcome.status === "pending" ? " (winner pending)" : ""
+      }`,
+      "result_checkpoint",
+      `race:${race.id}`
+    );
+    return null;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Could not create the race checkpoint.";
+    console.error(`[recovery] Post-publication checkpoint failed for race ${race.id}:`, message);
+    return message;
   }
 };
 
@@ -477,7 +474,9 @@ export async function activateLeagueSeasonAction(formData: FormData) {
       await createSeasonSafetySnapshot(
         supabase,
         currentSeason.id,
-        `Before activating a new season from ${currentSeason.season_year}`
+        `Before activating a new season from ${currentSeason.season_year}`,
+        "pre_rollover",
+        `season:${currentSeason.id}:activation`
       );
     } catch (snapshotError) {
       adminRedirect(
@@ -2138,7 +2137,9 @@ export async function upsertResultAction(formData: FormData) {
       await createSeasonSafetySnapshot(
         supabase,
         resultRace.season_id,
-        `Before correcting R${resultRace.round_number}: ${resultRace.race_name}`
+        `Before correcting R${resultRace.round_number}: ${resultRace.race_name}`,
+        "pre_correction",
+        `race:${selectedRaceId}`
       );
     } catch (snapshotError) {
       redirectWithTab(
@@ -2263,7 +2264,9 @@ export async function publishSavedRaceResultsAction(formData: FormData) {
       await createSeasonSafetySnapshot(
         supabase,
         savedResultRace.season_id,
-        `Before republishing R${savedResultRace.round_number}: ${savedResultRace.race_name}`
+        `Before republishing R${savedResultRace.round_number}: ${savedResultRace.race_name}`,
+        "pre_correction",
+        `race:${selectedRaceId}`
       );
     } catch (snapshotError) {
       redirectWithTab(
@@ -2288,12 +2291,23 @@ export async function publishSavedRaceResultsAction(formData: FormData) {
   }
 
   const winnerOutcome = await finalizePublishedRaceWinner(supabase, selectedRaceId);
+  const checkpointError = await createPublishedRaceCheckpoint(
+    supabase,
+    {
+      id: selectedRaceId,
+      raceName: savedResultRace.race_name,
+      roundNumber: savedResultRace.round_number,
+      seasonId: savedResultRace.season_id
+    },
+    winnerOutcome
+  );
 
   await recordAdminAudit(supabase, {
     action: "publish_results",
     afterState: {
       fantasy_winner_error: winnerOutcome.errorMessage,
       fantasy_winner_status: winnerOutcome.status,
+      recovery_checkpoint_error: checkpointError,
       official_winning_average_speed: officialWinningAverageSpeed,
       published_result_count: Number(publishedCount ?? 0),
       winner_profile_id: winnerOutcome.winnerProfileId
@@ -2309,7 +2323,9 @@ export async function publishSavedRaceResultsAction(formData: FormData) {
   revalidatePath("/picks");
   redirectWithTab(
     "message",
-    `Published ${Number(publishedCount ?? 0)} saved result row(s). Driver standings and groups were refreshed. ${fantasyWinnerPublicationMessage(winnerOutcome)}`
+    `Published ${Number(publishedCount ?? 0)} saved result row(s). Driver standings and groups were refreshed. ${fantasyWinnerPublicationMessage(winnerOutcome)}${
+      checkpointError ? " Create and download a manual safety backup before making another correction." : ""
+    }`
   );
 }
 
@@ -2471,7 +2487,9 @@ export async function importIndycarResultsAction(formData: FormData) {
       await createSeasonSafetySnapshot(
         supabase,
         importResultRace.season_id,
-        `Before replacing R${importResultRace.round_number}: ${importResultRace.race_name}`
+        `Before replacing R${importResultRace.round_number}: ${importResultRace.race_name}`,
+        "pre_correction",
+        `race:${raceId}`
       );
     } catch (snapshotError) {
       redirectWithTab(
@@ -2504,12 +2522,23 @@ export async function importIndycarResultsAction(formData: FormData) {
   }
 
   const winnerOutcome = await finalizePublishedRaceWinner(supabase, raceId);
+  const checkpointError = await createPublishedRaceCheckpoint(
+    supabase,
+    {
+      id: raceId,
+      raceName: importResultRace.race_name,
+      roundNumber: importResultRace.round_number,
+      seasonId: importResultRace.season_id
+    },
+    winnerOutcome
+  );
 
   await recordAdminAudit(supabase, {
     action: "import_and_publish_results",
     afterState: {
       fantasy_winner_error: winnerOutcome.errorMessage,
       fantasy_winner_status: winnerOutcome.status,
+      recovery_checkpoint_error: checkpointError,
       official_winning_average_speed: parsed.winningAverageSpeed,
       published_result_count: Number(publishedCount ?? payload.length),
       winner_profile_id: winnerOutcome.winnerProfileId
@@ -2544,7 +2573,9 @@ export async function importIndycarResultsAction(formData: FormData) {
 
   redirectWithTab(
     "message",
-    `Published ${Number(publishedCount ?? payload.length)} complete result row(s) for ${raceName}. ${raceResultCountText} Driver standings/groups were refreshed. ${fantasyWinnerPublicationMessage(winnerOutcome)}${ignoredSummary}`
+    `Published ${Number(publishedCount ?? payload.length)} complete result row(s) for ${raceName}. ${raceResultCountText} Driver standings/groups were refreshed. ${fantasyWinnerPublicationMessage(winnerOutcome)}${
+      checkpointError ? " Create and download a manual safety backup before making another correction." : ""
+    }${ignoredSummary}`
   );
 }
 
@@ -2651,7 +2682,9 @@ export async function finalizeHallOfFameSeasonAction(formData: FormData) {
     await createSeasonSafetySnapshot(
       supabase,
       seasonIdValue,
-      `Before finalizing ${seasonYear} Hall of Fame standings`
+      `Before finalizing ${seasonYear} Hall of Fame standings`,
+      "pre_rollover",
+      `season:${seasonIdValue}:hall-of-fame`
     );
   } catch (snapshotError) {
     redirectWithTab(
@@ -2694,277 +2727,5 @@ export async function finalizeHallOfFameSeasonAction(formData: FormData) {
   redirectWithTab(
     "message",
     `${seasonYear} final standings saved to the Hall of Fame. This snapshot remains available after drivers are retired or replaced.`
-  );
-}
-
-export async function retryFailedPickRemindersAction(formData: FormData) {
-  const { supabase } = await requireAdmin();
-  const raceId = parsePositiveInteger(asText(formData.get("race_id")));
-  const reminderType = asText(formData.get("reminder_type"));
-
-  if (!raceId || !["5d_open", "2d", "4h"].includes(reminderType)) {
-    adminRedirect("error", "Select a valid reminder queue before retrying.", "health");
-  }
-  const selectedRaceId = raceId as number;
-
-  const { data: race, error: raceError } = await supabase
-    .from("races")
-    .select(
-      "id,race_name,is_archived,season_id,pick_format,qualifying_start_at,race_date,league_seasons!inner(status)"
-    )
-    .eq("id", selectedRaceId)
-    .maybeSingle<{
-      id: number;
-      is_archived: boolean;
-      league_seasons: { status: string } | Array<{ status: string }>;
-      pick_format: RacePickFormat;
-      qualifying_start_at: string;
-      race_date: string;
-      race_name: string;
-      season_id: number;
-    }>();
-  if (raceError || !race) {
-    adminRedirect(
-      "error",
-      raceError?.message ?? "The selected reminder race was not found.",
-      "health"
-    );
-  }
-  const selectedRace = race!;
-  const seasonStatus = Array.isArray(selectedRace.league_seasons)
-    ? selectedRace.league_seasons[0]?.status
-    : selectedRace.league_seasons.status;
-  if (selectedRace.is_archived || seasonStatus !== "active") {
-    adminRedirect(
-      "error",
-      "Failed reminders can only be retried for an active-season race.",
-      "health"
-    );
-  }
-  const activeReminderWindow = getReminderWindow(
-    Date.parse(pickLockAtForRace(selectedRace)) - Date.now()
-  );
-  if (activeReminderWindow?.key !== reminderType) {
-    adminRedirect(
-      "error",
-      "This reminder window is no longer active. Refresh System Health before retrying.",
-      "health"
-    );
-  }
-
-  const serviceRoleSupabase = createServiceRoleSupabaseClient();
-  const { data: resetRows, error: resetError } = await serviceRoleSupabase
-    .from("pick_reminders")
-    .update({
-      attempt_count: 0,
-      delivery_status: "pending",
-      last_attempt_at: null,
-      last_error: null,
-      lease_expires_at: "1970-01-01T00:00:00.000Z"
-    })
-    .eq("race_id", selectedRaceId)
-    .eq("reminder_type", reminderType)
-    .eq("delivery_status", "failed")
-    .gte("attempt_count", REMINDER_MAX_ATTEMPTS)
-    .select("id");
-  if (resetError) {
-    adminRedirect("error", resetError.message, "health");
-  }
-
-  const resetCount = resetRows?.length ?? 0;
-  await recordAdminAudit(supabase, {
-    action: "retry_failed_reminders",
-    afterState: {
-      reminder_type: reminderType,
-      reset_count: resetCount
-    },
-    entityId: String(selectedRaceId),
-    entityType: "race",
-    summary: `Reset ${resetCount} terminal ${reminderType} reminder deliver${
-      resetCount === 1 ? "y" : "ies"
-    } for ${selectedRace.race_name}.`
-  });
-
-  revalidatePath("/admin");
-  adminRedirect(
-    "message",
-    resetCount > 0
-      ? `${resetCount} failed reminder deliver${
-          resetCount === 1 ? "y is" : "ies are"
-        } queued for the next cron run.`
-      : "No permanently failed deliveries were waiting for this race and reminder window.",
-    "health"
-  );
-}
-
-export async function updateFeedbackStatusAction(formData: FormData) {
-  const { supabase } = await requireAdmin();
-  const feedbackId = parsePositiveInteger(asText(formData.get("feedback_id")));
-  const status = asText(formData.get("status"));
-  const feedbackPage = parsePositiveInteger(asText(formData.get("feedback_page"))) ?? 1;
-  const requestedFilter = asText(formData.get("feedback_status"));
-  const feedbackStatus = ["all", "new", "in_review", "resolved"].includes(
-    requestedFilter
-  )
-    ? requestedFilter
-    : "all";
-  const redirectWithFeedbackState = (
-    key: "error" | "message",
-    value: string
-  ): never => {
-    const params = new URLSearchParams({
-      [key]: value,
-      feedback_page: String(feedbackPage),
-      feedback_status: feedbackStatus,
-      tab: "feedback"
-    });
-    redirect(`/admin?${params.toString()}`);
-  };
-
-  if (!feedbackId || !["new", "in_review", "resolved"].includes(status)) {
-    redirectWithFeedbackState("error", "Select a valid feedback status.");
-  }
-
-  const { data: existing, error: existingError } = await supabase
-    .from("feedback_items")
-    .select("id,status")
-    .eq("id", feedbackId)
-    .maybeSingle<{ id: number; status: string }>();
-  if (existingError || !existing) {
-    redirectWithFeedbackState(
-      "error",
-      existingError?.message ?? "Feedback submission was not found."
-    );
-  }
-
-  const { error } = await supabase
-    .from("feedback_items")
-    .update({
-      resolved_at: status === "resolved" ? new Date().toISOString() : null,
-      status
-    })
-    .eq("id", feedbackId);
-  if (error) {
-    redirectWithFeedbackState(
-      "error",
-      withMigrationHint(error.message, SEASON_RECOVERY_MIGRATION_FILE)
-    );
-  }
-
-  await recordAdminAudit(supabase, {
-    action: "update_feedback_status",
-    afterState: { status },
-    beforeState: { status: existing!.status },
-    entityId: String(feedbackId),
-    entityType: "feedback",
-    summary: `Marked feedback #${feedbackId} as ${status.replace("_", " ")}.`
-  });
-
-  revalidatePath("/admin");
-  redirectWithFeedbackState("message", "Feedback status updated.");
-}
-
-export async function cleanupTestFlowDataAction(formData: FormData) {
-  await requireAdmin();
-  const tab = parseAdminTab(asText(formData.get("tab"))) ?? "feedback";
-  const redirectWithTab = (key: "error" | "message", value: string): never =>
-    adminMutationRedirect(key, value, tab);
-
-  const serviceRoleSupabase = createServiceRoleSupabaseClient();
-
-  const [testRacesResponse, testProfilesResponse] = await Promise.all([
-    serviceRoleSupabase
-      .from("races")
-      .select("id")
-      .ilike("race_name", `${TEST_FLOW_PREFIX}%`),
-    serviceRoleSupabase
-      .from("profiles")
-      .select("id,team_name")
-      .ilike("team_name", `${TEST_FLOW_PREFIX}%`)
-  ]);
-
-  if (testRacesResponse.error) {
-    redirectWithTab("error", testRacesResponse.error.message);
-  }
-  if (testProfilesResponse.error) {
-    redirectWithTab("error", testProfilesResponse.error.message);
-  }
-
-  const raceIds = (testRacesResponse.data ?? []).map((race) => race.id);
-  const profileRows = testProfilesResponse.data ?? [];
-
-  let deletedRaceCount = 0;
-  if (raceIds.length > 0) {
-    const { data: deletedRaces, error: deleteRacesError } = await serviceRoleSupabase
-      .from("races")
-      .delete()
-      .in("id", raceIds)
-      .select("id");
-
-    if (deleteRacesError) {
-      redirectWithTab("error", deleteRacesError.message);
-    }
-
-    deletedRaceCount = (deletedRaces ?? []).length;
-  }
-
-  let deletedFeedbackCount = 0;
-  {
-    const { data: deletedFeedbackRows, error: deleteFeedbackError } = await serviceRoleSupabase
-      .from("feedback_items")
-      .delete()
-      .ilike("details", `${TEST_FLOW_PREFIX}%`)
-      .select("id");
-
-    if (deleteFeedbackError) {
-      redirectWithTab("error", deleteFeedbackError.message);
-    }
-
-    deletedFeedbackCount = (deletedFeedbackRows ?? []).length;
-  }
-
-  let deletedAuthUserCount = 0;
-  const failedAuthDeletes: string[] = [];
-
-  for (const profileRow of profileRows) {
-    const { error: deleteUserError } = await serviceRoleSupabase.auth.admin.deleteUser(profileRow.id);
-    if (deleteUserError) {
-      failedAuthDeletes.push(`${profileRow.team_name}: ${deleteUserError.message}`);
-      continue;
-    }
-
-    deletedAuthUserCount += 1;
-  }
-
-  const { error: refreshDriverError } = await serviceRoleSupabase.rpc(
-    "refresh_driver_standings_from_published_results"
-  );
-  if (refreshDriverError) {
-    redirectWithTab(
-      "error",
-      `Test artifacts were deleted, but driver standings could not be refreshed: ${withResultPublicationMigrationHint(
-        refreshDriverError.message
-      )}`
-    );
-  }
-
-  revalidatePath("/admin");
-  revalidatePath("/leaderboard");
-  revalidatePath("/picks");
-  revalidatePath("/feedback");
-  revalidatePath("/dashboard");
-
-  if (failedAuthDeletes.length > 0) {
-    redirectWithTab(
-      "error",
-      `Cleanup partly completed. Deleted ${deletedRaceCount} race(s), ${deletedFeedbackCount} feedback row(s), ${deletedAuthUserCount} auth user(s). Failed user deletions: ${failedAuthDeletes.join(
-        " | "
-      )}`
-    );
-  }
-
-  redirectWithTab(
-    "message",
-    `Cleanup completed. Deleted ${deletedRaceCount} race(s), ${deletedFeedbackCount} feedback row(s), and ${deletedAuthUserCount} test auth user(s).`
   );
 }

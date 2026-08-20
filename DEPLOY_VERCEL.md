@@ -132,8 +132,9 @@ supabase/schema.sql
 Then apply `supabase/migrations/20260725_harden_race_and_season_operations.sql`,
 `supabase/migrations/20260726_add_shared_pick_windows.sql`, and
 `supabase/migrations/20260729_scale_weekly_operations.sql`, followed by
-`supabase/migrations/20260730_atomic_picks_and_season_recovery.sql`. For an existing project, apply
-any missing files in `supabase/migrations/` in filename order.
+`supabase/migrations/20260730_atomic_picks_and_season_recovery.sql`, and
+`supabase/migrations/20260818_bound_recovery_jobs_and_registration.sql`. For an existing project,
+apply any missing files in `supabase/migrations/` in filename order.
 
 Most recent scoring safety migration:
 
@@ -244,7 +245,7 @@ from public.league_seasons
 order by season_year desc;
 ```
 
-Then open **Admin -> System Health** while signed into the app as an administrator and confirm the
+Then open **Admin -> Race Week** while signed into the app as an administrator and confirm the
 database contract reports healthy. Do not call `get_app_health_contract()` from Supabase SQL
 Editor; it intentionally requires an authenticated app-admin JWT, which SQL Editor does not have.
 
@@ -276,7 +277,7 @@ where key = 'schema_version';
 
 Existing races should each show `race_count = 1`. A configured doubleheader shows `race_count = 2`,
 consecutive rounds, and `deadline_count = 1`. The schema version must be
-`20260726_shared_pick_windows`. Confirm the health contract from **Admin -> System Health**.
+`20260726_shared_pick_windows`. Confirm the health contract from **Admin -> Race Week**.
 
 Latest weekly-scale operations migration:
 
@@ -287,7 +288,7 @@ supabase/migrations/20260729_scale_weekly_operations.sql
 Apply it after the shared pick-window migration and before deploying the matching application
 code. It limits each reminder cron invocation to 25 queued deliveries with five concurrent sends,
 adds resumable retry state, records partially successful runs as `degraded`, and adds targeted
-failed-delivery retry controls to **Admin -> System Health**.
+failed-delivery retry controls to **Admin -> Race Week**.
 
 Verify it after running:
 
@@ -323,7 +324,7 @@ select
 ```
 
 The schema version must be `20260729_weekly_scale_v1`, and both readiness columns must be `true`.
-Confirm the complete health contract from **Admin -> System Health**. Keep the existing
+Confirm the complete health contract from **Admin -> Race Week**. Keep the existing
 `pick_reminders_5min` cron schedule: a 90-person queue drains across several short, idempotent
 invocations.
 
@@ -354,9 +355,24 @@ select
     as season_restore_ready;
 ```
 
-The schema version must be `20260730_atomic_picks_recovery_v1`, and all readiness columns must be
-`true`. Then open **Admin -> System Health** and **Admin -> Recovery** in the authenticated app.
-Do not call admin-only health or recovery functions directly from Supabase SQL Editor.
+After applying only this migration, the interim schema version is
+`20260730_atomic_picks_recovery_v1` and all readiness columns must be `true`.
+
+Latest recovery, job-retention, and registration-protection migration:
+
+```text
+supabase/migrations/20260818_bound_recovery_jobs_and_registration.sql
+```
+
+Apply it after the atomic-pick migration and before deploying the matching application code. It
+bounds automatic restore points, keeps one current heartbeat per scheduled job, prunes old job
+events, rate-limits season invite attempts with keyed hashes, and hardens recovery requests.
+
+Verify the final contract by running `supabase/operations/01_verify_production_health.sql`. The
+schema version must be `20260818_recovery_jobs_security_v1`; every `schema`, `function`, and
+`storage` row must report `PASS`. Then open **Admin -> Race Week** and **Admin -> Recovery** in
+the authenticated app. Do not call admin-only health or recovery functions directly from Supabase
+SQL Editor.
 
 After the operations migration but before the shared-window and weekly-scale migrations, the older
 expected schema versions are `20260725_operations_v2` and `20260726_shared_pick_windows`.
@@ -418,6 +434,9 @@ Open the production URL and test:
 4. Confirm `/picks`, `/leaderboard`, `/rules`, and `/feedback` load.
 5. Login as admin and confirm `/admin?tab=health` reports the expected schema version.
 6. Open `/admin?tab=recovery`, create one backup, and store the downloaded JSON securely.
+7. In Vercel **Logs**, search for `[security:csp-report]` while opening the main pages. The policy is
+   report-only and cannot block users; investigate repeated same-origin script/style reports before
+   ever changing it to an enforced policy.
 
 Cron health checks:
 

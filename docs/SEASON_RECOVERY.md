@@ -13,7 +13,10 @@ try to rebuild live season rows manually during an incident.
 
 Create a fresh backup before a results correction, season rollover, or unusual database work. The
 database also creates internal restore points automatically after results are published and before
-high-risk admin operations.
+high-risk admin operations. Internal race checkpoints are bounded to one per race, and only the
+five newest correction/legacy automatic points per season are retained. Manual downloads,
+imported files, pre-restore safety points, and season-rollover milestones are not removed by
+automatic retention.
 
 ## Restore after a problem
 
@@ -24,7 +27,7 @@ high-risk admin operations.
 5. Review the backup, current, and changed row counts. Confirm the season and restore-point time.
 6. Type the displayed season year exactly.
 7. Select **Restore This Season** and accept the final confirmation.
-8. Open **Admin > System Health**, then verify Dashboard, Picks, and Leaderboard.
+8. Open **Admin > Race Week**, then verify Dashboard, Picks, and Leaderboard.
 9. Confirm the latest race results, participant count, and several saved participant picks.
 
 The restore runs in one database transaction. If any validation or insert fails, the transaction
@@ -58,11 +61,14 @@ Stored image URLs are included. Maintain service configuration and storage separ
 
 ## Deployment requirement
 
-Apply this migration in Supabase SQL Editor before deploying the matching app:
+Apply these migrations in Supabase SQL Editor, in order, before deploying the matching app:
 
 ```text
 supabase/migrations/20260730_atomic_picks_and_season_recovery.sql
+supabase/migrations/20260818_bound_recovery_jobs_and_registration.sql
 ```
 
-Then open **Admin > System Health** while signed in as an administrator. The expected schema
-version is `20260730_atomic_picks_recovery_v1`.
+Then open **Admin > Race Week** while signed in as an administrator. The expected schema
+version is `20260818_recovery_jobs_security_v1`. Run
+`supabase/operations/01_verify_production_health.sql` and confirm that every `schema`, `function`,
+and `storage` row reports `PASS` before relying on restore for a live incident.

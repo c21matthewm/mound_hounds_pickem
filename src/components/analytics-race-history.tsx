@@ -71,7 +71,7 @@ export function AnalyticsRaceHistory({ rows }: Props) {
       <div className="hidden overflow-x-auto border-t border-slate-200 md:block">
         <table className="min-w-full text-left text-sm">
           <caption className="sr-only">Race-by-race personal analytics</caption>
-          <thead className="bg-slate-50 text-slate-700">
+          <thead className="ui-table-head bg-slate-50 text-slate-700">
             <tr>
               <th className="px-3 py-2 font-semibold">Race</th>
               <th className="px-3 py-2 text-right font-semibold">Finish</th>

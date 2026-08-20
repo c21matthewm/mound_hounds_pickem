@@ -9,11 +9,11 @@ import type {
 export type StatusTone = "info" | "neutral" | "success" | "warning" | "danger";
 
 const STATUS_TONE_CLASSES: Record<StatusTone, string> = {
-  danger: "border-red-200 bg-red-50 text-red-700",
+  danger: "ui-status-danger border-red-200 bg-red-50 text-red-700",
   info: "border-cyan-200 bg-cyan-50 text-cyan-800",
   neutral: "border-slate-200 bg-slate-50 text-slate-700",
-  success: "border-emerald-200 bg-emerald-50 text-emerald-800",
-  warning: "border-amber-200 bg-amber-50 text-amber-800"
+  success: "ui-status-success border-emerald-200 bg-emerald-50 text-emerald-800",
+  warning: "ui-status-warning border-amber-200 bg-amber-50 text-amber-800"
 };
 
 type StatusChipProps = ComponentPropsWithoutRef<"span"> & {
@@ -49,9 +49,10 @@ const ACTION_BASE_CLASSES =
   "inline-flex min-h-10 items-center justify-center rounded-md px-3 py-2 text-sm font-semibold transition";
 
 const ACTION_VARIANT_CLASSES = {
-  primary: "bg-slate-900 text-white shadow-sm hover:bg-slate-700",
+  primary: "ui-action-primary bg-slate-900 text-white shadow-sm hover:bg-slate-700",
   quiet: "text-slate-700 hover:bg-slate-100 hover:text-slate-950",
-  secondary: "border border-slate-300 bg-white text-slate-800 hover:bg-slate-50"
+  secondary:
+    "ui-action-secondary ui-control-border border border-slate-300 bg-white text-slate-800 hover:bg-slate-50"
 };
 
 export function actionControlClassName(
@@ -155,7 +156,7 @@ export function ContentPanel({
 }: ContentPanelProps) {
   return (
     <section
-      className={`rounded-lg border border-slate-200 bg-white p-4 shadow-sm sm:p-5 ${className}`}
+      className={`ui-panel rounded-lg border border-slate-200 bg-white p-4 shadow-sm sm:p-5 ${className}`}
       {...props}
     >
       {children}
@@ -164,7 +165,7 @@ export function ContentPanel({
 }
 
 export const FIELD_CONTROL_CLASSES =
-  "w-full rounded-md border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-950 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-500";
+  "ui-control-border w-full rounded-md border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-950 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-500";
 
 export function fieldControlClassName(className = ""): string {
   return `${FIELD_CONTROL_CLASSES} ${className}`;
@@ -225,8 +226,8 @@ export function RouteTabs({
       <ul
         className={
           layout === "scroll"
-            ? "flex w-max min-w-full gap-1 rounded-md border border-slate-200 bg-white p-1"
-            : "grid w-full grid-cols-2 gap-1 rounded-md border border-slate-200 bg-white p-1 sm:flex sm:w-fit"
+            ? "ui-panel flex w-max min-w-full gap-1 rounded-md border border-slate-200 bg-white p-1"
+            : "ui-panel grid w-full grid-cols-2 gap-1 rounded-md border border-slate-200 bg-white p-1 sm:flex sm:w-fit"
         }
       >
         {items.map((item) => (
@@ -235,7 +236,7 @@ export function RouteTabs({
               aria-current={item.active ? "page" : undefined}
               className={`flex min-h-10 items-center justify-center rounded px-3 py-2 text-center text-sm font-semibold ${
                 item.active
-                  ? "bg-slate-900 text-white shadow-sm"
+                  ? "ui-action-primary bg-slate-900 text-white shadow-sm"
                   : "text-slate-700 hover:bg-slate-100 hover:text-slate-950"
               }`}
               data-testid={item.testId}
@@ -266,7 +267,7 @@ export function Disclosure({
 }: DisclosureProps) {
   return (
     <details
-      className={`group rounded-md border border-slate-200 bg-white ${className}`}
+      className={`ui-panel group rounded-md border border-slate-200 bg-white ${className}`}
       {...props}
     >
       <summary className="cursor-pointer px-4 py-3 marker:text-slate-400">
@@ -304,7 +305,7 @@ export function EmptyState({
 }: EmptyStateProps) {
   return (
     <div
-      className={`rounded-lg border border-dashed border-slate-300 bg-slate-50 px-4 py-5 text-center ${className}`}
+      className={`ui-empty-surface rounded-lg border border-dashed border-slate-300 bg-slate-50 px-4 py-5 text-center ${className}`}
     >
       <h2 className="text-base font-semibold text-slate-900">{title}</h2>
       <div className="mx-auto mt-1 max-w-xl text-sm leading-6 text-slate-600">{description}</div>
@@ -389,7 +390,7 @@ export function DataSurface({
 }: DataSurfaceProps) {
   return (
     <section
-      className={`overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm ${className}`}
+      className={`ui-panel overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm ${className}`}
       {...props}
     >
       <header className="flex min-w-0 flex-wrap items-end justify-between gap-3 border-b border-slate-800 bg-slate-950 px-4 py-3 text-white">

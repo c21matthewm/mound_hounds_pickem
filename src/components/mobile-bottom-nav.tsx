@@ -42,7 +42,7 @@ export function MobileBottomNav() {
       className="fixed inset-x-0 z-40 px-3 md:hidden"
       style={{ bottom: "max(0.75rem, env(safe-area-inset-bottom))" }}
     >
-      <ul className="mx-auto grid max-w-md grid-cols-3 rounded-full border border-slate-200 bg-white/90 p-1 shadow-[0_18px_50px_-28px_rgba(15,23,42,0.85)] backdrop-blur">
+      <ul className="ui-panel ui-panel-translucent mx-auto grid max-w-md grid-cols-3 rounded-full border border-slate-200 bg-white/90 p-1 shadow-[0_18px_50px_-28px_rgba(15,23,42,0.85)] backdrop-blur">
         {NAV_ITEMS.map((item) => {
           const active = isActiveRoute(pathname, item.href);
           return (
@@ -50,7 +50,7 @@ export function MobileBottomNav() {
               <Link
                 className={`flex h-11 items-center justify-center rounded-full text-xs font-semibold ${
                   active
-                    ? "bg-slate-900 text-white shadow-sm"
+                    ? "ui-action-primary bg-slate-900 text-white shadow-sm"
                     : "text-slate-500 hover:bg-slate-100 hover:text-slate-900"
                 }`}
                 href={item.href}

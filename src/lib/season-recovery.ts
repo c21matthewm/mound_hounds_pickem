@@ -1,5 +1,5 @@
 export const SEASON_RECOVERY_MIGRATION_FILE =
-  "supabase/migrations/20260730_atomic_picks_and_season_recovery.sql";
+  "supabase/migrations/20260818_bound_recovery_jobs_and_registration.sql";
 
 export const SEASON_BACKUP_FORMAT = "mound-hounds-season-backup";
 export const SEASON_BACKUP_FORMAT_VERSION = 1;
@@ -16,7 +16,16 @@ export type SeasonRestorePointSummary = {
   schema_version: string;
   season_id: number;
   season_year: number;
-  source: "automatic" | "manual" | "pre_restore" | "uploaded";
+  snapshot_bytes: number;
+  retention_key: string | null;
+  source:
+    | "automatic"
+    | "result_checkpoint"
+    | "pre_correction"
+    | "pre_rollover"
+    | "manual"
+    | "pre_restore"
+    | "uploaded";
 };
 
 export type SeasonRestoreDifference = {

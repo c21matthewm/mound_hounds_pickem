@@ -44,8 +44,13 @@
   },
   "overrides": {
     "minimatch@3.1.5": {
-      "brace-expansion": "1.1.13"
+      "brace-expansion": "1.1.18"
     },
+    "minimatch@9.0.9": {
+      "brace-expansion": "2.1.4"
+    },
+    "js-yaml": "4.3.1",
+    "nanoid": "3.3.18",
     "postcss": "8.5.23",
     "sharp": "$sharp"
   }

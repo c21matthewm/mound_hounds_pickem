@@ -8,7 +8,7 @@ export function ProfileButton({ className = "" }: Props) {
   return (
     <Link
       aria-label="Profile"
-      className={`inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-slate-900 text-white shadow-sm hover:bg-slate-700 ${className}`}
+      className={`inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full ui-action-primary bg-slate-900 text-white shadow-sm hover:bg-slate-700 ${className}`}
       href="/profile"
       title="Profile"
     >

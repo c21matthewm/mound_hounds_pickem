@@ -126,12 +126,13 @@ supabase/migrations/20260725_harden_race_and_season_operations.sql
 supabase/migrations/20260726_add_shared_pick_windows.sql
 supabase/migrations/20260729_scale_weekly_operations.sql
 supabase/migrations/20260730_atomic_picks_and_season_recovery.sql
+supabase/migrations/20260818_bound_recovery_jobs_and_registration.sql
 ```
 
 The expected production schema version is:
 
 ```text
-20260730_atomic_picks_recovery_v1
+20260818_recovery_jobs_security_v1
 ```
 
 Reusable health, cron, and race-diagnostic queries are in `supabase/operations/`. The deployment
@@ -165,7 +166,7 @@ where p.id = u.id
    winning average speed to refresh championship standings/groups and calculate the fantasy winner.
 7. Use the leaderboard tabs to review standings, locked picks by race, participant analytics, and
    finalized Hall of Fame seasons.
-8. Use **Admin > System Health** to verify the schema contract, active season, next-race result
+8. Use **Admin > Race Week** to verify the schema contract, active season, next-race result
    gate, registration count, reminder queue totals, degraded cron runs, and failed-delivery retry
    controls.
 9. Use **Admin > Recovery** to create and download a portable season backup before unusual
