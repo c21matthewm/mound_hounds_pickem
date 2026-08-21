@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 import {
-  computeGroupScoreExtremes,
   pickDriverIds,
   scorePickSelection,
   type PickSelection
@@ -27,40 +26,5 @@ describe("scoring engine", () => {
   it("includes all eight groups for the Indianapolis 500", () => {
     expect(pickDriverIds(pick, 8)).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
     expect(scorePickSelection(pick, 8, () => 5)).toBe(40);
-  });
-
-  it("calculates the highest and lowest valid score from each group", () => {
-    const results = [
-      { group: 1, points: 50 },
-      { group: 1, points: 20 },
-      { group: 2, points: 40 },
-      { group: 2, points: 10 },
-      { group: 3, points: 30 },
-      { group: 3, points: 5 }
-    ];
-
-    expect(
-      computeGroupScoreExtremes(
-        3,
-        results,
-        (result) => result.group,
-        (result) => result.points
-      )
-    ).toEqual({ highest: 120, lowest: 35 });
-  });
-
-  it("ignores results that are not mapped to a valid pick group", () => {
-    expect(
-      computeGroupScoreExtremes(
-        2,
-        [
-          { group: 1, points: 25 },
-          { group: undefined, points: 99 },
-          { group: 3, points: 88 }
-        ],
-        (result) => result.group,
-        (result) => result.points
-      )
-    ).toEqual({ highest: 25, lowest: 25 });
   });
 });

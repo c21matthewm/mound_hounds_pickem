@@ -33,8 +33,19 @@ with checks as (
       ('job_heartbeat_finish', 'public.finish_job_status(text,uuid,text,jsonb,text,boolean)'),
       ('season_backup', 'public.create_season_restore_point_v2(bigint,text,text,text)'),
       ('season_restore_preview', 'public.preview_season_restore_point(uuid)'),
-      ('season_restore', 'public.restore_season_from_restore_point_v2(uuid,integer)')
+      ('season_restore', 'public.restore_season_from_restore_point_v2(uuid,integer)'),
+      ('record_application_error', 'public.record_app_error_event(uuid,text,text,text,text,text,jsonb,uuid)'),
+      ('resolve_application_error', 'public.resolve_app_error_event(bigint)'),
+      ('prune_application_errors', 'public.prune_app_error_events()')
   ) required(name, signature)
+
+  union all
+
+  select
+    'storage',
+    'application_error_inbox',
+    case when to_regclass('public.app_error_events') is not null then 'PASS' else 'WARN' end,
+    coalesce(to_regclass('public.app_error_events')::text, 'missing')
 
   union all
 

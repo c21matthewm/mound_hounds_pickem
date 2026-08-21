@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { updateParticipantAction } from "@/app/admin/actions";
+import { updateParticipantAction } from "@/app/admin/season-actions";
 import { SubmitButton } from "@/components/submit-button";
 import {
   ContentPanel,

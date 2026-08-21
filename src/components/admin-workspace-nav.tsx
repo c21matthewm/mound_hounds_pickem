@@ -2,15 +2,9 @@
 
 import { useRouter } from "next/navigation";
 import { RouteTabs } from "@/components/ui-primitives";
+import type { AdminWorkspaceTab } from "@/lib/admin-tabs";
 
-export type AdminWorkspaceTab =
-  | "drivers"
-  | "participants"
-  | "races"
-  | "results"
-  | "feedback"
-  | "health"
-  | "recovery";
+export type { AdminWorkspaceTab } from "@/lib/admin-tabs";
 
 const ADMIN_WORKSPACES: Array<{
   label: string;

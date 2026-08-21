@@ -25,6 +25,24 @@
   --warn-bg: #fffbeb;
   --warn-border: #fde68a;
   --warn-ink: #92400e;
+  --mobile-edge-spacing: max(0.75rem, env(safe-area-inset-bottom, 0px));
+  --mobile-navigation-bottom: var(--mobile-edge-spacing);
+  --mobile-navigation-height: 3.25rem;
+  --mobile-action-dock-bottom: calc(
+    var(--mobile-navigation-bottom) + var(--mobile-navigation-height) + 0.25rem
+  );
+}
+
+.mobile-bottom-navigation {
+  bottom: 0.75rem;
+  bottom: max(0.75rem, env(safe-area-inset-bottom, 0px));
+  top: auto;
+}
+
+.mobile-action-dock {
+  bottom: 4.25rem;
+  bottom: calc(3.5rem + max(0.75rem, env(safe-area-inset-bottom, 0px)));
+  top: auto;
 }
 
 html {

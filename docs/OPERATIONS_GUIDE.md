@@ -165,13 +165,16 @@ configuration change. Confirm:
 - both scheduled jobs show a current heartbeat; the separate event list stays intentionally sparse
   and records only useful work, degraded runs, and failures;
 - recent admin audit entries match intentional participant, race, result, and season changes.
+- the application error inbox is available and has no unexplained open incidents; repeated errors
+  are grouped, and **Mark resolved** should be used only after the affected workflow is verified.
 
 The latest matching database migrations are
 `supabase/migrations/20260725_harden_race_and_season_operations.sql`,
 `supabase/migrations/20260726_add_shared_pick_windows.sql`, and
 `supabase/migrations/20260729_scale_weekly_operations.sql`, and
 `supabase/migrations/20260730_atomic_picks_and_season_recovery.sql`, and
-`supabase/migrations/20260818_bound_recovery_jobs_and_registration.sql`. Run them in filename order in
+`supabase/migrations/20260818_bound_recovery_jobs_and_registration.sql`, and
+`supabase/migrations/20260821_add_application_error_inbox.sql`. Run them in filename order in
 Supabase SQL Editor before deploying this application version. They are additive and keep existing
 2026 registrations intact. After they succeed, set the 2026 invite code in the admin interface
 before accepting any new 2026 participants.

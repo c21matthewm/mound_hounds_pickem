@@ -45,8 +45,24 @@ export type AdminAuditHealthRow = {
   summary: string;
 };
 
+export type AdminAppErrorRow = {
+  correlation_id: string;
+  error_code: string;
+  first_seen_at: string;
+  id: number;
+  last_seen_at: string;
+  occurrence_count: number;
+  route: string;
+  severity: "warning" | "error" | "critical";
+  subsystem: string;
+  technical_summary: string;
+};
+
 type AdminSystemHealthProps = {
   activeSeasonName: string | null;
+  appErrorInboxReady: boolean;
+  appErrorInboxIssue: string | null;
+  appErrors: AdminAppErrorRow[];
   auditRows: AdminAuditHealthRow[];
   cleanupTestFlowDataAction: (formData: FormData) => void | Promise<void>;
   currentTime: number;
@@ -68,9 +84,11 @@ type AdminSystemHealthProps = {
     roundLabel: string;
     roundNumber: number;
   } | null;
+  openAppErrorCount: number;
   registeredTeamCount: number;
   reminderQueue: AdminReminderQueueHealth | null;
   reminderRows: AdminReminderHealthRow[];
+  resolveAppErrorAction: (formData: FormData) => void | Promise<void>;
   retryFailedRemindersAction: (formData: FormData) => void | Promise<void>;
   schemaVersion: string | null;
   smsEnabled: boolean;
@@ -83,6 +101,9 @@ const formatHealthTime = (value: string): string =>
 
 export function AdminSystemHealth({
   activeSeasonName,
+  appErrorInboxReady,
+  appErrorInboxIssue,
+  appErrors,
   auditRows,
   cleanupTestFlowDataAction,
   currentTime,
@@ -91,9 +112,11 @@ export function AdminSystemHealth({
   jobEvents,
   jobRuns,
   nextRace,
+  openAppErrorCount,
   registeredTeamCount,
   reminderQueue,
   reminderRows,
+  resolveAppErrorAction,
   retryFailedRemindersAction,
   schemaVersion,
   smsEnabled
@@ -148,6 +171,8 @@ export function AdminSystemHealth({
     failedJobCount > 0 ||
     degradedJobCount > 0 ||
     staleJobNames.length > 0 ||
+    !appErrorInboxReady ||
+    openAppErrorCount > 0 ||
     Boolean(nextRace && !previousResultsReady) ||
     permanentReminderFailures > 0;
   const raceWeekSteps = [
@@ -256,6 +281,76 @@ export function AdminSystemHealth({
         <CompactNotice className="mt-4" tone="danger">
           <span className="font-semibold">Database contract needs attention.</span>{" "}
           {schemaIssue}
+        </CompactNotice>
+      ) : null}
+
+      {!appErrorInboxReady ? (
+        <CompactNotice className="mt-3" tone="warning">
+          {appErrorInboxIssue ?? "Application error tracking is unavailable."}
+        </CompactNotice>
+      ) : null}
+
+      {appErrorInboxReady && appErrors.length > 0 ? (
+        <section className="mt-5 rounded-lg border border-red-200 bg-white p-4">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h3 className="font-semibold text-slate-950">Application errors</h3>
+              <p className="mt-1 text-xs leading-5 text-slate-600">
+                Repeated occurrences are grouped. Resolve an incident after verifying the affected
+                workflow.
+              </p>
+            </div>
+            <StatusChip tone="danger">
+              {openAppErrorCount} open
+            </StatusChip>
+          </div>
+          <div className="mt-3 divide-y divide-slate-200 border-y border-slate-200">
+            {appErrors.map((event) => (
+              <article className="py-3" key={event.id}>
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <StatusChip tone={event.severity === "warning" ? "warning" : "danger"}>
+                        {event.severity}
+                      </StatusChip>
+                      <span className="text-xs font-semibold text-slate-700">
+                        {event.subsystem} · {event.error_code}
+                      </span>
+                      {event.occurrence_count > 1 ? (
+                        <span className="text-xs text-slate-500">
+                          {event.occurrence_count} occurrences
+                        </span>
+                      ) : null}
+                    </div>
+                    <p className="mt-1 break-words text-sm font-medium text-slate-900">
+                      {event.technical_summary}
+                    </p>
+                    <p className="mt-1 text-xs text-slate-500">
+                      {event.route} · Last seen {formatHealthTime(event.last_seen_at)} · Ref {event.correlation_id.slice(0, 8).toUpperCase()}
+                    </p>
+                  </div>
+                  <form action={resolveAppErrorAction}>
+                    <input name="event_id" type="hidden" value={event.id} />
+                    <SubmitButton
+                      className={actionControlClassName("secondary", "min-h-9 px-3 py-1.5 text-xs")}
+                      pendingLabel="Resolving..."
+                    >
+                      Mark resolved
+                    </SubmitButton>
+                  </form>
+                </div>
+              </article>
+            ))}
+          </div>
+          {openAppErrorCount > appErrors.length ? (
+            <p className="mt-2 text-xs text-slate-500">
+              Showing the {appErrors.length} most recent open incidents.
+            </p>
+          ) : null}
+        </section>
+      ) : appErrorInboxReady ? (
+        <CompactNotice className="mt-4" tone="success">
+          No open application errors.
         </CompactNotice>
       ) : null}
 

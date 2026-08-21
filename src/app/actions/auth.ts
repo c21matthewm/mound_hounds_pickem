@@ -6,6 +6,8 @@ import { sanitizeNextPath } from "@/lib/query";
 import { loadActiveLeagueSeason } from "@/lib/seasons";
 import { invalidateScoringCache } from "@/lib/scoring-cache";
 import { consumeRegistrationAttempt } from "@/lib/registration-rate-limit";
+import { errorReference, reportAppError } from "@/lib/app-error-reporter";
+import { participantSafeErrorMessage } from "@/lib/app-error-safety";
 import { resolveAuthOrigin } from "@/lib/site-url";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
 import { createServiceRoleSupabaseClient } from "@/lib/supabase/service-role";
@@ -33,8 +35,25 @@ const friendlyAuthError = (message: string): string => {
     return "Your email is not confirmed yet. Check your inbox/spam for the confirmation link, then sign in again.";
   }
 
-  return message;
+  if (normalized.includes("invalid login credentials")) {
+    return "Email or password is incorrect.";
+  }
+
+  if (normalized.includes("user already registered")) {
+    return "An account already exists for this email. Sign in or reset your password.";
+  }
+
+  if (normalized.includes("password") && normalized.includes("weak")) {
+    return "Choose a stronger password and try again.";
+  }
+
+  return "Authentication could not be completed. Please try again.";
 };
+
+const isExpectedAuthError = (message: string): boolean =>
+  /email not confirmed|invalid login credentials|user already registered|weak password|password.*weak|rate limit|too many requests/i.test(
+    message
+  );
 
 const getOrigin = async (): Promise<string> => {
   const requestHeaders = await headers();
@@ -55,7 +74,19 @@ export async function signInAction(formData: FormData) {
 
   if (error) {
     console.error("[auth] signInWithPassword failed:", error.message);
-    errorRedirect("/login", friendlyAuthError(error.message));
+    const reported = isExpectedAuthError(error.message)
+      ? null
+      : await reportAppError({
+          code: "sign-in-failed",
+          context: { operation: "sign_in" },
+          error,
+          route: "/login",
+          subsystem: "auth"
+        });
+    errorRedirect(
+      "/login",
+      `${friendlyAuthError(error.message)}${reported ? errorReference(reported) : ""}`
+    );
   }
 
   redirect(next);
@@ -85,7 +116,22 @@ export async function signUpAction(formData: FormData) {
     errorRedirect("/signup", "Password confirmation does not match.");
   }
 
-  const registrationSeason = await loadActiveLeagueSeason(createServiceRoleSupabaseClient());
+  let registrationSeason: Awaited<ReturnType<typeof loadActiveLeagueSeason>> = null;
+  try {
+    registrationSeason = await loadActiveLeagueSeason(createServiceRoleSupabaseClient());
+  } catch (seasonError) {
+    const reported = await reportAppError({
+      code: "load-signup-season-failed",
+      context: { operation: "signup" },
+      error: seasonError,
+      route: "/signup",
+      subsystem: "auth"
+    });
+    errorRedirect(
+      "/signup",
+      `Registration could not be opened. Please try again.${errorReference(reported)}`
+    );
+  }
   if (!registrationSeason) {
     errorRedirect("/signup", "Registration is not open because no league season is active.");
   }
@@ -109,7 +155,17 @@ export async function signUpAction(formData: FormData) {
       "[auth] registration rate limit failed:",
       rateLimitError instanceof Error ? rateLimitError.message : rateLimitError
     );
-    errorRedirect("/signup", "Registration could not be verified. Please try again shortly.");
+    const reported = await reportAppError({
+      code: "registration-rate-limit-failed",
+      context: { operation: "signup" },
+      error: rateLimitError,
+      route: "/signup",
+      subsystem: "auth"
+    });
+    errorRedirect(
+      "/signup",
+      `Registration could not be verified. Please try again shortly.${errorReference(reported)}`
+    );
   }
   if (!registrationAttemptAllowed) {
     errorRedirect("/signup", "Too many registration attempts. Wait 15 minutes and try again.");
@@ -124,7 +180,17 @@ export async function signUpAction(formData: FormData) {
   );
   if (inviteCodeError) {
     console.error("[auth] invite code validation failed:", inviteCodeError.message);
-    errorRedirect("/signup", "Registration could not be verified. Please try again.");
+    const reported = await reportAppError({
+      code: "invite-code-validation-failed",
+      context: { operation: "signup" },
+      error: inviteCodeError,
+      route: "/signup",
+      subsystem: "auth"
+    });
+    errorRedirect(
+      "/signup",
+      `Registration could not be verified. Please try again.${errorReference(reported)}`
+    );
   }
   if (!inviteCodeValid) {
     errorRedirect("/signup", "The season invite code is incorrect.");
@@ -147,7 +213,19 @@ export async function signUpAction(formData: FormData) {
 
   if (error) {
     console.error("[auth] signUp failed:", error.message);
-    errorRedirect("/signup", friendlyAuthError(error.message));
+    const reported = isExpectedAuthError(error.message)
+      ? null
+      : await reportAppError({
+          code: "sign-up-failed",
+          context: { operation: "sign_up" },
+          error,
+          route: "/signup",
+          subsystem: "auth"
+        });
+    errorRedirect(
+      "/signup",
+      `${friendlyAuthError(error.message)}${reported ? errorReference(reported) : ""}`
+    );
   }
 
   if (!data.user) {
@@ -166,6 +244,14 @@ export async function signUpAction(formData: FormData) {
 
   if (registrationError) {
     console.error("[auth] season registration after signup failed:", registrationError.message);
+    await reportAppError({
+      actorProfileId: createdUser.id,
+      code: "signup-season-registration-failed",
+      context: { operation: "register-after-signup", seasonId: selectedRegistrationSeason.id },
+      error: registrationError,
+      route: "/signup",
+      subsystem: "auth"
+    });
     messageRedirect(
       "/login",
       "Your account was created. Confirm your email, then enter the season invite code after signing in."
@@ -197,7 +283,19 @@ export async function requestPasswordResetAction(formData: FormData) {
 
   if (error) {
     console.error("[auth] resetPasswordForEmail failed:", error.message);
-    errorRedirect("/forgot-password", friendlyAuthError(error.message));
+    const reported = isExpectedAuthError(error.message)
+      ? null
+      : await reportAppError({
+          code: "password-reset-request-failed",
+          context: { operation: "request_password_reset" },
+          error,
+          route: "/forgot-password",
+          subsystem: "auth"
+        });
+    errorRedirect(
+      "/forgot-password",
+      `${friendlyAuthError(error.message)}${reported ? errorReference(reported) : ""}`
+    );
   }
 
   messageRedirect(
@@ -234,12 +332,26 @@ export async function updatePasswordAction(formData: FormData) {
   if (authError || !user) {
     errorRedirect("/login", "Your password reset link expired. Request a new reset link.");
   }
+  const currentUser = user!;
 
   const { error } = await supabase.auth.updateUser({ password });
 
   if (error) {
     console.error("[auth] updateUser password failed:", error.message);
-    errorRedirect("/reset-password", friendlyAuthError(error.message));
+    const reported = isExpectedAuthError(error.message)
+      ? null
+      : await reportAppError({
+          actorProfileId: currentUser.id,
+          code: "password-update-failed",
+          context: { operation: "update_password" },
+          error,
+          route: "/reset-password",
+          subsystem: "auth"
+        });
+    errorRedirect(
+      "/reset-password",
+      `${friendlyAuthError(error.message)}${reported ? errorReference(reported) : ""}`
+    );
   }
 
   await supabase.auth.signOut();
@@ -298,7 +410,18 @@ export async function saveProfileAction(formData: FormData) {
       errorRedirect("/onboarding", "Team name is already taken. Choose a different name.");
     }
 
-    errorRedirect("/onboarding", error.message);
+    const reported = await reportAppError({
+      actorProfileId: userId,
+      code: "profile-save-failed",
+      context: { operation: "save-profile" },
+      error,
+      route: "/onboarding",
+      subsystem: "profile"
+    });
+    errorRedirect(
+      "/onboarding",
+      `Your profile could not be saved. Please try again.${errorReference(reported)}`
+    );
   }
 
   messageRedirect(
@@ -332,7 +455,23 @@ export async function setSeasonParticipationAction(formData: FormData) {
       errorRedirect("/season-registration", "Enter the season invite code.");
     }
 
-    const activeSeason = await loadActiveLeagueSeason(supabase);
+    let activeSeason: Awaited<ReturnType<typeof loadActiveLeagueSeason>> = null;
+    try {
+      activeSeason = await loadActiveLeagueSeason(supabase);
+    } catch (seasonError) {
+      const reported = await reportAppError({
+        actorProfileId: currentUser.id,
+        code: "load-registration-season-failed",
+        context: { operation: "season_registration" },
+        error: seasonError,
+        route: "/season-registration",
+        subsystem: "auth"
+      });
+      errorRedirect(
+        "/season-registration",
+        `Season registration could not be opened. Please try again.${errorReference(reported)}`
+      );
+    }
     if (!activeSeason) {
       errorRedirect("/season-registration", "No league season is currently open.");
     }
@@ -350,9 +489,17 @@ export async function setSeasonParticipationAction(formData: FormData) {
         "[auth] season registration rate limit failed:",
         rateLimitError instanceof Error ? rateLimitError.message : rateLimitError
       );
+      const reported = await reportAppError({
+        actorProfileId: currentUser.id,
+        code: "registration-rate-limit-failed",
+        context: { operation: "season_registration" },
+        error: rateLimitError,
+        route: "/season-registration",
+        subsystem: "auth"
+      });
       errorRedirect(
         "/season-registration",
-        "Season registration could not be verified. Please try again shortly."
+        `Season registration could not be verified. Please try again shortly.${errorReference(reported)}`
       );
     }
     if (!registrationAttemptAllowed) {
@@ -375,7 +522,24 @@ export async function setSeasonParticipationAction(formData: FormData) {
   }
 
   if (error) {
-    errorRedirect("/season-registration", error.message);
+    const safeMessage = participantSafeErrorMessage(
+      error,
+      "Season registration could not be updated. Please try again."
+    );
+    const reported = safeMessage.startsWith("Season registration could not")
+      ? await reportAppError({
+          actorProfileId: currentUser.id,
+          code: "season-participation-update-failed",
+          context: { operation: decision },
+          error,
+          route: "/season-registration",
+          subsystem: "auth"
+        })
+      : null;
+    errorRedirect(
+      "/season-registration",
+      `${safeMessage}${reported ? errorReference(reported) : ""}`
+    );
   }
 
   invalidateScoringCache();

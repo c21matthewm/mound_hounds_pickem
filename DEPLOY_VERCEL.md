@@ -374,6 +374,17 @@ schema version must be `20260818_recovery_jobs_security_v1`; every `schema`, `fu
 the authenticated app. Do not call admin-only health or recovery functions directly from Supabase
 SQL Editor.
 
+Latest application-error inbox migration:
+
+```text
+supabase/migrations/20260821_add_application_error_inbox.sql
+```
+
+Apply it after the recovery/registration migration and before deploying the matching application
+code. It adds a bounded, admin-only incident inbox used by participant-safe error handling. It does
+not change the existing schema-version string; readiness appears as its own `application_error_inbox`
+check in `supabase/operations/01_verify_production_health.sql` and under **Admin -> Race Week**.
+
 After the operations migration but before the shared-window and weekly-scale migrations, the older
 expected schema versions are `20260725_operations_v2` and `20260726_shared_pick_windows`.
 Existing 2026 participants remain registered. Open **Admin -> Races -> Season management** and set

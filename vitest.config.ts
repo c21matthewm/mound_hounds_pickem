@@ -9,6 +9,6 @@ export default defineConfig({
   },
   test: {
     coverage: { enabled: false },
-    include: ["tests/unit/**/*.test.ts"]
+    include: ["tests/unit/**/*.test.{ts,tsx}"]
   }
 });

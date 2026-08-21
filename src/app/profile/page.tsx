@@ -1,6 +1,5 @@
 import { redirect } from "next/navigation";
 import { AuthenticatedPageShell } from "@/components/authenticated-page-shell";
-import { MobileBottomNav } from "@/components/mobile-bottom-nav";
 import { SignOutButton } from "@/components/sign-out-button";
 import {
   ActionLink,
@@ -48,6 +47,7 @@ export default async function ProfilePage() {
       description="Your league identity and account access."
       eyebrow="Account"
       maxWidth="max-w-3xl"
+      showMobileNavigation={profileComplete}
       title="Profile"
     >
       <section className="mt-6">
@@ -83,8 +83,6 @@ export default async function ProfilePage() {
           <SignOutButton />
         </div>
       </section>
-
-      {profileComplete ? <MobileBottomNav /> : null}
     </AuthenticatedPageShell>
   );
 }

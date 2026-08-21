@@ -8,6 +8,7 @@ import {
   useState,
   type FormEvent
 } from "react";
+import { MobileActionDock } from "@/components/mobile-action-dock";
 import {
   parsePickDraft,
   pickDraftStorageKey,
@@ -519,12 +520,7 @@ export function PickemForm({
         </button>
 
         {showMobileActionBar ? (
-          <div
-            className="fixed inset-x-3 z-30 md:hidden"
-            style={{
-              bottom: "calc(max(0.75rem, env(safe-area-inset-bottom)) + 3.5rem)"
-            }}
-          >
+          <MobileActionDock>
             <div className="ui-panel ui-panel-translucent mx-auto max-w-md rounded-lg border border-slate-200 bg-white/95 px-2.5 py-1.5 shadow-[0_18px_45px_-28px_rgba(15,23,42,0.9)] backdrop-blur">
               <div className="flex items-center justify-between gap-2">
                 <p className="shrink-0 text-xs font-semibold text-slate-800">
@@ -558,7 +554,7 @@ export function PickemForm({
                 </button>
               </div>
             </div>
-          </div>
+          </MobileActionDock>
         ) : null}
       </fieldset>
     </form>
