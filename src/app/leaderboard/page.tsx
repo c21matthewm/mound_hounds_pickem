@@ -1,7 +1,6 @@
 import { AuthenticatedPageShell } from "@/components/authenticated-page-shell";
 import { AnalyticsRaceHistory } from "@/components/analytics-race-history";
 import { HallOfFameYearSelect } from "@/components/hall-of-fame-year-select";
-import { MobileBottomNav } from "@/components/mobile-bottom-nav";
 import { PicksRaceSelect } from "@/components/picks-race-select";
 import {
   ActionLink,
@@ -135,7 +134,6 @@ export default async function LeaderboardPage({ searchParams }: PageProps) {
         <CompactNotice className="mt-6" tone="danger">
           Failed to load leaderboard: {message}
         </CompactNotice>
-        <MobileBottomNav />
       </AuthenticatedPageShell>
     );
   }
@@ -642,8 +640,6 @@ export default async function LeaderboardPage({ searchParams }: PageProps) {
           </div>
         )
       ) : null}
-
-      <MobileBottomNav />
     </AuthenticatedPageShell>
   );
 }

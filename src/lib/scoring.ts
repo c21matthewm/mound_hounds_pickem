@@ -11,10 +11,10 @@ import {
 } from "@/lib/race-format";
 import { participantLeaderboardLabel } from "@/lib/participant-display";
 import {
-  pickDriverEntries,
-  pickDriverIdsForGroupCount,
-  scoringNumber as asNumber
-} from "@/lib/scoring-engine";
+  buildRaceScoringProjection,
+  type RaceScoringRow
+} from "@/lib/race-scoring-model";
+import { pickDriverIdsForGroupCount, scoringNumber as asNumber } from "@/lib/scoring-engine";
 import {
   buildSeasonScoringModel,
   type LeagueScoringSnapshot,
@@ -23,7 +23,6 @@ import {
 } from "@/lib/season-scoring-model";
 import { loadAllRows } from "@/lib/supabase/paginated-query";
 import { SCORING_CACHE_TAG } from "@/lib/scoring-cache";
-import { assignWeeklyRanks } from "@/lib/weekly-ranking";
 
 export type {
   LeaderboardRow,
@@ -168,43 +167,6 @@ export type PicksByRaceSnapshot = {
   selectedRace: PicksByRaceOption | null;
 };
 
-const keyForRaceDriver = (raceId: number, driverId: number): string => `${raceId}:${driverId}`;
-
-const resolveRaceDriverGroup = (
-  raceId: number,
-  driverId: number,
-  raceDriverGroupByRaceDriver: Map<string, number>,
-  pickedDriverGroupByRaceDriver: Map<string, number>,
-  currentDriverGroupById: Map<number, number>
-): number | undefined => {
-  const raceSpecific = raceDriverGroupByRaceDriver.get(keyForRaceDriver(raceId, driverId));
-  if (raceSpecific !== undefined) {
-    return raceSpecific;
-  }
-
-  const pickedGroup = pickedDriverGroupByRaceDriver.get(keyForRaceDriver(raceId, driverId));
-  if (pickedGroup !== undefined) {
-    return pickedGroup;
-  }
-
-  return currentDriverGroupById.get(driverId);
-};
-
-const buildPickedDriverGroupByRaceDriver = (picks: PickRow[]): Map<string, number> => {
-  const pickedDriverGroupByRaceDriver = new Map<string, number>();
-
-  picks.forEach((pick) => {
-    pickDriverEntries(pick).forEach(([driverId, groupNumber]) => {
-      const key = keyForRaceDriver(pick.race_id, driverId);
-      if (!pickedDriverGroupByRaceDriver.has(key)) {
-        pickedDriverGroupByRaceDriver.set(key, groupNumber);
-      }
-    });
-  });
-
-  return pickedDriverGroupByRaceDriver;
-};
-
 const loadSeasonScoringModelUncached = async (
   seasonId: number
 ): Promise<SeasonScoringModel> => {
@@ -290,7 +252,7 @@ const loadSeasonScoringModelUncached = async (
 
 const buildCachedSeasonScoringModel = unstable_cache(
   loadSeasonScoringModelUncached,
-  ["season-scoring-model-v1"],
+  ["season-scoring-model-v2"],
   { revalidate: 3600, tags: [SCORING_CACHE_TAG] }
 );
 
@@ -413,96 +375,60 @@ async function buildPicksByRaceSnapshotUncached(
   selectedRacePicks.forEach((pick) => {
     picksByUser.set(pick.user_id, pick);
   });
-  const pickedDriverGroupByRaceDriver = buildPickedDriverGroupByRaceDriver(selectedRacePicks);
 
   const driverNameById = new Map<number, string>();
-  const currentDriverGroupById = new Map<number, number>();
   drivers.forEach((driver) => {
     driverNameById.set(driver.id, driver.driver_name);
-    currentDriverGroupById.set(driver.id, driver.group_number);
-  });
-  const raceDriverGroupByRaceDriver = new Map<string, number>();
-  raceDriverGroups.forEach((row) => {
-    raceDriverGroupByRaceDriver.set(keyForRaceDriver(row.race_id, row.driver_id), row.group_number);
   });
 
-  const resultPointsByDriverId = new Map<number, number>();
-  const minimumPointsByGroup = new Map<number, number>();
   const resultRows = selectedRace.resultsStatus === "published" ? loadedResultRows : [];
-  resultRows.forEach((result) => {
-    const points = asNumber(result.points);
-    resultPointsByDriverId.set(result.driver_id, points);
-    const group = resolveRaceDriverGroup(
-      selectedRace.raceId,
-      result.driver_id,
-      raceDriverGroupByRaceDriver,
-      pickedDriverGroupByRaceDriver,
-      currentDriverGroupById
-    );
-    if (!group || group < 1 || group > selectedRace.groupCount) {
-      return;
-    }
-    const currentMin = minimumPointsByGroup.get(group);
-    if (currentMin === undefined || points < currentMin) {
-      minimumPointsByGroup.set(group, points);
-    }
-  });
   const resultsPosted = selectedRace.resultsStatus === "published" && resultRows.length > 0;
+  const participantById = new Map(participants.map((participant) => [participant.id, participant]));
+  const projection = resultsPosted
+    ? buildRaceScoringProjection({
+        currentDrivers: drivers,
+        officialWinningAverageSpeed: selectedRace.officialWinningAverageSpeed,
+        participants,
+        pickFormat: selectedRace.pickFormat,
+        picks: selectedRacePicks,
+        raceDriverGroups,
+        results: resultRows
+      })
+    : null;
 
-  const baseRows = participants.map((participant) => {
+  const toDisplayRow = (
+    participant: Participant,
+    scoredRow: RaceScoringRow | null
+  ): PicksByRaceParticipantRow => {
     const pick = picksByUser.get(participant.id) ?? null;
-
-    const driverCells: PicksByRaceDriverCell[] = pickDriverIdsForGroupCount(
-      pick,
-      selectedRace.groupCount
-    ).map((driverId, index) => ({
-      driverName: driverId === null ? null : (driverNameById.get(driverId) ?? `Unknown #${driverId}`),
+    const driverIds = scoredRow?.driverIds ??
+      pickDriverIdsForGroupCount(pick, selectedRace.groupCount);
+    const driverCells: PicksByRaceDriverCell[] = driverIds.map((driverId, index) => ({
+      driverName:
+        driverId === null ? null : (driverNameById.get(driverId) ?? `Unknown #${driverId}`),
       groupNumber: index + 1,
-      points: resultsPosted
-        ? driverId !== null
-          ? (resultPointsByDriverId.get(driverId) ?? 0)
-          : pick
-            ? null
-            : (minimumPointsByGroup.get(index + 1) ?? null)
-        : null
+      points: scoredRow?.driverPoints[index] ?? null
     }));
-
-    const totalPoints = resultsPosted
-      ? driverCells.reduce((sum, driverCell) => sum + (driverCell.points ?? 0), 0)
-      : null;
 
     return {
-      averageSpeed: pick ? asNumber(pick.average_speed) : null,
+      averageSpeed: scoredRow?.averageSpeed ?? (pick ? asNumber(pick.average_speed) : null),
       displayName: participant.displayName,
       driverCells,
-      rank: null as number | null,
+      rank: scoredRow?.rank ?? null,
       teamName: participant.teamName,
-      totalPoints,
+      totalPoints: scoredRow?.points ?? null,
       userId: participant.id
     };
-  });
+  };
 
-  let rows: PicksByRaceParticipantRow[] = [];
-
-  if (resultsPosted) {
-    const ranked = assignWeeklyRanks(
-      baseRows.map((row) => ({
-        ...row,
-        points: row.totalPoints ?? 0
-      })),
-      selectedRace.officialWinningAverageSpeed
-    );
-
-    rows = ranked.map(({ points, ...row }) => ({
-      ...row,
-      rank: row.rank,
-      totalPoints: points
-    }));
-  } else {
-    rows = [...baseRows]
-      .sort((a, b) => a.teamName.localeCompare(b.teamName))
-      .map((row) => ({ ...row, rank: null }));
-  }
+  const rows: PicksByRaceParticipantRow[] = projection
+    ? projection.rows.flatMap((scoredRow) => {
+        const participant = participantById.get(scoredRow.userId);
+        return participant ? [toDisplayRow(participant, scoredRow)] : [];
+      })
+    : [...participants]
+        .sort((a, b) => a.teamName.localeCompare(b.teamName))
+        .map((participant) => toDisplayRow(participant, null));
 
   return {
     availableRaces,
@@ -514,7 +440,7 @@ async function buildPicksByRaceSnapshotUncached(
 
 const buildCachedPicksByRaceSnapshot = unstable_cache(
   buildPicksByRaceSnapshotUncached,
-  ["picks-by-race-snapshot-v1"],
+  ["picks-by-race-snapshot-v2"],
   { revalidate: 60, tags: [SCORING_CACHE_TAG] }
 );
 

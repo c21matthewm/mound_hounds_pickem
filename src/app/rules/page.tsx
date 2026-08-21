@@ -1,5 +1,4 @@
 import { AuthenticatedPageShell } from "@/components/authenticated-page-shell";
-import { MobileBottomNav } from "@/components/mobile-bottom-nav";
 import {
   ActionAnchor,
   ActionLink,
@@ -55,7 +54,6 @@ export default async function RulesPage() {
           The rules document for this season has not been posted yet.
         </CompactNotice>
       )}
-      <MobileBottomNav />
     </AuthenticatedPageShell>
   );
 }

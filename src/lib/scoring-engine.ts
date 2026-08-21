@@ -69,36 +69,3 @@ export const scorePickSelection = (
     (total, driverId) => total + scoringNumber(pointsForDriver(driverId)),
     0
   );
-
-export const computeGroupScoreExtremes = <T>(
-  groupCount: number,
-  results: T[],
-  groupForResult: (result: T) => number | undefined,
-  pointsForResult: (result: T) => number | string
-): { highest: number; lowest: number } => {
-  const pointsByGroup = new Map<number, number[]>();
-  for (let groupNumber = 1; groupNumber <= groupCount; groupNumber += 1) {
-    pointsByGroup.set(groupNumber, []);
-  }
-
-  results.forEach((result) => {
-    const groupNumber = groupForResult(result);
-    if (!groupNumber || groupNumber < 1 || groupNumber > groupCount) {
-      return;
-    }
-
-    pointsByGroup.get(groupNumber)?.push(scoringNumber(pointsForResult(result)));
-  });
-
-  let highest = 0;
-  let lowest = 0;
-  for (let groupNumber = 1; groupNumber <= groupCount; groupNumber += 1) {
-    const groupPoints = pointsByGroup.get(groupNumber) ?? [];
-    if (groupPoints.length > 0) {
-      highest += Math.max(...groupPoints);
-      lowest += Math.min(...groupPoints);
-    }
-  }
-
-  return { highest, lowest };
-};

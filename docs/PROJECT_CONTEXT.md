@@ -51,7 +51,7 @@ Mound Hounds Pick'em is a private INDYCAR fantasy league app. Participants submi
 ## Data Model
 
 The consolidated database definition is `supabase/schema.sql`; migrations for existing projects are in `supabase/migrations/`.
-Indy 500 features require `supabase/migrations/20260528_add_indy_500_pick_format.sql`. Role protection and atomic draft/published results require `supabase/migrations/20260709_harden_roles_and_result_publication.sql`. Explicit seasons require `supabase/migrations/20260718_add_league_seasons_and_active_participants.sql`; yearly enrollment and resilient reminder delivery require `supabase/migrations/20260718_add_season_enrollment_and_delivery_hardening.sql`; invite-code, race-field, audit, and job-heartbeat hardening requires `supabase/migrations/20260725_harden_race_and_season_operations.sql`; shared doubleheader pick deadlines require `supabase/migrations/20260726_add_shared_pick_windows.sql`; bounded reminder queues and degraded job health require `supabase/migrations/20260729_scale_weekly_operations.sql`; atomic pick versions and guided season recovery require `supabase/migrations/20260730_atomic_picks_and_season_recovery.sql`; bounded recovery storage, sparse job history, and registration-attempt protection require `supabase/migrations/20260818_bound_recovery_jobs_and_registration.sql`.
+Indy 500 features require `supabase/migrations/20260528_add_indy_500_pick_format.sql`. Role protection and atomic draft/published results require `supabase/migrations/20260709_harden_roles_and_result_publication.sql`. Explicit seasons require `supabase/migrations/20260718_add_league_seasons_and_active_participants.sql`; yearly enrollment and resilient reminder delivery require `supabase/migrations/20260718_add_season_enrollment_and_delivery_hardening.sql`; invite-code, race-field, audit, and job-heartbeat hardening requires `supabase/migrations/20260725_harden_race_and_season_operations.sql`; shared doubleheader pick deadlines require `supabase/migrations/20260726_add_shared_pick_windows.sql`; bounded reminder queues and degraded job health require `supabase/migrations/20260729_scale_weekly_operations.sql`; atomic pick versions and guided season recovery require `supabase/migrations/20260730_atomic_picks_and_season_recovery.sql`; bounded recovery storage, sparse job history, and registration-attempt protection require `supabase/migrations/20260818_bound_recovery_jobs_and_registration.sql`; bounded first-party incident reporting requires `supabase/migrations/20260821_add_application_error_inbox.sql`.
 
 - `profiles`: permanent Supabase auth identities with full name, unique team name, optional phone/carrier, role, and account eligibility.
 - `league_seasons`: explicit upcoming/active/completed seasons. Only one can be active.
@@ -61,6 +61,7 @@ Indy 500 features require `supabase/migrations/20260528_add_indy_500_pick_format
 - `races`: race metadata, `results_status` (`draft` or `published`), publication time, `pick_format` (`standard` or `indy_500`), `pick_window_key`, qualifying/race start, payout, official speed, winner fields, and archive status. Two consecutive standard races may share a pick-window key and qualifying deadline while remaining independently scored.
 - `picks`: one authoritative current row per user/race with average speed, six required standard driver IDs, and two nullable Indy-only driver IDs. Each successful resubmission atomically replaces this scoring row.
 - `pick_submission_versions`: append-only audit history for successful pick saves; these rows are not used directly for scoring.
+- `app_error_events`: admin-only, sanitized application incidents. Repeated errors are grouped; resolved incidents expire after 30 days and total retained incidents are capped at 500.
 - `results`: official driver points per race.
 - `race_driver_groups`: race-specific group snapshot used to keep scoring stable after standings/groups refresh; for Indy 500 it stores qualifying position and groups 1-8.
 - `feedback_items`: participant feedback submissions with new/in-review/resolved workflow state.
@@ -111,7 +112,8 @@ Key database triggers:
 - Admin data loading is tab-scoped. The Results workspace defaults to the next unpublished race and loads picks, result rows, race-driver groups, imports, and scoring audit data for only that selected race.
 - Race management loads one selected season at a time. Recovery creates portable downloads,
   automatic post-publication snapshots, previews, checksum validation, and transactional restore.
-- Race Week reports the schema contract, active season, registration count, next-race gate, delivery toggles, reminder queue totals, degraded cron runs, targeted failed-delivery retries, and admin audit history.
+- Race Week reports the schema contract, active season, registration count, next-race gate, delivery toggles, reminder queue totals, degraded cron runs, targeted failed-delivery retries, application incidents, and admin audit history.
+- Admin mutations are separated by domain under `src/app/admin/*-actions.ts`; tab-specific server workspaces live under `src/components/admin-*-workspace.tsx`. `src/app/admin/page.tsx` owns authorization, tab-scoped loading, and orchestration rather than every form implementation.
 
 ## Cron And Notifications
 

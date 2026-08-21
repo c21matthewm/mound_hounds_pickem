@@ -1807,5 +1807,7 @@ to authenticated;
 -- supabase/migrations/20260730_atomic_picks_and_season_recovery.sql
 -- Bounded recovery storage, sparse job history, and registration protection are maintained in:
 -- supabase/migrations/20260818_bound_recovery_jobs_and_registration.sql
+-- Bounded, admin-only application incident reporting is maintained in:
+-- supabase/migrations/20260821_add_application_error_inbox.sql
 -- Apply these migrations after this consolidated baseline in filename order. Keeping deployment
 -- migrations canonical prevents security, pick-window, and operations logic from diverging.

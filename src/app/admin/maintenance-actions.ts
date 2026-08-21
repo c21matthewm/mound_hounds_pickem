@@ -11,60 +11,61 @@ import {
 import { getReminderWindow } from "@/lib/reminder-windows";
 import { REMINDER_MAX_ATTEMPTS } from "@/lib/reminder-queue";
 import { invalidateScoringCache } from "@/lib/scoring-cache";
+import { errorReference, reportAppError } from "@/lib/app-error-reporter";
+import { adminSafeErrorMessage } from "@/lib/app-error-safety";
 import { SEASON_RECOVERY_MIGRATION_FILE } from "@/lib/season-recovery";
 import { createServiceRoleSupabaseClient } from "@/lib/supabase/service-role";
 import { withMigrationHint } from "@/lib/supabase/migration-errors";
-
-type AdminTab =
-  | "drivers"
-  | "participants"
-  | "races"
-  | "results"
-  | "feedback"
-  | "health"
-  | "recovery";
+import {
+  adminRedirect,
+  asText,
+  parseAdminTab,
+  parsePositiveInteger,
+  withResultPublicationMigrationHint
+} from "@/app/admin/action-runtime";
 
 const TEST_FLOW_PREFIX = "[TEST FLOW ";
-const RESULT_PUBLICATION_MIGRATION_FILE =
-  "supabase/migrations/20260709_harden_roles_and_result_publication.sql";
 
-const asText = (value: FormDataEntryValue | null): string =>
-  typeof value === "string" ? value.trim() : "";
+export async function resolveAppErrorAction(formData: FormData) {
+  const eventId = parsePositiveInteger(asText(formData.get("event_id")));
+  if (!eventId) {
+    adminRedirect("error", "Select a valid application error.", "health");
+  }
 
-const parsePositiveInteger = (value: string): number | null => {
-  const parsed = Number(value);
-  return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
-};
+  const { supabase, user } = await requireAdmin();
+  const { error } = await supabase.rpc("resolve_app_error_event", {
+    p_event_id: eventId
+  });
+  if (error) {
+    const reported = await reportAppError({
+      actorProfileId: user.id,
+      code: "resolve-error-event-failed",
+      context: { entityId: eventId, entityType: "app_error_event", operation: "resolve" },
+      error,
+      route: "/admin?tab=health",
+      subsystem: "admin"
+    });
+    adminRedirect(
+      "error",
+      `${adminSafeErrorMessage(error, "The application error could not be resolved.")}${errorReference(reported)}`,
+      "health"
+    );
+  }
 
-const parseAdminTab = (value: string): AdminTab | null => {
-  const tabs: AdminTab[] = [
-    "drivers",
-    "participants",
-    "races",
-    "results",
-    "feedback",
-    "health",
-    "recovery"
-  ];
-  return tabs.includes(value as AdminTab) ? (value as AdminTab) : null;
-};
+  await recordAdminAudit(supabase, {
+    action: "resolve_application_error",
+    afterState: { status: "resolved" },
+    entityId: String(eventId),
+    entityType: "app_error_event",
+    summary: `Resolved application error #${eventId}.`
+  });
 
-const adminRedirect = (
-  key: "error" | "message",
-  value: string,
-  tab: AdminTab
-): never => {
-  const params = new URLSearchParams({ [key]: value, tab });
-  redirect(`/admin?${params.toString()}`);
-};
-
-const withResultPublicationMigrationHint = (message: string): string =>
-  /function .* does not exist|schema cache/i.test(message)
-    ? withMigrationHint(message, RESULT_PUBLICATION_MIGRATION_FILE)
-    : message;
+  revalidatePath("/admin");
+  adminRedirect("message", "Application error marked resolved.", "health");
+}
 
 export async function retryFailedPickRemindersAction(formData: FormData) {
-  const { supabase } = await requireAdmin();
+  const { supabase, user } = await requireAdmin();
   const raceId = parsePositiveInteger(asText(formData.get("race_id")));
   const reminderType = asText(formData.get("reminder_type"));
 
@@ -89,9 +90,24 @@ export async function retryFailedPickRemindersAction(formData: FormData) {
       season_id: number;
     }>();
   if (raceError || !race) {
+    if (raceError) {
+      const reported = await reportAppError({
+        actorProfileId: user.id,
+        code: "load-reminder-retry-race-failed",
+        context: { entityId: raceId, entityType: "race", operation: "retry_reminders" },
+        error: raceError,
+        route: "/admin?tab=health",
+        subsystem: "reminders"
+      });
+      adminRedirect(
+        "error",
+        `The selected reminder race could not be loaded.${errorReference(reported)}`,
+        "health"
+      );
+    }
     adminRedirect(
       "error",
-      raceError?.message ?? "The selected reminder race was not found.",
+      "The selected reminder race was not found.",
       "health"
     );
   }
@@ -135,7 +151,19 @@ export async function retryFailedPickRemindersAction(formData: FormData) {
     .gte("attempt_count", REMINDER_MAX_ATTEMPTS)
     .select("id");
   if (resetError) {
-    adminRedirect("error", resetError.message, "health");
+    const reported = await reportAppError({
+      actorProfileId: user.id,
+      code: "reset-reminder-retries-failed",
+      context: { entityId: raceId, entityType: "race", operation: "retry_reminders" },
+      error: resetError,
+      route: "/admin?tab=health",
+      subsystem: "reminders"
+    });
+    adminRedirect(
+      "error",
+      `The failed reminder queue could not be reset.${errorReference(reported)}`,
+      "health"
+    );
   }
 
   const resetCount = resetRows?.length ?? 0;
@@ -165,7 +193,7 @@ export async function retryFailedPickRemindersAction(formData: FormData) {
 }
 
 export async function updateFeedbackStatusAction(formData: FormData) {
-  const { supabase } = await requireAdmin();
+  const { supabase, user } = await requireAdmin();
   const feedbackId = parsePositiveInteger(asText(formData.get("feedback_id")));
   const status = asText(formData.get("status"));
   const feedbackPage = parsePositiveInteger(asText(formData.get("feedback_page"))) ?? 1;
@@ -197,11 +225,22 @@ export async function updateFeedbackStatusAction(formData: FormData) {
     .select("id,status")
     .eq("id", feedbackId)
     .maybeSingle<{ id: number; status: string }>();
-  if (existingError || !existing) {
+  if (existingError) {
+    const reported = await reportAppError({
+      actorProfileId: user.id,
+      code: "load-feedback-for-update-failed",
+      context: { entityId: feedbackId, entityType: "feedback", operation: "update_status" },
+      error: existingError,
+      route: "/admin?tab=feedback",
+      subsystem: "admin"
+    });
     redirectWithFeedbackState(
       "error",
-      existingError?.message ?? "Feedback submission was not found."
+      `The feedback submission could not be loaded.${errorReference(reported)}`
     );
+  }
+  if (!existing) {
+    redirectWithFeedbackState("error", "Feedback submission was not found.");
   }
 
   const { error } = await supabase
@@ -212,9 +251,17 @@ export async function updateFeedbackStatusAction(formData: FormData) {
     })
     .eq("id", feedbackId);
   if (error) {
+    const reported = await reportAppError({
+      actorProfileId: user.id,
+      code: "update-feedback-status-failed",
+      context: { entityId: feedbackId, entityType: "feedback", operation: "update_status" },
+      error: withMigrationHint(error.message, SEASON_RECOVERY_MIGRATION_FILE),
+      route: "/admin?tab=feedback",
+      subsystem: "admin"
+    });
     redirectWithFeedbackState(
       "error",
-      withMigrationHint(error.message, SEASON_RECOVERY_MIGRATION_FILE)
+      `The feedback status could not be updated.${errorReference(reported)}`
     );
   }
 
@@ -232,7 +279,7 @@ export async function updateFeedbackStatusAction(formData: FormData) {
 }
 
 export async function cleanupTestFlowDataAction(formData: FormData) {
-  await requireAdmin();
+  const { user } = await requireAdmin();
   const tab = parseAdminTab(asText(formData.get("tab"))) ?? "feedback";
   const redirectWithTab = (key: "error" | "message", value: string): never => {
     invalidateScoringCache();
@@ -252,10 +299,26 @@ export async function cleanupTestFlowDataAction(formData: FormData) {
   ]);
 
   if (testRacesResponse.error) {
-    redirectWithTab("error", testRacesResponse.error.message);
+    const reported = await reportAppError({
+      actorProfileId: user.id,
+      code: "load-test-races-failed",
+      context: { entityType: "test_flow", operation: "cleanup" },
+      error: testRacesResponse.error,
+      route: "/admin?tab=health",
+      subsystem: "maintenance"
+    });
+    redirectWithTab("error", `Test races could not be loaded.${errorReference(reported)}`);
   }
   if (testProfilesResponse.error) {
-    redirectWithTab("error", testProfilesResponse.error.message);
+    const reported = await reportAppError({
+      actorProfileId: user.id,
+      code: "load-test-profiles-failed",
+      context: { entityType: "test_flow", operation: "cleanup" },
+      error: testProfilesResponse.error,
+      route: "/admin?tab=health",
+      subsystem: "maintenance"
+    });
+    redirectWithTab("error", `Test profiles could not be loaded.${errorReference(reported)}`);
   }
 
   const raceIds = (testRacesResponse.data ?? []).map((race) => race.id);
@@ -269,7 +332,15 @@ export async function cleanupTestFlowDataAction(formData: FormData) {
       .in("id", raceIds)
       .select("id");
     if (deleteRacesError) {
-      redirectWithTab("error", deleteRacesError.message);
+      const reported = await reportAppError({
+        actorProfileId: user.id,
+        code: "delete-test-races-failed",
+        context: { entityType: "test_flow", operation: "cleanup" },
+        error: deleteRacesError,
+        route: "/admin?tab=health",
+        subsystem: "maintenance"
+      });
+      redirectWithTab("error", `Test races could not be deleted.${errorReference(reported)}`);
     }
     deletedRaceCount = (deletedRaces ?? []).length;
   }
@@ -280,7 +351,15 @@ export async function cleanupTestFlowDataAction(formData: FormData) {
     .ilike("details", `${TEST_FLOW_PREFIX}%`)
     .select("id");
   if (deleteFeedbackError) {
-    redirectWithTab("error", deleteFeedbackError.message);
+    const reported = await reportAppError({
+      actorProfileId: user.id,
+      code: "delete-test-feedback-failed",
+      context: { entityType: "test_flow", operation: "cleanup" },
+      error: deleteFeedbackError,
+      route: "/admin?tab=health",
+      subsystem: "maintenance"
+    });
+    redirectWithTab("error", `Test feedback could not be deleted.${errorReference(reported)}`);
   }
   const deletedFeedbackCount = (deletedFeedbackRows ?? []).length;
 
@@ -299,11 +378,17 @@ export async function cleanupTestFlowDataAction(formData: FormData) {
     "refresh_driver_standings_from_published_results"
   );
   if (refreshDriverError) {
+    const reported = await reportAppError({
+      actorProfileId: user.id,
+      code: "refresh-after-test-cleanup-failed",
+      context: { entityType: "test_flow", operation: "cleanup" },
+      error: withResultPublicationMigrationHint(refreshDriverError.message),
+      route: "/admin?tab=health",
+      subsystem: "maintenance"
+    });
     redirectWithTab(
       "error",
-      `Test artifacts were deleted, but driver standings could not be refreshed: ${withResultPublicationMigrationHint(
-        refreshDriverError.message
-      )}`
+      `Test artifacts were deleted, but driver standings could not be refreshed.${errorReference(reported)}`
     );
   }
 
@@ -314,11 +399,17 @@ export async function cleanupTestFlowDataAction(formData: FormData) {
   revalidatePath("/dashboard");
 
   if (failedAuthDeletes.length > 0) {
+    const reported = await reportAppError({
+      actorProfileId: user.id,
+      code: "delete-test-users-failed",
+      context: { entityType: "test_flow", operation: "cleanup" },
+      error: failedAuthDeletes.join(" | "),
+      route: "/admin?tab=health",
+      subsystem: "maintenance"
+    });
     redirectWithTab(
       "error",
-      `Cleanup partly completed. Deleted ${deletedRaceCount} race(s), ${deletedFeedbackCount} feedback row(s), ${deletedAuthUserCount} auth user(s). Failed user deletions: ${failedAuthDeletes.join(
-        " | "
-      )}`
+      `Cleanup partly completed. Deleted ${deletedRaceCount} race(s), ${deletedFeedbackCount} feedback row(s), ${deletedAuthUserCount} auth user(s). Some test users could not be deleted.${errorReference(reported)}`
     );
   }
 

@@ -127,6 +127,7 @@ supabase/migrations/20260726_add_shared_pick_windows.sql
 supabase/migrations/20260729_scale_weekly_operations.sql
 supabase/migrations/20260730_atomic_picks_and_season_recovery.sql
 supabase/migrations/20260818_bound_recovery_jobs_and_registration.sql
+supabase/migrations/20260821_add_application_error_inbox.sql
 ```
 
 The expected production schema version is:
@@ -167,8 +168,9 @@ where p.id = u.id
 7. Use the leaderboard tabs to review standings, locked picks by race, participant analytics, and
    finalized Hall of Fame seasons.
 8. Use **Admin > Race Week** to verify the schema contract, active season, next-race result
-   gate, registration count, reminder queue totals, degraded cron runs, and failed-delivery retry
-   controls.
+   gate, registration count, reminder queue totals, degraded cron runs, application error inbox,
+   and failed-delivery retry controls. Resolve an application incident only after checking the
+   referenced workflow.
 9. Use **Admin > Recovery** to create and download a portable season backup before unusual
    database work. Follow `docs/SEASON_RECOVERY.md` if a restore is ever needed.
 

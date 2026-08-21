@@ -1,6 +1,5 @@
 import Link from "next/link";
 import { AuthenticatedPageShell } from "@/components/authenticated-page-shell";
-import { MobileBottomNav } from "@/components/mobile-bottom-nav";
 import {
   ActionLink,
   CompactNotice,
@@ -212,8 +211,6 @@ export default async function DashboardPage({ searchParams }: PageProps) {
           />
         </section>
       ) : null}
-
-      <MobileBottomNav />
     </AuthenticatedPageShell>
   );
 }

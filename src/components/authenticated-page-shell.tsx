@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { MobileBottomNav } from "@/components/mobile-bottom-nav";
 import { ProfileButton } from "@/components/profile-button";
 
 type Props = {
@@ -7,6 +8,7 @@ type Props = {
   description?: ReactNode;
   eyebrow: string;
   maxWidth?: string;
+  showMobileNavigation?: boolean;
   title: string;
 };
 
@@ -16,10 +18,13 @@ export function AuthenticatedPageShell({
   description,
   eyebrow,
   maxWidth = "max-w-6xl",
+  showMobileNavigation = true,
   title
 }: Props) {
   return (
-    <main className={`mx-auto flex min-h-screen w-full min-w-0 ${maxWidth} flex-col px-4 py-6 pb-28 sm:px-6 sm:py-8 md:py-10 md:pb-12`}>
+    <main
+      className={`mx-auto flex min-h-screen w-full min-w-0 ${maxWidth} flex-col px-4 py-6 ${showMobileNavigation ? "pb-28" : "pb-10"} sm:px-6 sm:py-8 md:py-10 md:pb-12`}
+    >
       <header className="border-b border-slate-200 pb-5 md:pb-6">
         <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-start gap-3 sm:gap-4">
           <div className="min-w-0 max-w-3xl">
@@ -41,6 +46,7 @@ export function AuthenticatedPageShell({
       </header>
 
       {children}
+      {showMobileNavigation ? <MobileBottomNav /> : null}
     </main>
   );
 }

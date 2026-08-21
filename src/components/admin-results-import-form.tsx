@@ -8,6 +8,7 @@ import {
   pickGroupCountForFormat,
   type RacePickFormat
 } from "@/lib/race-format";
+import { buildRaceScoringProjection } from "@/lib/race-scoring-model";
 import { SubmitButton } from "@/components/submit-button";
 
 type RaceOption = {
@@ -283,49 +284,38 @@ export function AdminResultsImportForm({
     const zeroPointDriverNames = zeroPointDriverIds
       .map((driverId) => driverById.get(driverId)?.driverName ?? `Driver #${driverId}`)
       .sort((a, b) => a.localeCompare(b));
-    const pointsByGroup = new Map<number, number[]>();
-    for (const groupNumber of groupNumbers) {
-      pointsByGroup.set(groupNumber, []);
-    }
-
-    previewRows.forEach((row) => {
-      if (row.status !== "ready" || !row.groupNumber) {
-        return;
-      }
-
-      const points = pointsByGroup.get(row.groupNumber) ?? [];
-      points.push(row.points);
-      pointsByGroup.set(row.groupNumber, points);
-    });
-
-    const missingOfficialGroups = groupNumbers.filter(
-      (groupNumber) => (pointsByGroup.get(groupNumber) ?? []).length === 0
+    const officialResultGroups = new Set(
+      readyRows
+        .map((row) => row.groupNumber)
+        .filter((groupNumber): groupNumber is number => groupNumber !== null)
     );
-
-    zeroPointDriverIds.forEach((driverId) => {
-      const groupNumber = resolveGroupNumber(driverId);
-      if (!groupNumber) {
-        return;
-      }
-
-      const points = pointsByGroup.get(groupNumber) ?? [];
-      points.push(0);
-      pointsByGroup.set(groupNumber, points);
+    const missingOfficialGroups = groupNumbers.filter(
+      (groupNumber) => !officialResultGroups.has(groupNumber)
+    );
+    const scoringProjection = buildRaceScoringProjection({
+      currentDrivers: drivers.map((driver) => ({
+        group_number: driver.groupNumber,
+        id: driver.id
+      })),
+      officialWinningAverageSpeed: parsed.winningAverageSpeed,
+      participants: [],
+      pickFormat: racePickFormat,
+      picks: [],
+      raceDriverGroups: raceDriverGroups.filter(
+        (group) => group.race_id === selectedRaceId
+      ),
+      results: [
+        ...readyRows.flatMap((row) =>
+          row.mappedDriverId === null
+            ? []
+            : [{ driver_id: row.mappedDriverId, points: row.points }]
+        ),
+        ...zeroPointDriverIds.map((driverId) => ({ driver_id: driverId, points: 0 }))
+      ]
     });
-
-    const missingScoreGroups: number[] = [];
-    let highestPossibleScore = 0;
-    let lowestPossibleScore = 0;
-    for (const groupNumber of groupNumbers) {
-      const groupPoints = pointsByGroup.get(groupNumber) ?? [];
-      if (groupPoints.length === 0) {
-        missingScoreGroups.push(groupNumber);
-        continue;
-      }
-
-      highestPossibleScore += Math.max(...groupPoints);
-      lowestPossibleScore += Math.min(...groupPoints);
-    }
+    const missingScoreGroups = groupNumbers.filter(
+      (groupNumber) => !scoringProjection.minimumPointsByGroup.has(groupNumber)
+    );
 
     const pickedUserIds = new Set(
       picks.filter((pick) => pick.race_id === selectedRaceId).map((pick) => pick.user_id)
@@ -340,10 +330,12 @@ export function AdminResultsImportForm({
       duplicateCount,
       expectedResultCount: expectedDriverIds.size,
       groupCount,
-      highestPossibleScore: missingScoreGroups.length > 0 ? null : highestPossibleScore,
+      highestPossibleScore:
+        missingScoreGroups.length > 0 ? null : scoringProjection.highestPossibleScore,
       ignoredLineCount: parsed.ignoredLineCount,
       inputKey: currentInputKey,
-      lowestPossibleScore: missingScoreGroups.length > 0 ? null : lowestPossibleScore,
+      lowestPossibleScore:
+        missingScoreGroups.length > 0 ? null : scoringProjection.lowestPossibleScore,
       missingOfficialGroups,
       missingScoreGroups,
       noPickTeamNames,

@@ -2,18 +2,8 @@ import "server-only";
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { createServiceRoleSupabaseClient } from "@/lib/supabase/service-role";
-import {
-  normalizeRacePickFormat,
-  pickGroupCountForFormat,
-  type RacePickFormat
-} from "@/lib/race-format";
-import {
-  computeGroupScoreExtremes,
-  pickDriverEntries,
-  scorePickSelection,
-  scoringNumber
-} from "@/lib/scoring-engine";
-import { buildOrderedWeeklyRows } from "@/lib/weekly-ranking";
+import type { RacePickFormat } from "@/lib/race-format";
+import { buildRaceScoringProjection } from "@/lib/race-scoring-model";
 
 export const AUTO_WINNER_DELAY_MINUTES = 15;
 
@@ -70,51 +60,6 @@ const withOfficialSpeedMigrationHint = (message: string): string =>
   message.includes("official_winning_average_speed")
     ? `${message}. Run the latest Supabase migration to add official race average speed support.`
     : message;
-
-const buildPickedDriverGroupByDriverId = (picks: PickRow[]): Map<number, number> => {
-  const groupByDriverId = new Map<number, number>();
-
-  picks.forEach((pick) => {
-    pickDriverEntries(pick).forEach(([driverId, groupNumber]) => {
-      if (!groupByDriverId.has(driverId)) {
-        groupByDriverId.set(driverId, groupNumber);
-      }
-    });
-  });
-
-  return groupByDriverId;
-};
-
-const resolveRaceDriverGroup = (
-  driverId: number,
-  raceDriverGroupByDriverId: Map<number, number>,
-  pickedDriverGroupByDriverId: Map<number, number>,
-  currentDriverGroupById: Map<number, number>
-): number | undefined =>
-  raceDriverGroupByDriverId.get(driverId) ??
-  pickedDriverGroupByDriverId.get(driverId) ??
-  currentDriverGroupById.get(driverId);
-
-const computeLowestPossibleScore = (
-  groupCount: number,
-  results: ResultRow[],
-  raceDriverGroupByDriverId: Map<number, number>,
-  pickedDriverGroupByDriverId: Map<number, number>,
-  currentDriverGroupById: Map<number, number>
-): number => {
-  return computeGroupScoreExtremes(
-    groupCount,
-    results,
-    (result) =>
-      resolveRaceDriverGroup(
-        result.driver_id,
-        raceDriverGroupByDriverId,
-        pickedDriverGroupByDriverId,
-        currentDriverGroupById
-      ),
-    (result) => result.points
-  ).lowest;
-};
 
 export async function scheduleRaceWinnerAutoCalculation(supabase: SupabaseClient, raceId: number) {
   const eligibleAt = new Date(Date.now() + AUTO_WINNER_DELAY_MINUTES * 60_000).toISOString();
@@ -228,53 +173,15 @@ export async function calculateRaceWinnerProfileId(
     return null;
   }
 
-  const pointsByDriverId = new Map<number, number>();
-  results.forEach((row) => {
-    pointsByDriverId.set(row.driver_id, scoringNumber(row.points));
-  });
-
-  const officialWinningAverageSpeed =
-    race.official_winning_average_speed === null || race.official_winning_average_speed === undefined
-      ? null
-      : scoringNumber(race.official_winning_average_speed);
-  const groupCount = pickGroupCountForFormat(normalizeRacePickFormat(race.pick_format));
-  const currentDriverGroupById = new Map<number, number>();
-  ((driversRes.data ?? []) as DriverRow[]).forEach((driver) => {
-    currentDriverGroupById.set(driver.id, driver.group_number);
-  });
-  const raceDriverGroupByDriverId = new Map<number, number>();
-  ((raceDriverGroupsRes.data ?? []) as RaceDriverGroupRow[]).forEach((row) => {
-    raceDriverGroupByDriverId.set(row.driver_id, row.group_number);
-  });
-  const pickedDriverGroupByDriverId = buildPickedDriverGroupByDriverId(picks);
-  const lowestPossibleScore = computeLowestPossibleScore(
-    groupCount,
-    results,
-    raceDriverGroupByDriverId,
-    pickedDriverGroupByDriverId,
-    currentDriverGroupById
-  );
-  const pickByUserId = new Map<string, PickRow>();
-  picks.forEach((pick) => {
-    pickByUserId.set(pick.user_id, pick);
-  });
-
-  const ranked = buildOrderedWeeklyRows(
-    participants.map((participant) => {
-      const pick = pickByUserId.get(participant.id);
-      return {
-        averageSpeed: pick ? scoringNumber(pick.average_speed) : null,
-        points: pick
-          ? scorePickSelection(pick, groupCount, (driverId) => pointsByDriverId.get(driverId))
-          : lowestPossibleScore,
-        teamName: participant.teamName,
-        userId: participant.id
-      };
-    }),
-    officialWinningAverageSpeed
-  );
-
-  return ranked[0]?.userId ?? null;
+  return buildRaceScoringProjection({
+    currentDrivers: (driversRes.data ?? []) as DriverRow[],
+    officialWinningAverageSpeed: race.official_winning_average_speed,
+    participants,
+    pickFormat: race.pick_format,
+    picks,
+    raceDriverGroups: (raceDriverGroupsRes.data ?? []) as RaceDriverGroupRow[],
+    results
+  }).winnerUserId;
 }
 
 export async function finalizeRaceWinnerNow(

@@ -3,11 +3,9 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { requireAppUser } from "@/lib/authenticated-user";
+import { errorReference, reportAppError } from "@/lib/app-error-reporter";
+import { participantSafeErrorMessage } from "@/lib/app-error-safety";
 import { isValidAverageSpeedMph } from "@/lib/race-format";
-import { withMigrationHint } from "@/lib/supabase/migration-errors";
-
-const ATOMIC_PICK_MIGRATION_FILE =
-  "supabase/migrations/20260730_atomic_picks_and_season_recovery.sql";
 
 type SaveWeeklyPickResult = {
   message: string;
@@ -64,7 +62,7 @@ const parseSaveResult = (value: unknown): SaveWeeklyPickResult | null => {
 };
 
 export async function saveWeeklyPickAction(formData: FormData) {
-  const { supabase } = await requireAppUser({
+  const { supabase, user } = await requireAppUser({
     requireRegistration: true,
     requireSeasonDecision: true
   });
@@ -99,16 +97,33 @@ export async function saveWeeklyPickAction(formData: FormData) {
   });
 
   if (error) {
-    const message = /function .*save_weekly_pick.*does not exist|schema cache/i.test(error.message)
-      ? withMigrationHint(error.message, ATOMIC_PICK_MIGRATION_FILE)
-      : error.message;
-    picksErrorRedirect(message, raceId as number);
+    const fallback = "Your picks could not be saved. Reload the form and try again.";
+    const message = participantSafeErrorMessage(error, fallback);
+    const reported = message === fallback
+      ? await reportAppError({
+          actorProfileId: user.id,
+          code: "pick-save-failed",
+          context: { operation: "save-weekly-pick", raceId },
+          error,
+          route: "/picks",
+          subsystem: "picks"
+        })
+      : null;
+    picksErrorRedirect(`${message}${reported ? errorReference(reported) : ""}`, raceId as number);
   }
 
   const result = parseSaveResult(data);
   if (!result) {
+    const reported = await reportAppError({
+      actorProfileId: user.id,
+      code: "pick-save-response-invalid",
+      context: { operation: "parse-save-response", raceId },
+      error: "The save_weekly_pick response did not match the application contract.",
+      route: "/picks",
+      subsystem: "picks"
+    });
     picksErrorRedirect(
-      "Your save response could not be verified. Reload the form before trying again.",
+      `Your save response could not be verified. Reload the form before trying again.${errorReference(reported)}`,
       raceId as number
     );
   }

@@ -1,6 +1,5 @@
 import Link from "next/link";
 import { AuthenticatedPageShell } from "@/components/authenticated-page-shell";
-import { MobileBottomNav } from "@/components/mobile-bottom-nav";
 import { PickSubmissionSnapshot } from "@/components/pick-submission-snapshot";
 import { saveWeeklyPickAction } from "@/app/picks/actions";
 import { PickemForm } from "@/components/pickem-form";
@@ -529,8 +528,6 @@ export default async function PicksPage({ searchParams }: PageProps) {
           savedSelection={selectedMap}
         />
       ) : null}
-
-      <MobileBottomNav />
     </AuthenticatedPageShell>
   );
 }

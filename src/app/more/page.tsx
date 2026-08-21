@@ -1,6 +1,5 @@
 import Link from "next/link";
 import { AuthenticatedPageShell } from "@/components/authenticated-page-shell";
-import { MobileBottomNav } from "@/components/mobile-bottom-nav";
 import {
   ActionLink,
   StatusChip
@@ -82,8 +81,6 @@ export default async function MorePage() {
           </Link>
         ) : null}
       </nav>
-
-      <MobileBottomNav />
     </AuthenticatedPageShell>
   );
 }

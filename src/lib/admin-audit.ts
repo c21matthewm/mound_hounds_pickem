@@ -1,6 +1,7 @@
 import "server-only";
 
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { reportAppError } from "@/lib/app-error-reporter";
 
 export type AdminAuditEvent = {
   action: string;
@@ -26,5 +27,17 @@ export const recordAdminAudit = async (
 
   if (error) {
     console.error("[audit] Failed recording admin event:", error.message);
+    await reportAppError({
+      code: "write-admin-audit-failed",
+      context: {
+        entityId: event.entityId,
+        entityType: event.entityType,
+        operation: event.action
+      },
+      error,
+      route: "/admin",
+      severity: "warning",
+      subsystem: "admin-audit"
+    });
   }
 };

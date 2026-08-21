@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { requireAppUser } from "@/lib/authenticated-user";
+import { errorReference, reportAppError } from "@/lib/app-error-reporter";
 import { isFeedbackCategory, isFeedbackType } from "@/lib/feedback";
 
 const asText = (value: FormDataEntryValue | null): string =>
@@ -44,7 +45,18 @@ export async function submitFeedbackAction(formData: FormData) {
   });
 
   if (error) {
-    feedbackRedirect("error", error.message);
+    const reported = await reportAppError({
+      actorProfileId: user.id,
+      code: "feedback-submit-failed",
+      context: { operation: "submit-feedback" },
+      error,
+      route: "/feedback",
+      subsystem: "feedback"
+    });
+    feedbackRedirect(
+      "error",
+      `Your feedback could not be submitted. Please try again.${errorReference(reported)}`
+    );
   }
 
   revalidatePath("/admin");

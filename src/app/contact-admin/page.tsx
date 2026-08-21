@@ -1,5 +1,4 @@
 import { AuthenticatedPageShell } from "@/components/authenticated-page-shell";
-import { MobileBottomNav } from "@/components/mobile-bottom-nav";
 import {
   ActionLink,
   ContentPanel,
@@ -37,7 +36,6 @@ export default async function ContactAdminPage() {
           Include your team name and as much detail as possible so the issue can be handled quickly.
         </p>
       </ContentPanel>
-      <MobileBottomNav />
     </AuthenticatedPageShell>
   );
 }
