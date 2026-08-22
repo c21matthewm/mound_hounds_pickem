@@ -128,12 +128,14 @@ supabase/migrations/20260729_scale_weekly_operations.sql
 supabase/migrations/20260730_atomic_picks_and_season_recovery.sql
 supabase/migrations/20260818_bound_recovery_jobs_and_registration.sql
 supabase/migrations/20260821_add_application_error_inbox.sql
+supabase/migrations/20260822_harden_pick_reminder_delivery.sql
+supabase/migrations/20260822_retire_five_day_pick_email.sql
 ```
 
 The expected production schema version is:
 
 ```text
-20260818_recovery_jobs_security_v1
+20260822_reminder_delivery_v1
 ```
 
 Reusable health, cron, and race-diagnostic queries are in `supabase/operations/`. The deployment
@@ -168,9 +170,9 @@ where p.id = u.id
 7. Use the leaderboard tabs to review standings, locked picks by race, participant analytics, and
    finalized Hall of Fame seasons.
 8. Use **Admin > Race Week** to verify the schema contract, active season, next-race result
-   gate, registration count, reminder queue totals, degraded cron runs, application error inbox,
-   and failed-delivery retry controls. Resolve an application incident only after checking the
-   referenced workflow.
+   gate, registration count, reminder schedule and preview, queue totals, degraded cron runs,
+   application error inbox, and failed-delivery retry controls. Send tests only from the dedicated
+   test control; it never changes participant reminder history.
 9. Use **Admin > Recovery** to create and download a portable season backup before unusual
    database work. Follow `docs/SEASON_RECOVERY.md` if a restore is ever needed.
 

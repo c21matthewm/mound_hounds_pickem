@@ -3,6 +3,7 @@ import {
   resolveAppErrorAction,
   retryFailedPickRemindersAction
 } from "@/app/admin/maintenance-actions";
+import { sendPickReminderTestAction } from "@/app/admin/reminder-actions";
 import {
   AdminParticipantsWorkspace,
   type AdminParticipantRow
@@ -18,6 +19,7 @@ import {
   type AdminAppErrorRow,
   type AdminAuditHealthRow,
   type AdminJobRunHealthRow,
+  type AdminReminderPreview,
   type AdminReminderQueueHealth,
   type AdminReminderHealthRow
 } from "@/components/admin-system-health";
@@ -26,6 +28,7 @@ import { ActionLink, CompactNotice } from "@/components/ui-primitives";
 import { requireAdmin } from "@/lib/admin";
 import { createAdminRequestToken } from "@/lib/admin-request-token";
 import { errorReference, reportAppError } from "@/lib/app-error-reporter";
+import { buildPickReminderMessage } from "@/lib/pick-reminder-message";
 import { getPreviousRaceResultsGate } from "@/lib/pickem-results-gate";
 import {
   nextPickWindow,
@@ -38,8 +41,14 @@ import {
   summarizeReminderQueue,
   type ReminderQueueRow
 } from "@/lib/reminder-queue";
-import { getReminderWindow } from "@/lib/reminder-windows";
+import {
+  getReminderWindow,
+  getReminderWindowByType,
+  reminderScheduleForDeadline,
+  type ReminderType
+} from "@/lib/reminder-windows";
 import type { SeasonRestorePointSummary } from "@/lib/season-recovery";
+import { canonicalSiteOrigin } from "@/lib/site-url";
 
 import type {
   DriverRow,
@@ -340,6 +349,7 @@ export default async function AdminPage({ searchParams }: PageProps) {
   let healthSchemaVersion: string | null = null;
   let healthReminderRows: AdminReminderHealthRow[] = [];
   let healthReminderQueue: AdminReminderQueueHealth | null = null;
+  let healthReminderPreview: AdminReminderPreview | null = null;
   let healthJobRuns: AdminJobRunHealthRow[] = [];
   let healthJobEvents: AdminJobRunHealthRow[] = [];
   let healthAuditRows: AdminAuditHealthRow[] = [];
@@ -470,17 +480,18 @@ export default async function AdminPage({ searchParams }: PageProps) {
     healthNextRace = healthNextRaces[0] ?? null;
 
     if (healthNextRace) {
+      const pickDeadline = pickLockAtForRace(healthNextRace);
       const reminderWindow = getReminderWindow(
-        Date.parse(pickLockAtForRace(healthNextRace)) - currentTime
+        Date.parse(pickDeadline) - currentTime
       );
-      const [{ count }, gate, queueResponse] = await Promise.all([
+      const [healthPicksResponse, gate, queueResponse, reminderHistoryResponse] = await Promise.all([
         registeredProfileIds.size > 0
           ? supabase
               .from("picks")
-              .select("id", { count: "exact", head: true })
+              .select("race_id,user_id")
               .in("race_id", healthNextRaces.map((race) => race.id))
               .in("user_id", Array.from(registeredProfileIds))
-          : Promise.resolve({ count: 0, data: null, error: null }),
+          : Promise.resolve({ data: [], error: null }),
         getPreviousRaceResultsGate(supabase, healthNextRace),
         reminderWindow
           ? supabase
@@ -490,16 +501,25 @@ export default async function AdminPage({ searchParams }: PageProps) {
               )
               .eq("race_id", healthNextRace.id)
               .eq("reminder_type", reminderWindow.key)
-          : Promise.resolve({ data: [], error: null })
+          : Promise.resolve({ data: [], error: null }),
+        supabase
+          .from("pick_reminders")
+          .select("reminder_type,delivery_status,channel")
+          .eq("race_id", healthNextRace.id)
+          .eq("channel", "email")
       ]);
-      if (queueResponse.error) {
+      if (healthPicksResponse.error || queueResponse.error || reminderHistoryResponse.error) {
         await throwAdminLoadError(
           "admin-reminder-health-load-failed",
-          queueResponse.error,
+          healthPicksResponse.error ?? queueResponse.error ?? reminderHistoryResponse.error,
           "load_reminder_health"
         );
       }
-      healthPickCount = count ?? 0;
+      const healthPickRows = (healthPicksResponse.data ?? []) as Array<{
+        race_id: number;
+        user_id: string;
+      }>;
+      healthPickCount = healthPickRows.length;
       healthPreviousResultsStatus =
         gate.status === "ready" ? "Ready: previous results are published." : gate.shortMessage;
       if (reminderWindow) {
@@ -518,6 +538,59 @@ export default async function AdminPage({ searchParams }: PageProps) {
           sent: queueSummary.sent
         };
       }
+
+      const pickedRaceIdsByUser = new Map<string, Set<number>>();
+      healthPickRows.forEach((pick) => {
+        const pickedRaceIds = pickedRaceIdsByUser.get(pick.user_id) ?? new Set<number>();
+        pickedRaceIds.add(pick.race_id);
+        pickedRaceIdsByUser.set(pick.user_id, pickedRaceIds);
+      });
+      const missingParticipantCount = Array.from(registeredProfileIds).filter(
+        (profileId) =>
+          (pickedRaceIdsByUser.get(profileId)?.size ?? 0) < healthNextRaces.length
+      ).length;
+      const sentCountByType = new Map<ReminderType, number>();
+      (reminderHistoryResponse.data ?? []).forEach((row) => {
+        const reminderType = row.reminder_type as ReminderType;
+        if (row.delivery_status === "sent") {
+          sentCountByType.set(reminderType, (sentCountByType.get(reminderType) ?? 0) + 1);
+        }
+      });
+      const schedule = reminderScheduleForDeadline(pickDeadline);
+      const previewType =
+        reminderWindow?.key ??
+        schedule.find((item) => Date.parse(item.sendAt) > currentTime)?.key ??
+        "4h";
+      const previewMessage = buildPickReminderMessage({
+        missingRaces: healthNextRaces,
+        races: healthNextRaces,
+        recipientName: profile.full_name,
+        reminderWindow: getReminderWindowByType(previewType),
+        siteUrl: canonicalSiteOrigin()
+      });
+      healthReminderPreview = {
+        from: process.env.RESEND_FROM_EMAIL?.trim() || null,
+        html: previewMessage.html,
+        missingParticipantCount,
+        raceId: healthNextRace.id,
+        raceName: pickWindowDisplayName(healthNextRaces, healthNextRace.race_name),
+        recipientEmail: user.email ?? null,
+        reminderType: previewType,
+        schedule: schedule.map((item) => {
+          const sentCount = sentCountByType.get(item.key) ?? 0;
+          const sendTime = Date.parse(item.sendAt);
+          const status = sentCount > 0
+            ? "sent"
+            : reminderWindow?.key === item.key
+              ? "due"
+              : sendTime <= currentTime
+                ? "passed"
+                : "scheduled";
+          return { ...item, sentCount, status };
+        }),
+        subject: previewMessage.subject,
+        text: previewMessage.text
+      };
     }
   }
 
@@ -588,9 +661,11 @@ export default async function AdminPage({ searchParams }: PageProps) {
           } : null}
           registeredTeamCount={registeredProfileIds.size}
           reminderQueue={healthReminderQueue}
+          reminderPreview={healthReminderPreview}
           reminderRows={healthReminderRows}
           resolveAppErrorAction={resolveAppErrorAction}
           retryFailedRemindersAction={retryFailedPickRemindersAction}
+          sendReminderTestAction={sendPickReminderTestAction}
           schemaVersion={healthSchemaVersion}
           openAppErrorCount={healthOpenAppErrorCount}
           smsEnabled={process.env.REMINDER_SMS_ENABLED?.toLowerCase() === "true"}

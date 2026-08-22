@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { AuthenticatedPageShell } from "@/components/authenticated-page-shell";
 import { PickSubmissionSnapshot } from "@/components/pick-submission-snapshot";
+import { RaceScheduleRefresh } from "@/components/race-schedule-refresh";
 import { saveWeeklyPickAction } from "@/app/picks/actions";
 import { PickemForm } from "@/components/pickem-form";
 import {
@@ -330,6 +331,10 @@ export default async function PicksPage({ searchParams }: PageProps) {
       maxWidth="max-w-6xl"
       title="Pick'em Form"
     >
+      <RaceScheduleRefresh
+        pickLockAt={pickLockAt}
+        raceStartAt={selectedRace.race_date}
+      />
       {pickWindow.length > 1 ? (
         <section className="mt-6 border-y border-slate-200 bg-white py-4">
           <div className="flex flex-wrap items-center justify-between gap-2">

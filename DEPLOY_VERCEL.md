@@ -368,11 +368,10 @@ Apply it after the atomic-pick migration and before deploying the matching appli
 bounds automatic restore points, keeps one current heartbeat per scheduled job, prunes old job
 events, rate-limits season invite attempts with keyed hashes, and hardens recovery requests.
 
-Verify the final contract by running `supabase/operations/01_verify_production_health.sql`. The
-schema version must be `20260818_recovery_jobs_security_v1`; every `schema`, `function`, and
-`storage` row must report `PASS`. Then open **Admin -> Race Week** and **Admin -> Recovery** in
-the authenticated app. Do not call admin-only health or recovery functions directly from Supabase
-SQL Editor.
+After applying this migration, the interim schema version is
+`20260818_recovery_jobs_security_v1`. Continue through the later migrations below before running
+the final production-health query. Do not call admin-only health or recovery functions directly
+from Supabase SQL Editor.
 
 Latest application-error inbox migration:
 
@@ -389,6 +388,25 @@ After the operations migration but before the shared-window and weekly-scale mig
 expected schema versions are `20260725_operations_v2` and `20260726_shared_pick_windows`.
 Existing 2026 participants remain registered. Open **Admin -> Races -> Season management** and set
 the private 2026 invite code; only new or not-yet-registered participants will be asked for it.
+
+Latest pick-reminder delivery and schedule-correction migration:
+
+```text
+supabase/migrations/20260822_harden_pick_reminder_delivery.sql
+supabase/migrations/20260822_retire_five_day_pick_email.sql
+```
+
+Apply it after the application-error migration and before deploying the matching application code.
+It adds a service-role pre-send eligibility check and an atomic admin correction for qualifying
+delays, including shared doubleheader windows. A correction preserves reminder types already sent,
+removes only unsent queue work, and recalculates future reminders from the new qualifying time.
+
+Verify them with `supabase/operations/01_verify_production_health.sql`. The schema version must be
+`20260822_reminder_delivery_v1`, and the `reminder_delivery_validation`,
+`qualifying_schedule_correction`, and `two_stage_policy` checks must report `PASS`. Then open
+**Admin -> Race Week**, review the two calculated send times, preview the email, and use
+**Send test to me**. Test messages go only to the signed-in administrator and do not create or
+modify participant reminder history.
 
 For the older result-publication migration, retain known historical exceptions rather than
 reconstructing missing snapshots from current standings: Race 8 has 25 official rows and a

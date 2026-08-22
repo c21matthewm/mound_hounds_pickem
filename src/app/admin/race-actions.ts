@@ -17,6 +17,7 @@ import {
   type EditablePickWindowRace,
   LEAGUE_SEASONS_MIGRATION_FILE,
   MAX_RACE_NAME_LENGTH,
+  REMINDER_DELIVERY_MIGRATION_FILE,
   SHARED_PICK_WINDOWS_MIGRATION_FILE,
   adminMutationRedirect,
   asText,
@@ -54,6 +55,73 @@ const reportRaceFailure = ({
     fallback,
     tab: "races"
   });
+
+export async function correctPickWindowQualifyingStartAction(formData: FormData) {
+  const { supabase, user } = await requireAdmin();
+  const raceId = parsePositiveInteger(asText(formData.get("race_id")));
+  const qualifyingStartInput = asText(formData.get("qualifying_start_at"));
+  const correctionConfirmed =
+    asText(formData.get("confirm_schedule_correction")) === "on";
+
+  if (!raceId || !qualifyingStartInput) {
+    adminMutationRedirect(
+      "error",
+      "Select a race and corrected qualifying start.",
+      "races"
+    );
+  }
+  if (!correctionConfirmed) {
+    adminMutationRedirect(
+      "error",
+      "Confirm the schedule correction before changing the pick deadline.",
+      "races"
+    );
+  }
+
+  const qualifyingStartAt = parseLeagueDateTimeLocalInput(qualifyingStartInput);
+  if (!qualifyingStartAt || Date.parse(qualifyingStartAt) <= Date.now()) {
+    adminMutationRedirect(
+      "error",
+      "The corrected qualifying start must be a valid future Indianapolis time.",
+      "races"
+    );
+  }
+
+  const { data, error } = await supabase.rpc(
+    "correct_pick_window_qualifying_start",
+    {
+      p_qualifying_start_at: qualifyingStartAt,
+      p_race_id: raceId
+    }
+  );
+
+  if (error) {
+    await reportRaceFailure({
+      code: "correct-pick-window-deadline-failed",
+      error: withMigrationHint(error.message, REMINDER_DELIVERY_MIGRATION_FILE),
+      fallback: "The qualifying correction could not be saved.",
+      operation: "correct_pick_window_deadline",
+      raceId,
+      userId: user.id
+    });
+  }
+
+  const result = data && typeof data === "object" && !Array.isArray(data)
+    ? (data as { raceCount?: number })
+    : null;
+  const raceCount = result?.raceCount ?? 1;
+
+  revalidatePath("/admin");
+  revalidatePath("/dashboard");
+  revalidatePath("/race-center");
+  revalidatePath("/picks");
+  revalidatePath("/leaderboard");
+  adminMutationRedirect(
+    "message",
+    `Qualifying deadline corrected for ${raceCount} race${raceCount === 1 ? "" : "s"}. Sent emails were preserved; unsent reminders will follow the new time.`,
+    "races"
+  );
+}
 
 export async function createRaceAction(formData: FormData) {
   const { supabase, user } = await requireAdmin();
@@ -448,6 +516,21 @@ export async function updateRaceAction(formData: FormData) {
     redirectWithTab("error", `Race start year must match the ${selectedSeason.season_year} season.`);
   }
 
+  const qualifyingChanged = !timestampsMatch(
+    selectedExistingRace.qualifying_start_at,
+    qualifyingStartAt
+  );
+  if (
+    qualifyingChanged &&
+    selectedSeason.status === "active" &&
+    pickFormat === "standard"
+  ) {
+    redirectWithTab(
+      "error",
+      "Use the Qualifying schedule correction control so the form and unsent reminders update together."
+    );
+  }
+
   const identityChanged =
     selectedExistingRace.season_id !== seasonId ||
     selectedExistingRace.round_number !== roundNumber ||
@@ -463,7 +546,7 @@ export async function updateRaceAction(formData: FormData) {
     );
   }
   const scheduleChanged =
-    !timestampsMatch(selectedExistingRace.qualifying_start_at, qualifyingStartAt) ||
+    qualifyingChanged ||
     !timestampsMatch(selectedExistingRace.race_date, raceDate);
   if (identityChanged || scheduleChanged) {
     const [pickCountResponse, resultCountResponse] = await Promise.all([

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { resolveAuthOrigin } from "@/lib/site-url";
+import { canonicalSiteOrigin, resolveAuthOrigin } from "@/lib/site-url";
 
 describe("resolveAuthOrigin", () => {
   it("uses the configured canonical origin in production", () => {
@@ -40,5 +40,12 @@ describe("resolveAuthOrigin", () => {
         requestOrigin: "https://attacker.example"
       })
     ).toBe("https://moundhoundspickem.app");
+  });
+});
+
+describe("canonicalSiteOrigin", () => {
+  it("uses only the configured origin for reminder links", () => {
+    expect(canonicalSiteOrigin("https://moundhoundspickem.app/ignored/path"))
+      .toBe("https://moundhoundspickem.app");
   });
 });

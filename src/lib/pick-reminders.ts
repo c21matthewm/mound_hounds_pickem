@@ -1,6 +1,10 @@
 import "server-only";
 
 import type { SupabaseClient } from "@supabase/supabase-js";
+import {
+  buildPickReminderMessage,
+  type PickReminderRace
+} from "@/lib/pick-reminder-message";
 import { pickWindowDisplayName, racesInPickWindow } from "@/lib/pick-windows";
 import { pickLockAtForRace } from "@/lib/race-format";
 import { getPreviousRaceResultsGate } from "@/lib/pickem-results-gate";
@@ -14,24 +18,15 @@ import {
 import {
   getReminderWindow,
   type ReminderType,
-  type ReminderWindow
 } from "@/lib/reminder-windows";
+import { sendResendEmail } from "@/lib/resend-email";
 import { loadActiveLeagueSeason } from "@/lib/seasons";
+import { canonicalSiteOrigin } from "@/lib/site-url";
 import { createServiceRoleSupabaseClient } from "@/lib/supabase/service-role";
-import { formatLeagueDateTime, LEAGUE_TIME_ZONE } from "@/lib/timezone";
 
 type ReminderChannel = "email" | "sms";
 
-type UpcomingRace = {
-  id: number;
-  pick_format: string | null;
-  pick_window_key: string;
-  qualifying_start_at: string;
-  race_date: string;
-  race_name: string;
-  round_number: number;
-  season_id: number;
-};
+type UpcomingRace = PickReminderRace;
 
 type ProfileForReminder = {
   full_name: string | null;
@@ -44,10 +39,6 @@ type ProfileForReminder = {
 type PickUserRow = {
   race_id: number;
   user_id: string;
-};
-
-type SendResult = {
-  id: string | null;
 };
 
 type PickReminderSummary = {
@@ -88,15 +79,6 @@ const SMS_GATEWAY_DOMAIN_BY_CARRIER: Record<string, string | null> = {
   tmobile: "tmomail.net",
   uscellular: "email.uscc.net",
   verizon: "vtext.com"
-};
-
-const getSiteUrl = (): string => {
-  const configured = process.env.NEXT_PUBLIC_SITE_URL?.trim();
-  if (!configured) {
-    return "http://localhost:3000";
-  }
-
-  return configured.endsWith("/") ? configured.slice(0, -1) : configured;
 };
 
 const normalizePhoneToTenDigits = (raw: string | null): string | null => {
@@ -182,124 +164,6 @@ const loadAuthEmailsByUserId = async (
   return emailByUserId;
 };
 
-const buildReminderMessage = (
-  races: UpcomingRace[],
-  missingRaces: UpcomingRace[],
-  reminderWindow: ReminderWindow
-): { smsText: string; subject: string; text: string } => {
-  const race = races[0];
-  const pickLockAt = pickLockAtForRace(race);
-  const pickDeadlineText = formatLeagueDateTime(pickLockAt, {
-    dateStyle: "full",
-    timeStyle: "short"
-  });
-  const siteUrl = getSiteUrl();
-  const picksUrl = `${siteUrl}/picks`;
-
-  const isFormOpenNotice = reminderWindow.key === "5d_open";
-  const isFinalReminder = reminderWindow.key === "4h";
-  const weekendName = pickWindowDisplayName(races, race.race_name);
-  const missingRaceLines = missingRaces.map(
-    (missingRace) => `- R${missingRace.round_number}: ${missingRace.race_name}`
-  );
-  const missingSummary =
-    missingRaces.length === races.length
-      ? `You need to submit ${races.length === 1 ? "the race form" : "both race forms"}.`
-      : `You still need to submit ${missingRaces[0].race_name}.`;
-  const subject = isFormOpenNotice
-    ? `[Mound Hounds Pick'em] Picks are open: ${weekendName}`
-    : isFinalReminder
-      ? `[Mound Hounds Pick'em] Final reminder: ${weekendName}`
-      : `[Mound Hounds Pick'em] 2-day reminder: ${weekendName}`;
-  const text = [
-    isFormOpenNotice
-      ? "The pick form is open and ready for the next race."
-      : isFinalReminder
-        ? "Final reminder from the Mound Hounds Pick'em League."
-        : "Reminder from the Mound Hounds Pick'em League.",
-    "",
-    races.length > 1 ? "Doubleheader races:" : `Race: ${race.race_name}`,
-    ...(races.length > 1 ? missingRaceLines : []),
-    `Pick deadline: ${pickDeadlineText} (${LEAGUE_TIME_ZONE})`,
-    "",
-    missingSummary,
-    isFormOpenNotice ? "The form is available now for your race selections." : "",
-    `Submit your picks here: ${picksUrl}`,
-    "",
-    isFormOpenNotice
-      ? "Make your selections when you are ready. Good luck and enjoy the race weekend!"
-      : "Get your lineup locked before the pick deadline. Good luck and enjoy the race weekend!"
-  ].join("\n");
-
-  const smsText = [
-    isFormOpenNotice
-      ? "Mound Hounds Pick'em: picks are open."
-      : `Mound Hounds Pick'em reminder (${reminderWindow.label}):`,
-    weekendName,
-    missingRaces.length > 1
-      ? "Both race forms are needed."
-      : `Missing: ${missingRaces[0].race_name}.`,
-    `Pick deadline: ${pickDeadlineText} (${LEAGUE_TIME_ZONE})`,
-    `Submit picks: ${picksUrl}`
-  ].join(" ");
-
-  return { smsText, subject, text };
-};
-
-const sendWithResend = async (
-  to: string,
-  subject: string,
-  text: string,
-  idempotencyKey: string
-): Promise<SendResult> => {
-  const apiKey = process.env.RESEND_API_KEY?.trim();
-  const from = process.env.RESEND_FROM_EMAIL?.trim();
-  const replyTo = process.env.RESEND_REPLY_TO?.trim();
-
-  if (!apiKey) {
-    throw new Error("Missing RESEND_API_KEY for pick reminder notifications.");
-  }
-  if (!from) {
-    throw new Error("Missing RESEND_FROM_EMAIL for pick reminder notifications.");
-  }
-
-  const payload: {
-    from: string;
-    reply_to?: string;
-    subject: string;
-    text: string;
-    to: string[];
-  } = {
-    from,
-    subject,
-    text,
-    to: [to]
-  };
-
-  if (replyTo) {
-    payload.reply_to = replyTo;
-  }
-
-  const response = await fetch("https://api.resend.com/emails", {
-    body: JSON.stringify(payload),
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      "Content-Type": "application/json",
-      "Idempotency-Key": idempotencyKey
-    },
-    method: "POST"
-  });
-
-  const body = (await response.json().catch(() => null)) as { id?: string; message?: string } | null;
-  if (!response.ok) {
-    throw new Error(
-      `Resend API error (${response.status}) while sending to ${to}: ${body?.message ?? response.statusText}`
-    );
-  }
-
-  return { id: body?.id ?? null };
-};
-
 const claimReminderSlot = async (
   supabase: SupabaseClient,
   raceId: number,
@@ -362,6 +226,106 @@ const markReminderFailed = async (
   }
 };
 
+type FreshReminderContext = {
+  missingRaces: UpcomingRace[];
+  races: UpcomingRace[];
+};
+
+const reminderContextsMatch = (
+  expected: FreshReminderContext,
+  current: FreshReminderContext | null
+): boolean => {
+  if (!current || expected.races.length !== current.races.length) {
+    return false;
+  }
+
+  const expectedRaceState = expected.races.map((race) =>
+    [race.id, pickLockAtForRace(race)].join(":")
+  );
+  const currentRaceState = current.races.map((race) =>
+    [race.id, pickLockAtForRace(race)].join(":")
+  );
+  const expectedMissingIds = expected.missingRaces.map((race) => race.id);
+  const currentMissingIds = current.missingRaces.map((race) => race.id);
+
+  return (
+    expectedRaceState.join("|") === currentRaceState.join("|") &&
+    expectedMissingIds.join("|") === currentMissingIds.join("|")
+  );
+};
+
+const discardUnsentReminder = async (
+  supabase: SupabaseClient,
+  reminderId: number
+): Promise<void> => {
+  const { error } = await supabase
+    .from("pick_reminders")
+    .delete()
+    .eq("id", reminderId)
+    .neq("delivery_status", "sent");
+
+  if (error) {
+    throw new Error(`Failed discarding obsolete reminder ${reminderId}: ${error.message}`);
+  }
+};
+
+const loadFreshReminderContext = async (
+  supabase: SupabaseClient,
+  reminderId: number
+): Promise<FreshReminderContext | null> => {
+  const { data, error } = await supabase.rpc(
+    "validate_pick_reminder_delivery",
+    { p_reminder_id: reminderId }
+  );
+
+  if (error) {
+    throw new Error(`Failed rechecking reminder eligibility: ${error.message}`);
+  }
+  if (!data || typeof data !== "object" || Array.isArray(data)) {
+    throw new Error("Reminder eligibility check returned an invalid response.");
+  }
+
+  const payload = data as Record<string, unknown>;
+  if (payload.valid !== true) {
+    return null;
+  }
+
+  const isUpcomingRace = (value: unknown): value is UpcomingRace => {
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+      return false;
+    }
+
+    const race = value as Record<string, unknown>;
+    return (
+      typeof race.id === "number" &&
+      (typeof race.pick_format === "string" || race.pick_format === null) &&
+      typeof race.pick_window_key === "string" &&
+      typeof race.qualifying_start_at === "string" &&
+      typeof race.race_date === "string" &&
+      typeof race.race_name === "string" &&
+      typeof race.round_number === "number" &&
+      typeof race.season_id === "number"
+    );
+  };
+
+  if (!Array.isArray(payload.races) || !Array.isArray(payload.missingRaces)) {
+    throw new Error("Reminder eligibility check omitted its race context.");
+  }
+
+  const races = payload.races.filter(isUpcomingRace);
+  const missingRaces = payload.missingRaces.filter(isUpcomingRace);
+  if (
+    races.length !== payload.races.length ||
+    missingRaces.length !== payload.missingRaces.length ||
+    races.length === 0 ||
+    missingRaces.length === 0
+  ) {
+    throw new Error("Reminder eligibility check returned malformed race data.");
+  }
+
+  return { missingRaces, races };
+};
+
 const mapWithConcurrency = async <T, R>(
   items: T[],
   concurrency: number,
@@ -421,6 +385,8 @@ export async function sendDuePickReminders(): Promise<PickReminderSummary> {
   if (!emailDeliveryEnabled) {
     return emptySummary("delivery_disabled");
   }
+
+  const siteUrl = canonicalSiteOrigin();
 
   const activeSeason = await loadActiveLeagueSeason(supabase);
   const { data: upcomingRaces, error: raceError } = activeSeason
@@ -688,13 +654,6 @@ export async function sendDuePickReminders(): Promise<PickReminderSummary> {
       if (!participant || !desiredDelivery) {
         return counts;
       }
-      const pickedRaceIds = pickedRaceIdsByUser.get(participant.id) ?? new Set<number>();
-      const missingRaces = upcomingRaceWindow.filter((race) => !pickedRaceIds.has(race.id));
-      const message = buildReminderMessage(
-        upcomingRaceWindow,
-        missingRaces,
-        reminderWindow
-      );
       const recipient = desiredDelivery.recipient;
 
       if (queueRow.channel === "email") {
@@ -712,13 +671,36 @@ export async function sendDuePickReminders(): Promise<PickReminderSummary> {
           if (!reminderId) {
             counts.emailSkippedAlreadySent = 1;
           } else {
-            const sendResult = await sendWithResend(
-              recipient,
-              message.subject,
-              message.text,
-              `pick-${upcomingRace.id}-${participant.id}-${reminderWindow.key}-email`
-            );
-            await markReminderSent(supabase, reminderId, sendResult.id);
+            const claimedReminderId = reminderId;
+            const freshContext = await loadFreshReminderContext(supabase, claimedReminderId);
+            if (!freshContext) {
+              await discardUnsentReminder(supabase, claimedReminderId);
+              return counts;
+            }
+            const message = buildPickReminderMessage({
+              missingRaces: freshContext.missingRaces,
+              races: freshContext.races,
+              recipientName: participant.full_name,
+              reminderWindow,
+              siteUrl
+            });
+            const sendResult = await sendResendEmail({
+              beforeSend: async () =>
+                reminderContextsMatch(
+                  freshContext,
+                  await loadFreshReminderContext(supabase, claimedReminderId)
+                ),
+              html: message.html,
+              idempotencyKey: `pick-${upcomingRace.id}-${participant.id}-${reminderWindow.key}-email`,
+              subject: message.subject,
+              text: message.text,
+              to: recipient
+            });
+            if (sendResult.skipped) {
+              await discardUnsentReminder(supabase, claimedReminderId);
+              return counts;
+            }
+            await markReminderSent(supabase, claimedReminderId, sendResult.id);
             counts.emailSent = 1;
           }
         } catch (error) {
@@ -749,13 +731,35 @@ export async function sendDuePickReminders(): Promise<PickReminderSummary> {
         if (!smsReminderId) {
           counts.smsSkippedAlreadySent = 1;
         } else {
-          const sendResult = await sendWithResend(
-            recipient,
-            message.subject,
-            message.smsText,
-            `pick-${upcomingRace.id}-${participant.id}-${reminderWindow.key}-sms`
-          );
-          await markReminderSent(supabase, smsReminderId, sendResult.id);
+          const claimedReminderId = smsReminderId;
+          const freshContext = await loadFreshReminderContext(supabase, claimedReminderId);
+          if (!freshContext) {
+            await discardUnsentReminder(supabase, claimedReminderId);
+            return counts;
+          }
+          const message = buildPickReminderMessage({
+            missingRaces: freshContext.missingRaces,
+            races: freshContext.races,
+            recipientName: participant.full_name,
+            reminderWindow,
+            siteUrl
+          });
+          const sendResult = await sendResendEmail({
+            beforeSend: async () =>
+              reminderContextsMatch(
+                freshContext,
+                await loadFreshReminderContext(supabase, claimedReminderId)
+              ),
+            idempotencyKey: `pick-${upcomingRace.id}-${participant.id}-${reminderWindow.key}-sms`,
+            subject: message.subject,
+            text: message.smsText,
+            to: recipient
+          });
+          if (sendResult.skipped) {
+            await discardUnsentReminder(supabase, claimedReminderId);
+            return counts;
+          }
+          await markReminderSent(supabase, claimedReminderId, sendResult.id);
           counts.smsSent = 1;
         }
       } catch (error) {

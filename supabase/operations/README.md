@@ -7,8 +7,8 @@ separate from `supabase/migrations`, which remains the canonical, ordered databa
 
 1. `01_verify_production_health.sql`
    - Read-only and safe to run at any time.
-   - Checks the schema version, required functions, application-error inbox, race-result
-     completeness, and cron schedules.
+   - Checks the schema version, two-stage reminder policy, required functions,
+     application-error inbox, race-result completeness, and cron schedules.
 2. `02_configure_cron_jobs.sql`
    - Configuration write; run only when installing or changing cron jobs or rotating `CRON_SECRET`.
    - Replaces duplicate/legacy jobs, runs fantasy-winner recovery hourly, and optionally enables
@@ -24,7 +24,7 @@ query is only an editor document; deleting it does not remove functions, tables,
 that were already created in the database.
 
 After `01_verify_production_health.sql` reports schema
-`20260818_recovery_jobs_security_v1`, the old saved migration bundles and one-off Race 2/Race 8
+`20260822_reminder_delivery_v1`, the old saved migration bundles and one-off Race 2/Race 8
 diagnostic queries can be deleted from the Supabase SQL Editor. Their canonical copies remain in
 `supabase/migrations` and Git history.
 
@@ -39,6 +39,8 @@ diagnostic queries can be deleted from the Supabase SQL Editor. Their canonical 
 | Operations and shared doubleheaders | `20260725` and `20260726` migrations | Delete combined saved copy |
 | Weekly scale and atomic recovery | `20260729` and `20260730` migrations | Delete combined saved copy |
 | Bounded recovery and application errors | `20260818` and `20260821` migrations | Delete saved copies after verification |
+| Reminder delivery and schedule corrections | `migrations/20260822_harden_pick_reminder_delivery.sql` | Delete saved copy after verification |
+| Two-stage reminder policy | `migrations/20260822_retire_five_day_pick_email.sql` | Delete saved copy after verification |
 | Race IDs 48/128 diagnostics | `operations/03_diagnose_race_results.sql` | Delete old one-off copies |
 | Admin/cron setup query | Deployment docs plus `operations/02_configure_cron_jobs.sql` | Delete after cron replacement |
 | Old 493-line consolidated schema | Obsolete predecessor of `supabase/schema.sql` | Delete and do not rerun |

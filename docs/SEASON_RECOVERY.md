@@ -66,9 +66,11 @@ Apply these migrations in Supabase SQL Editor, in order, before deploying the ma
 ```text
 supabase/migrations/20260730_atomic_picks_and_season_recovery.sql
 supabase/migrations/20260818_bound_recovery_jobs_and_registration.sql
+supabase/migrations/20260821_add_application_error_inbox.sql
+supabase/migrations/20260822_harden_pick_reminder_delivery.sql
 ```
 
 Then open **Admin > Race Week** while signed in as an administrator. The expected schema
-version is `20260818_recovery_jobs_security_v1`. Run
+version is `20260822_reminder_delivery_v1`. Run
 `supabase/operations/01_verify_production_health.sql` and confirm that every `schema`, `function`,
 and `storage` row reports `PASS` before relying on restore for a live incident.

@@ -69,7 +69,7 @@ export async function retryFailedPickRemindersAction(formData: FormData) {
   const raceId = parsePositiveInteger(asText(formData.get("race_id")));
   const reminderType = asText(formData.get("reminder_type"));
 
-  if (!raceId || !["5d_open", "2d", "4h"].includes(reminderType)) {
+  if (!raceId || !["2d", "4h"].includes(reminderType)) {
     adminRedirect("error", "Select a valid reminder queue before retrying.", "health");
   }
 
