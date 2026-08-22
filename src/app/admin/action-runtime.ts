@@ -62,6 +62,8 @@ export const OPERATIONS_HARDENING_MIGRATION_FILE =
   "supabase/migrations/20260725_harden_race_and_season_operations.sql";
 export const SHARED_PICK_WINDOWS_MIGRATION_FILE =
   "supabase/migrations/20260726_add_shared_pick_windows.sql";
+export const REMINDER_DELIVERY_MIGRATION_FILE =
+  "supabase/migrations/20260822_harden_pick_reminder_delivery.sql";
 
 export const withResultPublicationMigrationHint = (message: string): string =>
   /function .* does not exist|schema cache/i.test(message)

@@ -38,6 +38,25 @@ export type AdminReminderQueueHealth = {
   sent: number;
 };
 
+export type AdminReminderPreview = {
+  from: string | null;
+  html: string;
+  missingParticipantCount: number;
+  raceId: number;
+  raceName: string;
+  recipientEmail: string | null;
+  reminderType: "2d" | "4h";
+  schedule: Array<{
+    key: "2d" | "4h";
+    label: string;
+    sendAt: string;
+    sentCount: number;
+    status: "due" | "passed" | "scheduled" | "sent";
+  }>;
+  subject: string;
+  text: string;
+};
+
 export type AdminAuditHealthRow = {
   action: string;
   created_at: string;
@@ -87,14 +106,16 @@ type AdminSystemHealthProps = {
   openAppErrorCount: number;
   registeredTeamCount: number;
   reminderQueue: AdminReminderQueueHealth | null;
+  reminderPreview: AdminReminderPreview | null;
   reminderRows: AdminReminderHealthRow[];
   resolveAppErrorAction: (formData: FormData) => void | Promise<void>;
   retryFailedRemindersAction: (formData: FormData) => void | Promise<void>;
+  sendReminderTestAction: (formData: FormData) => void | Promise<void>;
   schemaVersion: string | null;
   smsEnabled: boolean;
 };
 
-const EXPECTED_SCHEMA_VERSION = "20260818_recovery_jobs_security_v1";
+const EXPECTED_SCHEMA_VERSION = "20260822_reminder_delivery_v1";
 
 const formatHealthTime = (value: string): string =>
   formatLeagueDateTime(value, { dateStyle: "medium", timeStyle: "short" });
@@ -115,9 +136,11 @@ export function AdminSystemHealth({
   openAppErrorCount,
   registeredTeamCount,
   reminderQueue,
+  reminderPreview,
   reminderRows,
   resolveAppErrorAction,
   retryFailedRemindersAction,
+  sendReminderTestAction,
   schemaVersion,
   smsEnabled
 }: AdminSystemHealthProps) {
@@ -427,6 +450,125 @@ export function AdminSystemHealth({
           )}
         </section>
       </div>
+
+      {reminderPreview ? (
+        <section className="mt-5 border-b border-slate-200 pb-5">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h3 className="font-semibold text-slate-900">Reminder readiness</h3>
+              <p className="mt-1 text-sm text-slate-600">
+                {reminderPreview.missingParticipantCount} registered participant
+                {reminderPreview.missingParticipantCount === 1 ? " is" : "s are"} currently
+                missing at least one form for {reminderPreview.raceName}.
+              </p>
+            </div>
+            <StatusChip tone={emailEnabled ? "success" : "warning"}>
+              {emailEnabled ? "Delivery enabled" : "Delivery disabled"}
+            </StatusChip>
+          </div>
+
+          <div className="mt-4 grid gap-2 sm:grid-cols-2">
+            {reminderPreview.schedule.map((item) => (
+              <div
+                className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2"
+                key={item.key}
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-slate-600">
+                    {item.label}
+                  </p>
+                  <StatusChip
+                    tone={
+                      item.status === "sent"
+                        ? "success"
+                        : item.status === "due"
+                          ? "warning"
+                          : "neutral"
+                    }
+                  >
+                    {item.status === "sent"
+                      ? `${item.sentCount} sent`
+                      : item.status === "due"
+                        ? "Due now"
+                        : item.status === "passed"
+                          ? "Passed"
+                          : "Scheduled"}
+                  </StatusChip>
+                </div>
+                <p className="mt-1 text-sm font-medium text-slate-900">
+                  {formatHealthTime(item.sendAt)}
+                </p>
+              </div>
+            ))}
+          </div>
+          <p className="mt-2 text-xs text-slate-500">
+            The early-week form-open announcement is manual. The app sends only the two-day and
+            four-hour stages. Schedule changes move unsent stages to the corrected qualifying
+            time; a stage already sent remains recorded and is not sent again.
+          </p>
+          {reminderPreview.missingParticipantCount >= 90 ? (
+            <CompactNotice className="mt-3" tone="warning">
+              {reminderPreview.missingParticipantCount} participants are still missing picks.
+              Resend&apos;s free daily allowance is shared with authentication email, so check its
+              remaining quota before this stage becomes due.
+            </CompactNotice>
+          ) : null}
+
+          <div className="mt-4 flex flex-wrap items-end justify-between gap-3">
+            <div className="text-xs leading-5 text-slate-600">
+              <p>From: {reminderPreview.from ?? "Not configured"}</p>
+              <p>
+                Test recipient: {reminderPreview.recipientEmail ?? "Administrator email unavailable"}
+              </p>
+            </div>
+            <form action={sendReminderTestAction} className="flex flex-wrap items-end gap-2">
+              <input name="race_id" type="hidden" value={reminderPreview.raceId} />
+              <label className="block">
+                <span className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                  Test template
+                </span>
+                <select
+                  className="rounded-md ui-control-border border border-slate-300 bg-white px-3 py-2 text-sm"
+                  defaultValue={reminderPreview.reminderType}
+                  name="reminder_type"
+                >
+                  <option value="2d">Two-day reminder</option>
+                  <option value="4h">Final reminder</option>
+                </select>
+              </label>
+              <SubmitButton
+                className={actionControlClassName("secondary")}
+                disabled={!reminderPreview.recipientEmail}
+                pendingLabel="Sending test..."
+              >
+                Send test to me
+              </SubmitButton>
+            </form>
+          </div>
+
+          <Disclosure
+            className="mt-4"
+            description={reminderPreview.subject}
+            summary="Preview participant email"
+          >
+            <iframe
+              className="h-[560px] w-full rounded-md border border-slate-200 bg-slate-100"
+              loading="lazy"
+              sandbox=""
+              srcDoc={reminderPreview.html}
+              title="Pick reminder email preview"
+            />
+            <details className="mt-3">
+              <summary className="cursor-pointer text-xs font-semibold text-slate-700">
+                Plain-text fallback
+              </summary>
+              <pre className="mt-2 whitespace-pre-wrap rounded-md bg-slate-950 p-3 text-xs leading-5 text-slate-100">
+                {reminderPreview.text}
+              </pre>
+            </details>
+          </Disclosure>
+        </section>
+      ) : null}
 
       <Disclosure
         className="mt-5"

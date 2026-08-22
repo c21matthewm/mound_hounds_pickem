@@ -5,12 +5,40 @@ with checks as (
     'schema'::text as check_group,
     'schema_version'::text as check_name,
     case
-      when metadata.value = '20260818_recovery_jobs_security_v1' then 'PASS'
+      when metadata.value = '20260822_reminder_delivery_v1' then 'PASS'
       else 'WARN'
     end as status,
     coalesce(metadata.value, 'missing') as details
   from (select 1) seed
   left join public.app_metadata metadata on metadata.key = 'schema_version'
+
+  union all
+
+  select
+    'reminders',
+    'two_stage_policy',
+    case
+      when metadata.value = '2d_4h_only'
+        and not exists (
+          select 1
+          from public.pick_reminders reminder
+          where reminder.reminder_type = '5d_open'
+            and reminder.delivery_status <> 'sent'
+        ) then 'PASS'
+      else 'WARN'
+    end,
+    format(
+      'policy=%s, unsent_5d_rows=%s',
+      coalesce(metadata.value, 'missing'),
+      (
+        select count(*)
+        from public.pick_reminders reminder
+        where reminder.reminder_type = '5d_open'
+          and reminder.delivery_status <> 'sent'
+      )
+    )
+  from (select 1) seed
+  left join public.app_metadata metadata on metadata.key = 'pick_reminder_policy'
 
   union all
 
@@ -28,6 +56,8 @@ with checks as (
       ('atomic_pick_save', 'public.save_weekly_pick(bigint,numeric,bigint[])'),
       ('shared_pick_window_validation', 'public.validate_shared_pick_window()'),
       ('reminder_delivery_claim', 'public.claim_pick_reminder_delivery(bigint,uuid,text,text,text)'),
+      ('reminder_delivery_validation', 'public.validate_pick_reminder_delivery(bigint)'),
+      ('qualifying_schedule_correction', 'public.correct_pick_window_qualifying_start(bigint,timestamptz)'),
       ('registration_rate_limit', 'public.consume_registration_attempt(text[],integer,integer)'),
       ('job_heartbeat_start', 'public.start_job_status(text)'),
       ('job_heartbeat_finish', 'public.finish_job_status(text,uuid,text,jsonb,text,boolean)'),

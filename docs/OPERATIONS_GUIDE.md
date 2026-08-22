@@ -52,27 +52,57 @@ Do not commit the Resend key. Supabase stores the SMTP credential.
 
 4. Confirm the existing `NEXT_PUBLIC_SITE_URL` Production variable is `https://moundhoundspickem.app` after the custom domain is active. Email links are built from this value.
 5. Save the variables with `PICK_EMAILS_ENABLED=false`. They take effect on the next production deployment; pushing the release to `main` will create that deployment without sending league email.
-6. Run `supabase/migrations/20260717_update_pick_reminder_windows.sql` and all later pending
-   migrations through `supabase/migrations/20260729_scale_weekly_operations.sql` in filename order
-   in the Supabase SQL Editor.
-7. Confirm the existing `pick_reminders_5min` job is active with the verification query in `DEPLOY_VERCEL.md`.
-8. When the migration, domain, and sender are all verified, change `PICK_EMAILS_ENABLED` to `true` in Vercel and create a new production deployment. This arms email delivery. If the current race is already inside a notification window, eligible missing-pick teams can be emailed as soon as that deployment is active.
+6. Run `supabase/migrations/20260717_update_pick_reminder_windows.sql` and every later pending
+   migration through `supabase/migrations/20260822_retire_five_day_pick_email.sql` in filename
+   order in the Supabase SQL Editor.
+7. Deploy the matching app while `PICK_EMAILS_ENABLED=false`. In **Admin > Race Week**, confirm the
+   schema contract is healthy, review the calculated schedule and participant email preview, then
+   use **Send test to me**. This sends only to the signed-in administrator and does not alter the
+   participant queue or sent history.
+8. When the migration, domain, sender, and test are verified, change `PICK_EMAILS_ENABLED` to
+   `true` in Vercel and create a new production deployment.
+9. Set `enable_pick_reminders := true` in a temporary copy of
+   `supabase/operations/02_configure_cron_jobs.sql`, insert the current `CRON_SECRET`, run it, and
+   confirm exactly one active `pick_reminders_5min` job exists. If the current race is already
+   inside a notification window, eligible missing-pick teams can be emailed on its next run.
 
-The email schedule is:
+The application email schedule is:
 
-- 5 days before the pick deadline: “Picks are open” notice.
 - 2 days before the pick deadline: first reminder.
 - 4 hours before the pick deadline: final reminder.
 
-Only registered teams without a saved pick for that race receive a given email. Each delivery is
-deduplicated in `pick_reminders`; the cron sends at most 25 queued deliveries per five-minute run
-with five concurrent provider requests. Failed or abandoned delivery attempts can retry up to
-three times with the same provider idempotency key. Standard-race deadlines are qualifying start.
-The Indianapolis 500 deadline remains race start because qualifying-order groups must be imported
-before that form is usable. If previous-race results have not been published, the form-open notice
-waits until those results are ready.
+The league administrator sends the early-week form-open announcement manually outside the app.
 
-For an 80-person league on Resend's free plan, set `REMINDER_SMS_ENABLED=false` in Vercel. One email reminder to 80 missing-pick participants fits under the 100-email daily limit. Enabling carrier-gateway SMS can double that window to 160 messages. Also avoid onboarding all 80 users on the same day as a full reminder run.
+Only active, registered teams without every required saved form receive a given email. Each
+delivery is deduplicated in `pick_reminders`; the cron sends at most 25 queued deliveries per
+five-minute run and paces provider request starts below the default rate limit. Failed or abandoned
+delivery attempts can retry up to three times with the same provider idempotency key. Eligibility,
+saved picks, and the current deadline are rechecked immediately before each provider request.
+Standard-race deadlines are qualifying start. The Indianapolis 500 deadline remains race start
+because qualifying-order groups must be imported before that form is usable. If previous-race
+results have not been published, automated reminders wait until those results are ready.
+
+For a 90-person league on Resend's free plan, set `REMINDER_SMS_ENABLED=false` in Vercel. One email
+stage to 90 missing-pick participants leaves little daily headroom for tests or authentication
+email. Enabling carrier-gateway SMS can double that stage to 180 messages. Avoid bulk onboarding
+on the same day as a full reminder run, and check the current provider quota before enabling
+delivery.
+
+### Qualifying schedule changes
+
+For a delayed or corrected standard-race qualifying time:
+
+1. Open **Admin > Races**, expand the first race in the affected pick window, and find
+   **Qualifying schedule correction**.
+2. Enter the new official Indianapolis time, check the confirmation, and select **Update
+   deadline**. A doubleheader updates both race forms in the same transaction.
+3. Confirm the new time on the Picks page and in **Admin > Race Week > Reminder readiness**.
+
+The pick form, database submission guard, and unsent email stages all use the corrected time.
+Already-sent stages are preserved: for example, changing qualifying after the two-day reminder has
+sent does not resend that reminder, while the final four-hour reminder moves to four hours before
+the new deadline. An already-open Picks page refreshes its schedule periodically and when the tab
+regains focus.
 
 ## Deploying the Hall of Fame
 
@@ -156,11 +186,13 @@ admin must explicitly authorize forced removal; normal profile edits do not remo
 Open **Admin > Race Week** after a migration, deployment, season rollover, or notification
 configuration change. Confirm:
 
-- schema version is `20260818_recovery_jobs_security_v1` and the database contract reports healthy;
+- schema version is `20260822_reminder_delivery_v1` and the database contract reports healthy;
 - the expected season is active and the registered-team count is reasonable;
 - the next race and previous-results gate are correct;
 - pick email/SMS enabled states match Vercel;
 - reminder queue counts progress from pending/retrying to sent without permanent failures;
+- the two reminder send times match the next race's current qualifying deadline, and an admin
+  test email renders correctly before participant delivery is enabled;
 - use **Retry permanent failures** only after correcting the provider or recipient problem;
 - both scheduled jobs show a current heartbeat; the separate event list stays intentionally sparse
   and records only useful work, degraded runs, and failures;
@@ -174,7 +206,9 @@ The latest matching database migrations are
 `supabase/migrations/20260729_scale_weekly_operations.sql`, and
 `supabase/migrations/20260730_atomic_picks_and_season_recovery.sql`, and
 `supabase/migrations/20260818_bound_recovery_jobs_and_registration.sql`, and
-`supabase/migrations/20260821_add_application_error_inbox.sql`. Run them in filename order in
+`supabase/migrations/20260821_add_application_error_inbox.sql`, and
+`supabase/migrations/20260822_harden_pick_reminder_delivery.sql`, and
+`supabase/migrations/20260822_retire_five_day_pick_email.sql`. Run them in filename order in
 Supabase SQL Editor before deploying this application version. They are additive and keep existing
 2026 registrations intact. After they succeed, set the 2026 invite code in the admin interface
 before accepting any new 2026 participants.

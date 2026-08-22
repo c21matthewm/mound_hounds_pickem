@@ -1,5 +1,6 @@
 import Link from "next/link";
 import {
+  correctPickWindowQualifyingStartAction,
   createRaceAction,
   deleteRaceAction,
   setRaceArchivedAction,
@@ -35,6 +36,26 @@ import {
   formatDateTime,
   formatDateTimeLocalInput
 } from "@/app/admin/admin-data";
+
+const isPickWindowAnchor = (
+  race: RaceRow,
+  racesByPickWindow: Map<string, RaceRow[]>
+): boolean =>
+  (racesByPickWindow.get(race.pick_window_key) ?? [race]).every(
+    (candidate) =>
+      candidate.round_number > race.round_number ||
+      (candidate.round_number === race.round_number && candidate.id >= race.id)
+  );
+
+const usesDedicatedQualifyingCorrection = (
+  race: RaceRow,
+  racesByPickWindow: Map<string, RaceRow[]>,
+  seasonById: Map<number, LeagueSeasonRow>
+): boolean =>
+  normalizeRacePickFormat(race.pick_format) === "standard" &&
+  !race.is_archived &&
+  seasonById.get(race.season_id)?.status === "active" &&
+  isPickWindowAnchor(race, racesByPickWindow);
 
 type AdminRacesWorkspaceProps = {
   activeParticipants: WinnerProfileRow[];
@@ -631,6 +652,64 @@ export function AdminRacesWorkspace({
                     </div>
                   </dl>
 
+                  {usesDedicatedQualifyingCorrection(
+                    race,
+                    racesByPickWindow,
+                    seasonById
+                  ) ? (
+                    <form
+                      action={correctPickWindowQualifyingStartAction}
+                      className="mt-3 grid gap-3 rounded-md border border-amber-200 bg-amber-50 p-3 sm:grid-cols-[minmax(0,1fr)_minmax(220px,0.75fr)_auto] sm:items-end"
+                    >
+                      <div>
+                        <p className="text-sm font-semibold text-amber-950">
+                          Qualifying schedule correction
+                        </p>
+                        <p className="mt-1 text-xs leading-5 text-amber-800">
+                          {pickWindowPartnerByRaceId.has(race.id)
+                            ? "Updates both doubleheader forms together."
+                            : "Updates this form's lock time."}{" "}
+                          Sent emails stay recorded; unsent reminders move to the new schedule.
+                        </p>
+                      </div>
+                      <input name="race_id" type="hidden" value={race.id} />
+                      <div className="grid gap-2">
+                        <FormField label="Corrected qualifying start">
+                          <input
+                            required
+                            className={fieldControlClassName("bg-white px-2 py-2")}
+                            defaultValue={formatDateTimeLocalInput(race.qualifying_start_at)}
+                            name="qualifying_start_at"
+                            type="datetime-local"
+                          />
+                        </FormField>
+                        <label className="flex items-start gap-2 text-xs leading-5 text-amber-900">
+                          <input
+                            required
+                            className="mt-0.5"
+                            name="confirm_schedule_correction"
+                            type="checkbox"
+                          />
+                          I confirm the official qualifying time changed.
+                        </label>
+                      </div>
+                      <ConfirmSubmitButton
+                        className={actionControlClassName(
+                          "secondary",
+                          "border-amber-300 text-amber-950 hover:bg-amber-100"
+                        )}
+                        confirmMessage={
+                          pickWindowPartnerByRaceId.has(race.id)
+                            ? "Update the shared qualifying deadline for both doubleheader races?"
+                            : `Update the qualifying deadline for ${race.race_name}?`
+                        }
+                        pendingLabel="Updating..."
+                      >
+                        Update deadline
+                      </ConfirmSubmitButton>
+                    </form>
+                  ) : null}
+
                 <form
                   action={updateRaceAction}
                   className="mt-3 grid gap-2 md:grid-cols-12"
@@ -688,7 +767,14 @@ export function AdminRacesWorkspace({
                       required
                       className={fieldControlClassName("px-2 py-2")}
                       defaultValue={formatDateTimeLocalInput(race.qualifying_start_at)}
-                      disabled={pickWindowPartnerByRaceId.has(race.id)}
+                      disabled={
+                        pickWindowPartnerByRaceId.has(race.id) ||
+                        usesDedicatedQualifyingCorrection(
+                          race,
+                          racesByPickWindow,
+                          seasonById
+                        )
+                      }
                       name="qualifying_start_at"
                       type="datetime-local"
                     />
@@ -730,11 +816,22 @@ export function AdminRacesWorkspace({
                     </select>
                   </FormField>
 
-                  {race.field_frozen_at || pickWindowPartnerByRaceId.has(race.id) ? (
+                  {race.field_frozen_at ||
+                  pickWindowPartnerByRaceId.has(race.id) ||
+                  usesDedicatedQualifyingCorrection(
+                    race,
+                    racesByPickWindow,
+                    seasonById
+                  ) ? (
                     <>
                       <input name="season_id" type="hidden" value={String(race.season_id)} />
                       <input name="round_number" type="hidden" value={String(race.round_number)} />
-                      {pickWindowPartnerByRaceId.has(race.id) ? (
+                      {pickWindowPartnerByRaceId.has(race.id) ||
+                      usesDedicatedQualifyingCorrection(
+                        race,
+                        racesByPickWindow,
+                        seasonById
+                      ) ? (
                         <input
                           name="qualifying_start_at"
                           type="hidden"
@@ -752,10 +849,15 @@ export function AdminRacesWorkspace({
                           Confirm a qualifying/race-time correction if submitted picks already
                           exist. Leave unchecked for name, payout, or image changes.
                         </label>
-                      ) : (
+                      ) : pickWindowPartnerByRaceId.has(race.id) ? (
                         <p className="rounded-md border border-cyan-200 bg-cyan-50 px-3 py-2 text-xs text-cyan-900 md:col-span-6">
                           Qualifying time and race identity are controlled by the shared deadline
                           link below. Unlink before changing them.
+                        </p>
+                      ) : (
+                        <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900 md:col-span-6">
+                          Use the qualifying schedule correction panel above to change the pick
+                          deadline safely.
                         </p>
                       )}
                     </>
