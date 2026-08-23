@@ -317,11 +317,6 @@ export default async function PicksPage({ searchParams }: PageProps) {
 
   return (
     <AuthenticatedPageShell
-      actions={
-        <ActionLink href="/dashboard" variant="secondary">
-          Dashboard
-        </ActionLink>
-      }
       description={
         <>
           Team <span className="font-semibold text-slate-900">{profile.team_name}</span>

@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { DesktopPrimaryNav } from "@/components/desktop-primary-nav";
 import { MobileBottomNav } from "@/components/mobile-bottom-nav";
 import { ProfileButton } from "@/components/profile-button";
 
@@ -8,6 +9,7 @@ type Props = {
   description?: ReactNode;
   eyebrow: string;
   maxWidth?: string;
+  showDesktopNavigation?: boolean;
   showMobileNavigation?: boolean;
   title: string;
 };
@@ -18,6 +20,7 @@ export function AuthenticatedPageShell({
   description,
   eyebrow,
   maxWidth = "max-w-6xl",
+  showDesktopNavigation = true,
   showMobileNavigation = true,
   title
 }: Props) {
@@ -39,6 +42,7 @@ export function AuthenticatedPageShell({
             ) : null}
           </div>
           <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
+            {showDesktopNavigation ? <DesktopPrimaryNav /> : null}
             {actions}
             <ProfileButton />
           </div>

@@ -17,7 +17,8 @@ import {
 import {
   ActionButton,
   DataSurface,
-  Pagination
+  Pagination,
+  RankBadge
 } from "@/components/ui-primitives";
 
 type DriverCell = {
@@ -183,6 +184,38 @@ export function PicksByRaceTable({ officialWinningAverageSpeed, resultsPosted, r
         title="Picks Matrix"
       >
 
+        <div
+          className={`grid gap-1 border-b border-slate-200 bg-white p-2 md:hidden ${
+            resultsPosted ? "grid-cols-4" : "grid-cols-2"
+          }`}
+        >
+          {(resultsPosted
+            ? ([
+                ["rank", "Rank"],
+                ["teamName", "Name"],
+                ["totalPoints", "Score"],
+                ["averageSpeed", "Tiebreak"]
+              ] as Array<[SortKey, string]>)
+            : ([
+                ["teamName", "Name"],
+                ["averageSpeed", "Tiebreak"]
+              ] as Array<[SortKey, string]>)).map(([key, label]) => (
+            <button
+              aria-pressed={sortKey === key}
+              className={`min-h-8 rounded px-1 text-[11px] font-semibold ${
+                sortKey === key
+                  ? "bg-blue-50 text-blue-800"
+                  : "text-slate-500 hover:bg-slate-100 hover:text-slate-900"
+              }`}
+              key={key}
+              onClick={() => onSort(key)}
+              type="button"
+            >
+              {label} {sortIndicator(key, sortKey, sortDirection)}
+            </button>
+          ))}
+        </div>
+
         <div className="divide-y divide-slate-200 md:hidden">
           {sortedRows.length === 0 ? (
             <p className="px-4 py-4 text-sm text-slate-600">No team picks are available.</p>
@@ -195,9 +228,13 @@ export function PicksByRaceTable({ officialWinningAverageSpeed, resultsPosted, r
                     onClick={() => setSelectedRow(row)}
                     type="button"
                   >
-                    <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                      {resultsPosted ? `Rank ${row.rank ?? "-"}` : "Submitted Pick"}
-                    </p>
+                    {resultsPosted && row.rank !== null ? (
+                      <RankBadge aria-label={`Rank ${row.rank}`} rank={row.rank} />
+                    ) : (
+                      <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                        Submitted Pick
+                      </p>
+                    )}
                     <h3
                       className="mt-0.5 truncate text-sm font-semibold text-slate-900 underline decoration-slate-300 underline-offset-2"
                       title={row.displayName}
@@ -206,7 +243,7 @@ export function PicksByRaceTable({ officialWinningAverageSpeed, resultsPosted, r
                     </h3>
                   </button>
                   <div className="text-right">
-                    <p className="text-lg font-semibold text-slate-900">
+                    <p className="text-lg font-semibold tabular-nums text-slate-900">
                       {resultsPosted ? (row.totalPoints ?? 0) : "-"}
                     </p>
                     <p className="text-xs text-slate-500">score</p>
@@ -318,7 +355,11 @@ export function PicksByRaceTable({ officialWinningAverageSpeed, resultsPosted, r
               paginatedRows.map((row) => (
                 <tr key={row.userId} className="border-t border-slate-200">
                   <td className="px-3 py-2 font-semibold">
-                    {resultsPosted ? (row.rank ?? "-") : "-"}
+                    {resultsPosted && row.rank !== null ? (
+                      <RankBadge aria-label={`Rank ${row.rank}`} rank={row.rank} />
+                    ) : (
+                      "-"
+                    )}
                   </td>
                   <td className="px-3 py-2">
                     <button

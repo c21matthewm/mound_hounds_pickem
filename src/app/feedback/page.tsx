@@ -1,7 +1,6 @@
 import { AuthenticatedPageShell } from "@/components/authenticated-page-shell";
 import { SubmitButton } from "@/components/submit-button";
 import {
-  ActionLink,
   CompactNotice,
   ContentPanel,
   Disclosure,
@@ -60,11 +59,6 @@ export default async function FeedbackPage({ searchParams }: PageProps) {
 
   return (
     <AuthenticatedPageShell
-      actions={
-        <ActionLink href="/dashboard" variant="secondary">
-          Dashboard
-        </ActionLink>
-      }
       description="Report bugs or suggest improvements for league admins to review."
       eyebrow="Feedback"
       maxWidth="max-w-4xl"

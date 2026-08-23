@@ -36,6 +36,37 @@ export function StatusChip({
   );
 }
 
+type RankBadgeProps = ComponentPropsWithoutRef<"span"> & {
+  rank: number;
+  showNumberSign?: boolean;
+};
+
+export function RankBadge({
+  className = "",
+  rank,
+  showNumberSign = false,
+  ...props
+}: RankBadgeProps) {
+  const podiumClassName =
+    rank === 1
+      ? "border-amber-300 bg-amber-100 text-amber-900"
+      : rank === 2
+        ? "border-slate-300 bg-slate-100 text-slate-700"
+        : rank === 3
+          ? "border-orange-300 bg-orange-100 text-orange-900"
+          : "border-transparent text-slate-700";
+
+  return (
+    <span
+      className={`inline-flex h-6 min-w-7 items-center justify-center rounded-full border px-1 text-xs font-bold tabular-nums ${podiumClassName} ${className}`}
+      {...props}
+    >
+      {showNumberSign ? "#" : ""}
+      {rank}
+    </span>
+  );
+}
+
 export type ActionVariant = "primary" | "secondary" | "quiet";
 
 type ActionLinkProps = {
@@ -430,7 +461,9 @@ export function MetricStrip({ className = "", items }: MetricStripProps) {
           <dt className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
             {item.label}
           </dt>
-          <dd className="mt-0.5 truncate text-sm font-semibold text-slate-950">{item.value}</dd>
+          <dd className="mt-0.5 truncate text-sm font-semibold tabular-nums text-slate-950">
+            {item.value}
+          </dd>
         </div>
       ))}
     </dl>

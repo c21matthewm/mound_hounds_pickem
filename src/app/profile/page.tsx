@@ -3,6 +3,7 @@ import { AuthenticatedPageShell } from "@/components/authenticated-page-shell";
 import { SignOutButton } from "@/components/sign-out-button";
 import {
   ActionLink,
+  ContentPanel,
   DetailGrid,
   SectionHeader,
   StatusChip
@@ -37,20 +38,20 @@ export default async function ProfilePage() {
   return (
     <AuthenticatedPageShell
       actions={
-        <ActionLink
-          href={profileComplete ? "/dashboard" : "/onboarding"}
-          variant="secondary"
-        >
-          {profileComplete ? "Dashboard" : "Complete profile"}
-        </ActionLink>
+        !profileComplete ? (
+          <ActionLink href="/onboarding" variant="secondary">
+            Complete profile
+          </ActionLink>
+        ) : undefined
       }
       description="Your league identity and account access."
       eyebrow="Account"
       maxWidth="max-w-3xl"
+      showDesktopNavigation={profileComplete}
       showMobileNavigation={profileComplete}
       title="Profile"
     >
-      <section className="mt-6">
+      <ContentPanel className="mt-6">
         <SectionHeader
           action={
             activeSeason ? (
@@ -82,7 +83,7 @@ export default async function ProfilePage() {
         <div className="mt-5 flex justify-center">
           <SignOutButton />
         </div>
-      </section>
+      </ContentPanel>
     </AuthenticatedPageShell>
   );
 }

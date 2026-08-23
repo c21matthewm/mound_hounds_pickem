@@ -19,6 +19,32 @@ import {
 type SelectionMap = Record<number, number | null>;
 const LEAVE_CONFIRM_MESSAGE = "You have unsaved Pick'em changes. Leave this page without saving?";
 
+type GroupSelectionStatus = "changed" | "missing" | "saved";
+
+const groupSelectionStatus = (
+  draftSelection: SelectionMap,
+  savedSelection: SelectionMap,
+  groupNumber: number
+): GroupSelectionStatus => {
+  const draftDriverId = draftSelection[groupNumber] ?? null;
+  const savedDriverId = savedSelection[groupNumber] ?? null;
+
+  if (draftDriverId === null) return "missing";
+  return draftDriverId === savedDriverId ? "saved" : "changed";
+};
+
+const GROUP_STATUS_CLASSES: Record<GroupSelectionStatus, string> = {
+  changed: "border-cyan-300 bg-cyan-50 text-cyan-800",
+  missing: "ui-status-warning border-amber-200 bg-amber-50 text-amber-800",
+  saved: "ui-status-success border-emerald-200 bg-emerald-50 text-emerald-800"
+};
+
+const GROUP_STATUS_LABELS: Record<GroupSelectionStatus, string> = {
+  changed: "selected, not saved",
+  missing: "not selected",
+  saved: "saved"
+};
+
 type DriverOption = {
   championshipPoints: number;
   detailText?: string;
@@ -372,6 +398,37 @@ export function PickemForm({
       ) : null}
 
       <fieldset className="space-y-5 disabled:opacity-80" disabled={picksLocked || isSubmitting}>
+        <section className="ui-panel rounded-lg border border-slate-200 bg-white px-3 py-3 sm:px-4">
+          <div className="flex items-center justify-between gap-3">
+            <p className="text-sm font-semibold text-slate-900">Driver groups</p>
+            <p className="text-xs font-semibold tabular-nums text-slate-500">
+              {selectedGroupCount}/{groupNumbers.length} selected
+            </p>
+          </div>
+          <nav aria-label="Driver group navigation" className="mt-2 overflow-x-auto pb-0.5">
+            <div className="flex w-max min-w-full gap-1.5 sm:w-full">
+              {groupNumbers.map((groupNumber) => {
+                const status = groupSelectionStatus(
+                  draftSelection,
+                  savedSelection,
+                  groupNumber
+                );
+
+                return (
+                  <a
+                    aria-label={`Group ${groupNumber}, ${GROUP_STATUS_LABELS[status]}`}
+                    className={`inline-flex h-8 min-w-9 flex-1 items-center justify-center rounded-md border px-2 text-xs font-semibold ${GROUP_STATUS_CLASSES[status]}`}
+                    href={`#driver-group-${groupNumber}`}
+                    key={`group-navigation-${groupNumber}`}
+                  >
+                    G{groupNumber}
+                  </a>
+                );
+              })}
+            </div>
+          </nav>
+        </section>
+
         <section className="rounded-lg ui-panel border border-slate-200 bg-white px-4 py-4 md:px-5">
           <label className="grid items-end gap-3 sm:grid-cols-[minmax(0,1fr)_15rem]">
             <span>
@@ -403,7 +460,7 @@ export function PickemForm({
           <section
             id={`driver-group-${group.groupNumber}`}
             key={group.groupNumber}
-            className="rounded-lg ui-panel border border-slate-200 bg-white p-5 md:p-6"
+            className="scroll-mt-4 rounded-lg ui-panel border border-slate-200 bg-white p-4 md:p-5"
           >
             <div>
               <div>
@@ -422,7 +479,7 @@ export function PickemForm({
             {group.drivers.length === 0 ? (
               <p className="mt-3 text-sm text-slate-600">No active drivers in this group.</p>
             ) : (
-              <div className="mt-4 grid gap-3 md:grid-cols-2">
+              <div className="mt-3 grid gap-2.5 md:grid-cols-2">
                 {group.drivers.map((driver) => {
                   const selectedDriverId = draftSelection[group.groupNumber] ?? null;
                   const savedDriverId = savedSelection[group.groupNumber] ?? null;
@@ -441,10 +498,11 @@ export function PickemForm({
                   return (
                     <label
                       key={driver.id}
-                      className={`relative flex cursor-pointer items-center gap-3 rounded-md border px-3 py-3 shadow-sm transition hover:-translate-y-0.5 ${cardClassName}`}
+                      className={`relative flex min-h-20 cursor-pointer items-center gap-2.5 rounded-md border px-3 py-2.5 shadow-sm transition hover:-translate-y-0.5 focus-within:outline focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-blue-600 ${cardClassName}`}
                     >
                       <input
                         required
+                        className="sr-only"
                         checked={isSelected}
                         name={`driver_group${group.groupNumber}_id`}
                         onChange={() => {
@@ -457,6 +515,17 @@ export function PickemForm({
                         type="radio"
                         value={String(driver.id)}
                       />
+
+                      <span
+                        aria-hidden
+                        className={`flex h-4 w-4 shrink-0 items-center justify-center rounded-full border ${
+                          isSelected
+                            ? "border-cyan-700 bg-cyan-700"
+                            : "border-slate-400 bg-white"
+                        }`}
+                      >
+                        {isSelected ? <span className="h-1.5 w-1.5 rounded-full bg-white" /> : null}
+                      </span>
 
                       {driver.imageUrl ? (
                         // eslint-disable-next-line @next/next/no-img-element
@@ -476,7 +545,9 @@ export function PickemForm({
                       )}
 
                       <div>
-                        <p className="pr-16 text-sm font-semibold text-slate-900">{driver.driverName}</p>
+                        <p className="pr-20 text-sm font-semibold text-slate-900">
+                          {driver.driverName}
+                        </p>
                         <p className="text-xs text-slate-600">
                           {driver.detailText ?? `Championship Pts: ${driver.championshipPoints}`}
                         </p>
@@ -527,23 +598,26 @@ export function PickemForm({
                   {selectedGroupCount}/{groupNumbers.length} groups
                 </p>
                 <div className="min-w-0 flex-1 overflow-x-auto">
-                  {missingGroupNumbers.length > 0 ? (
-                    <div className="flex w-max gap-1">
-                      {missingGroupNumbers.map((groupNumber) => (
+                  <div className="flex w-max gap-1">
+                    {groupNumbers.map((groupNumber) => {
+                      const status = groupSelectionStatus(
+                        draftSelection,
+                        savedSelection,
+                        groupNumber
+                      );
+
+                      return (
                         <a
-                          key={`missing-group-${groupNumber}`}
-                          className="rounded-md border ui-status-warning border-amber-200 bg-amber-50 px-2 py-0.5 text-[11px] font-semibold text-amber-800"
+                          aria-label={`Group ${groupNumber}, ${GROUP_STATUS_LABELS[status]}`}
+                          className={`rounded-md border px-2 py-0.5 text-[11px] font-semibold ${GROUP_STATUS_CLASSES[status]}`}
                           href={`#driver-group-${groupNumber}`}
+                          key={`dock-group-${groupNumber}`}
                         >
                           G{groupNumber}
                         </a>
-                      ))}
-                    </div>
-                  ) : (
-                    <span className="block truncate text-[11px] font-medium text-emerald-700">
-                      All groups selected
-                    </span>
-                  )}
+                      );
+                    })}
+                  </div>
                 </div>
                 <button
                   className="shrink-0 rounded-md ui-action-primary bg-slate-900 px-2.5 py-1.5 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"

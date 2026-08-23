@@ -7,26 +7,23 @@ import {
   PRIMARY_NAVIGATION_ITEMS
 } from "@/lib/primary-navigation";
 
-export function MobileBottomNav() {
+export function DesktopPrimaryNav() {
   const pathname = usePathname();
 
   return (
-    <nav
-      aria-label="Primary mobile navigation"
-      className="mobile-bottom-navigation fixed inset-x-0 z-40 px-3 md:hidden"
-      data-mobile-navigation
-    >
-      <ul className="ui-panel ui-panel-translucent mx-auto grid max-w-md grid-cols-3 rounded-full border border-slate-200 bg-white/90 p-1 shadow-[0_18px_50px_-28px_rgba(15,23,42,0.85)] backdrop-blur">
+    <nav aria-label="Primary navigation" className="hidden md:block">
+      <ul className="ui-panel flex items-center gap-1 rounded-md border border-slate-200 bg-white p-1 shadow-sm">
         {PRIMARY_NAVIGATION_ITEMS.map((item) => {
           const active = isPrimaryNavigationRouteActive(pathname, item.href);
+
           return (
             <li key={item.href}>
               <Link
                 aria-current={active ? "page" : undefined}
-                className={`flex h-11 items-center justify-center rounded-full text-xs font-semibold ${
+                className={`inline-flex min-h-9 items-center rounded px-2.5 py-1.5 text-xs font-semibold transition-colors lg:px-3 lg:text-sm ${
                   active
-                    ? "ui-action-primary bg-slate-900 text-white shadow-sm"
-                    : "text-slate-500 hover:bg-slate-100 hover:text-slate-900"
+                    ? "ui-action-primary bg-blue-800 text-white shadow-sm"
+                    : "text-slate-600 hover:bg-slate-100 hover:text-slate-950"
                 }`}
                 href={item.href}
               >

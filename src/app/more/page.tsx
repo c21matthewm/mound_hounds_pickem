@@ -1,9 +1,6 @@
 import Link from "next/link";
 import { AuthenticatedPageShell } from "@/components/authenticated-page-shell";
-import {
-  ActionLink,
-  StatusChip
-} from "@/components/ui-primitives";
+import { StatusChip } from "@/components/ui-primitives";
 import { requireAppUser } from "@/lib/authenticated-user";
 
 const destinations = [
@@ -31,20 +28,15 @@ export default async function MorePage() {
 
   return (
     <AuthenticatedPageShell
-      actions={
-        <ActionLink href="/dashboard" variant="secondary">
-          Dashboard
-        </ActionLink>
-      }
       description="League information and support."
       eyebrow="More"
       maxWidth="max-w-3xl"
       title="League Menu"
     >
-      <nav aria-label="League menu" className="mt-5 divide-y divide-slate-200 border-y border-slate-200">
+      <nav aria-label="League menu" className="mt-6 grid gap-2.5 sm:grid-cols-2 sm:gap-3">
         {destinations.map((destination) => (
           <Link
-            className="flex items-center justify-between gap-4 py-4 hover:bg-white/60"
+            className="ui-panel flex min-h-24 items-center justify-between gap-4 rounded-lg border border-slate-200 bg-white p-3.5 shadow-sm hover:-translate-y-0.5 hover:border-blue-200 hover:shadow-md sm:min-h-28 sm:p-4"
             href={destination.href}
             key={destination.href}
           >
@@ -63,7 +55,7 @@ export default async function MorePage() {
         ))}
         {profile.role === "admin" ? (
           <Link
-            className="flex items-center justify-between gap-4 py-4 hover:bg-white/60"
+            className="ui-panel flex min-h-24 items-center justify-between gap-4 rounded-lg border border-slate-200 bg-white p-3.5 shadow-sm hover:-translate-y-0.5 hover:border-blue-200 hover:shadow-md sm:min-h-28 sm:p-4"
             href="/admin"
           >
             <span className="min-w-0">
