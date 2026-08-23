@@ -8,7 +8,7 @@ import {
   sortIndicator,
   type SortDirection
 } from "@/lib/table-utils";
-import { DataSurface, Pagination } from "@/components/ui-primitives";
+import { DataSurface, Pagination, RankBadge } from "@/components/ui-primitives";
 
 export type StandingsTableRaceColumn = {
   raceId: number;
@@ -124,6 +124,29 @@ export function StandingsTable({
       description={`${firstVisible}-${lastVisible} of ${sortedRows.length} teams`}
       title={seasonYear ? `${seasonYear} Standings` : "Season Standings"}
     >
+      <div className="grid grid-cols-4 gap-1 border-b border-slate-200 bg-white p-2 md:hidden">
+        {([
+          ["currentStanding", "Rank"],
+          ["teamName", "Name"],
+          ["change", "Change"],
+          ["totalPoints", "Points"]
+        ] as Array<[BaseSortKey, string]>).map(([key, label]) => (
+          <button
+            aria-pressed={sortKey === key}
+            className={`min-h-8 rounded px-1.5 text-[11px] font-semibold ${
+              sortKey === key
+                ? "bg-blue-50 text-blue-800"
+                : "text-slate-500 hover:bg-slate-100 hover:text-slate-900"
+            }`}
+            key={key}
+            onClick={() => onSort(key)}
+            type="button"
+          >
+            {label} {sortIndicator(key, sortKey, sortDirection)}
+          </button>
+        ))}
+      </div>
+
       <div className="grid grid-cols-[2.25rem_2.75rem_minmax(0,1fr)_4.25rem] gap-1.5 border-b border-slate-200 bg-slate-50 px-3 py-1.5 text-[10px] font-semibold uppercase text-slate-500 md:hidden">
         <span className="text-right">Rank</span>
         <span className="text-center">+/-</span>
@@ -150,8 +173,11 @@ export function StandingsTable({
                   onClick={() => setExpandedUserId(expanded ? null : row.userId)}
                   type="button"
                 >
-                  <span className="text-right text-sm font-semibold tabular-nums text-slate-700">
-                    {row.currentStanding}
+                  <span className="flex justify-end">
+                    <RankBadge
+                      aria-label={`Rank ${row.currentStanding}`}
+                      rank={row.currentStanding}
+                    />
                   </span>
                   <span className="flex justify-center">
                     <ChangeBadge value={row.change} />
@@ -256,7 +282,10 @@ export function StandingsTable({
                     key={row.userId}
                   >
                     <td className={`sticky left-0 z-10 px-3 py-2 text-right font-semibold tabular-nums ${isCurrentUser ? "bg-cyan-50" : "bg-white"}`}>
-                      {row.currentStanding}
+                      <RankBadge
+                        aria-label={`Rank ${row.currentStanding}`}
+                        rank={row.currentStanding}
+                      />
                     </td>
                     <td className={`sticky left-20 z-10 truncate px-3 py-2 text-left font-medium text-slate-900 ${isCurrentUser ? "bg-cyan-50" : "bg-white"}`} title={row.displayName}>
                       {row.displayName}

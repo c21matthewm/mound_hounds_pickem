@@ -1,7 +1,6 @@
 import { AuthenticatedPageShell } from "@/components/authenticated-page-shell";
 import {
   ActionAnchor,
-  ActionLink,
   CompactNotice,
   ContentPanel
 } from "@/components/ui-primitives";
@@ -17,11 +16,6 @@ export default async function RulesPage() {
 
   return (
     <AuthenticatedPageShell
-      actions={
-        <ActionLink href="/dashboard" variant="secondary">
-          Dashboard
-        </ActionLink>
-      }
       description={`Official Mound Hounds Pick'em league rules${
         activeSeason ? ` for ${activeSeason.seasonYear}` : ""
       }.`}

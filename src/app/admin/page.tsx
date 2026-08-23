@@ -24,7 +24,7 @@ import {
   type AdminReminderHealthRow
 } from "@/components/admin-system-health";
 import { SeasonRecoveryCenter } from "@/components/season-recovery-center";
-import { ActionLink, CompactNotice } from "@/components/ui-primitives";
+import { CompactNotice } from "@/components/ui-primitives";
 import { requireAdmin } from "@/lib/admin";
 import { createAdminRequestToken } from "@/lib/admin-request-token";
 import { errorReference, reportAppError } from "@/lib/app-error-reporter";
@@ -596,11 +596,6 @@ export default async function AdminPage({ searchParams }: PageProps) {
 
   return (
     <AuthenticatedPageShell
-      actions={
-        <ActionLink href="/dashboard" variant="secondary">
-          Back to dashboard
-        </ActionLink>
-      }
       description={
         <>
           Signed in as <span className="font-semibold text-slate-900">{profile.team_name}</span>.

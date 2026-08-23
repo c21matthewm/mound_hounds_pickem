@@ -25,7 +25,8 @@ Mound Hounds Pick'em is a private INDYCAR fantasy league app. Participants submi
 - `/onboarding` requires full name and team name. Phone and carrier are optional while delivery is email-only.
 - `/season-registration` lets a returning account join or skip the current season without admin approval.
 - `/race-center` redirects to `/dashboard` for old bookmarks.
-- `/dashboard` is the single race-week home for next action, saved picks, compact quick links, profile details, and admin readiness. It intentionally does not duplicate latest-race results.
+- `/dashboard` is the single race-week home for the next action, race context, compact quick links, and admin readiness. Profile details and sign-out live on `/profile`; the dashboard intentionally does not duplicate latest-race results.
+- Authenticated pages share Dashboard, Pick'em Form, and Standings navigation: a compact header nav on desktop/tablet and a bottom dock on mobile.
 - `/more` keeps secondary mobile navigation for rules, feedback, contact, and admin out of the primary race-week view.
 - `/picks` shows the active race, pick lock state, saved submission snapshot, driver groups, average-speed input, local draft recovery, and an unsaved-change guard. Standard races show six groups; Indy 500 races show eight groups after qualifying order import.
 - `/leaderboard` has tabs for current season standings, picks by race, personal analytics, and finalized Hall of Fame seasons.

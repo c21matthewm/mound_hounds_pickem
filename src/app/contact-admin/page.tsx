@@ -1,6 +1,5 @@
 import { AuthenticatedPageShell } from "@/components/authenticated-page-shell";
 import {
-  ActionLink,
   ContentPanel,
   SectionHeader
 } from "@/components/ui-primitives";
@@ -12,11 +11,6 @@ export default async function ContactAdminPage() {
 
   return (
     <AuthenticatedPageShell
-      actions={
-        <ActionLink href="/dashboard" variant="secondary">
-          Dashboard
-        </ActionLink>
-      }
       description="For league questions or issues, contact the league admin directly by email."
       eyebrow="Support"
       maxWidth="max-w-3xl"

@@ -3,11 +3,11 @@ import { AnalyticsRaceHistory } from "@/components/analytics-race-history";
 import { HallOfFameYearSelect } from "@/components/hall-of-fame-year-select";
 import { PicksRaceSelect } from "@/components/picks-race-select";
 import {
-  ActionLink,
   CompactNotice,
   ContentPanel,
   Disclosure,
   EmptyState,
+  RankBadge,
   RouteTabs,
   SectionHeader
 } from "@/components/ui-primitives";
@@ -121,11 +121,6 @@ export default async function LeaderboardPage({ searchParams }: PageProps) {
 
     return (
       <AuthenticatedPageShell
-        actions={
-          <ActionLink href="/dashboard" variant="secondary">
-            Dashboard
-          </ActionLink>
-        }
         description="Standings, locked picks by race, season analytics, and league history."
         eyebrow="League Data"
         maxWidth="max-w-4xl"
@@ -220,11 +215,6 @@ export default async function LeaderboardPage({ searchParams }: PageProps) {
 
   return (
     <AuthenticatedPageShell
-      actions={
-        <ActionLink href="/dashboard" variant="secondary">
-          Dashboard
-        </ActionLink>
-      }
       description="Standings, locked picks by race, season analytics, and league history."
       eyebrow="League Data"
       maxWidth="max-w-[1200px]"
@@ -336,7 +326,7 @@ export default async function LeaderboardPage({ searchParams }: PageProps) {
                     <p className="text-xs font-semibold uppercase tracking-wide text-slate-300">
                       Current Rank
                     </p>
-                    <p className="mt-1 text-3xl font-semibold">
+                    <p className="mt-1 text-3xl font-semibold tabular-nums">
                       {analyticsSnapshot.summary.currentStanding !== null
                         ? `#${analyticsSnapshot.summary.currentStanding}`
                         : "-"}
@@ -349,7 +339,7 @@ export default async function LeaderboardPage({ searchParams }: PageProps) {
                     <p className="text-xs font-semibold uppercase tracking-wide text-slate-300">
                       Total Points
                     </p>
-                    <p className="mt-1 text-3xl font-semibold">
+                    <p className="mt-1 text-3xl font-semibold tabular-nums">
                       {analyticsSnapshot.summary.totalPoints}
                     </p>
                     <p className="text-xs text-slate-300">
@@ -360,7 +350,7 @@ export default async function LeaderboardPage({ searchParams }: PageProps) {
                     <p className="text-xs font-semibold uppercase tracking-wide text-slate-300">
                       Vs League Avg
                     </p>
-                    <p className="mt-1 text-3xl font-semibold">
+                    <p className="mt-1 text-3xl font-semibold tabular-nums">
                       {formatSignedValue(totalVsLeagueAverage)}
                     </p>
                     <p className="text-xs text-slate-300">
@@ -371,7 +361,7 @@ export default async function LeaderboardPage({ searchParams }: PageProps) {
                     <p className="text-xs font-semibold uppercase tracking-wide text-slate-300">
                       Best Finish
                     </p>
-                    <p className="mt-1 text-3xl font-semibold">
+                    <p className="mt-1 text-3xl font-semibold tabular-nums">
                       {bestFinish !== null ? `#${bestFinish}` : "-"}
                     </p>
                     <p className="text-xs text-slate-300">
@@ -394,7 +384,7 @@ export default async function LeaderboardPage({ searchParams }: PageProps) {
                       </p>
                     </div>
                     <div className="text-right">
-                      <p className="text-lg font-semibold text-slate-900">
+                      <p className="text-lg font-semibold tabular-nums text-slate-900">
                         {formatOptionalNumber(analyticsSnapshot.summary.lastThreeRaceAverage)}
                       </p>
                       <p className="text-xs text-slate-500">
@@ -566,7 +556,7 @@ export default async function LeaderboardPage({ searchParams }: PageProps) {
                         <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
                           Points
                         </p>
-                        <p className="text-xl font-semibold text-slate-900">
+                        <p className="text-xl font-semibold tabular-nums text-slate-900">
                           {season.championTotalPoints}
                         </p>
                       </div>
@@ -574,7 +564,7 @@ export default async function LeaderboardPage({ searchParams }: PageProps) {
                         <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
                           Field
                         </p>
-                        <p className="text-xl font-semibold text-slate-900">
+                        <p className="text-xl font-semibold tabular-nums text-slate-900">
                           {season.participantCount}
                         </p>
                       </div>
@@ -593,14 +583,20 @@ export default async function LeaderboardPage({ searchParams }: PageProps) {
                         key={`${season.seasonId}-${entry.teamName}`}
                       >
                         <div className="flex min-w-0 items-center gap-3">
-                          <span className="w-8 shrink-0 text-sm font-semibold text-slate-600">
-                            #{entry.finalRank}
+                          <span className="w-8 shrink-0">
+                            <RankBadge
+                              aria-label={`Final rank ${entry.finalRank}`}
+                              className="h-7 min-w-8"
+                              rank={entry.finalRank}
+                              showNumberSign
+                              title={`Final rank ${entry.finalRank}`}
+                            />
                           </span>
                           <span className="truncate text-sm font-semibold text-slate-900">
                             {entry.teamName}
                           </span>
                         </div>
-                        <span className="shrink-0 text-sm font-semibold text-slate-900">
+                        <span className="shrink-0 text-sm font-semibold tabular-nums text-slate-900">
                           {entry.totalPoints} pts
                         </span>
                       </div>
@@ -622,11 +618,19 @@ export default async function LeaderboardPage({ searchParams }: PageProps) {
                             className="border-t border-slate-200"
                             key={`${season.seasonId}-${entry.teamName}`}
                           >
-                            <td className="px-3 py-2 font-semibold">#{entry.finalRank}</td>
+                            <td className="px-3 py-2 font-semibold">
+                              <RankBadge
+                                aria-label={`Final rank ${entry.finalRank}`}
+                                className="h-7 min-w-8"
+                                rank={entry.finalRank}
+                                showNumberSign
+                                title={`Final rank ${entry.finalRank}`}
+                              />
+                            </td>
                             <td className="px-3 py-2 font-medium text-slate-900">
                               {entry.teamName}
                             </td>
-                            <td className="px-3 py-2 text-right font-semibold">
+                            <td className="px-3 py-2 text-right font-semibold tabular-nums">
                               {entry.totalPoints}
                             </td>
                           </tr>
