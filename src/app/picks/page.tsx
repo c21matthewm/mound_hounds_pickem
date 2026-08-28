@@ -331,23 +331,23 @@ export default async function PicksPage({ searchParams }: PageProps) {
         raceStartAt={selectedRace.race_date}
       />
       {pickWindow.length > 1 ? (
-        <section className="mt-6 border-y border-slate-200 bg-white py-4">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <div>
+        <section className="ui-panel mt-6 rounded-lg border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
+          <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2">
+            <div className="min-w-0">
               <p className="text-xs font-semibold uppercase tracking-wide text-cyan-700">
                 {pickWindowRoundLabel(pickWindow)} · Doubleheader
               </p>
-              <h2 className="mt-1 text-base font-semibold text-slate-950">
+              <h2 className="mt-1 text-lg font-semibold text-slate-950">
                 Two separate race submissions
               </h2>
             </div>
-            <span className="text-sm font-semibold text-slate-700">
+            <span className="shrink-0 rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-semibold text-slate-700">
               {savedRaceCount}/{pickWindow.length} saved
             </span>
           </div>
           <nav
             aria-label="Doubleheader race forms"
-            className="mt-3 grid gap-2 sm:grid-cols-2"
+            className="mt-4 grid gap-3 sm:grid-cols-2"
           >
             {pickWindow.map((race) => {
               const isSelected = race.id === selectedRace.id;
@@ -356,9 +356,9 @@ export default async function PicksPage({ searchParams }: PageProps) {
               return (
                 <Link
                   aria-current={isSelected ? "page" : undefined}
-                  className={`flex min-w-0 items-center justify-between gap-3 rounded-md border px-3 py-2.5 text-left transition ${
+                  className={`grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-start gap-3 rounded-md border p-3.5 text-left transition sm:p-4 ${
                     isSelected
-                      ? "border-cyan-700 bg-cyan-50"
+                      ? "border-cyan-700 bg-cyan-50 shadow-sm"
                       : "border-slate-200 bg-white hover:border-slate-400 hover:bg-slate-50"
                   }`}
                   href={`/picks?race_id=${race.id}`}
@@ -369,12 +369,12 @@ export default async function PicksPage({ searchParams }: PageProps) {
                       R{race.round_number} ·{" "}
                       {formatLeagueDateTime(race.race_date, { weekday: "long" })}
                     </span>
-                    <span className="mt-0.5 block truncate text-sm font-semibold text-slate-950">
+                    <span className="mt-1 block text-sm font-semibold leading-5 text-slate-950">
                       {race.race_name}
                     </span>
                   </span>
                   <span
-                    className={`shrink-0 rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${
+                    className={`mt-0.5 shrink-0 rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${
                       isSaved
                         ? "ui-status-success border-emerald-200 bg-emerald-50 text-emerald-800"
                         : "ui-status-warning border-amber-200 bg-amber-50 text-amber-800"
@@ -386,7 +386,7 @@ export default async function PicksPage({ searchParams }: PageProps) {
               );
             })}
           </nav>
-          <p className="mt-2 text-xs text-slate-500">
+          <p className="mt-3 text-xs leading-5 text-slate-500">
             Each race has its own drivers and speed tie-breaker. Both forms lock at{" "}
             {formatRaceDate(pickLockAt)}.
           </p>
