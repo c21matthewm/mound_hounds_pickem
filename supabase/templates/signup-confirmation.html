@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Confirm your Mound Hounds account</title>
+  </head>
+  <body style="margin:0;padding:0;background:#f1f5f9;color:#0f172a;font-family:Arial,Helvetica,sans-serif;">
+    <div style="display:none;max-height:0;overflow:hidden;opacity:0;">
+      Confirm your email address to finish creating your Mound Hounds Pick'em account.
+    </div>
+    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:#f1f5f9;padding:24px 12px;">
+      <tr>
+        <td align="center">
+          <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:600px;background:#ffffff;border:1px solid #cbd5e1;border-radius:8px;overflow:hidden;">
+            <tr>
+              <td style="padding:20px 24px;background:#0f172a;color:#ffffff;">
+                <table role="presentation" width="100%" cellspacing="0" cellpadding="0">
+                  <tr>
+                    <td width="58" valign="middle">
+                      <img src="https://moundhoundspickem.app/images/branding/mound-hound.webp" alt="Mound Hounds" width="48" height="48" style="display:block;border:0;border-radius:6px;object-fit:contain;" />
+                    </td>
+                    <td valign="middle" style="font-size:18px;font-weight:700;line-height:24px;">
+                      Mound Hounds Pick'em
+                    </td>
+                  </tr>
+                </table>
+              </td>
+            </tr>
+            <tr>
+              <td style="padding:24px;">
+                <p style="margin:0 0 8px;color:#0369a1;font-size:12px;font-weight:700;line-height:18px;text-transform:uppercase;">
+                  League account
+                </p>
+                <h1 style="margin:0 0 12px;font-size:24px;line-height:30px;color:#0f172a;">
+                  Confirm your email
+                </h1>
+                <p style="margin:0 0 20px;color:#475569;font-size:15px;line-height:22px;">
+                  Confirm {{ .Email }} to finish creating your Mound Hounds Pick'em account and enter the current league season.
+                </p>
+                <table role="presentation" cellspacing="0" cellpadding="0" style="margin:0 0 22px;">
+                  <tr>
+                    <td style="border-radius:6px;background:#0369a1;">
+                      <a href="{{ .ConfirmationURL }}" style="display:inline-block;padding:12px 18px;color:#ffffff;text-decoration:none;font-size:15px;font-weight:700;">
+                        Confirm Email Address
+                      </a>
+                    </td>
+                  </tr>
+                </table>
+                <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin:0 0 20px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:6px;">
+                  <tr>
+                    <td style="padding:14px;color:#475569;font-size:13px;line-height:20px;">
+                      If you did not create this account, you can safely ignore this email.
+                    </td>
+                  </tr>
+                </table>
+                <p style="margin:0 0 6px;color:#64748b;font-size:12px;line-height:18px;">
+                  If the button does not work, open this secure link:
+                </p>
+                <p style="margin:0;color:#64748b;font-size:12px;line-height:18px;word-break:break-all;">
+                  <a href="{{ .ConfirmationURL }}" style="color:#0369a1;">{{ .ConfirmationURL }}</a>
+                </p>
+              </td>
+            </tr>
+            <tr>
+              <td style="padding:14px 24px;border-top:1px solid #e2e8f0;color:#64748b;font-size:11px;line-height:17px;">
+                This automated account email was sent by Mound Hounds Pick'em.
+              </td>
+            </tr>
+          </table>
+        </td>
+      </tr>
+    </table>
+  </body>
+</html>

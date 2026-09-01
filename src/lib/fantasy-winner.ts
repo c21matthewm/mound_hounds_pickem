@@ -1,6 +1,6 @@
 import "server-only";
 
-import type { SupabaseClient } from "@supabase/supabase-js";
+import type { AppSupabaseClient } from "@/lib/supabase/types";
 import { createServiceRoleSupabaseClient } from "@/lib/supabase/service-role";
 import type { RacePickFormat } from "@/lib/race-format";
 import { buildRaceScoringProjection } from "@/lib/race-scoring-model";
@@ -61,7 +61,7 @@ const withOfficialSpeedMigrationHint = (message: string): string =>
     ? `${message}. Run the latest Supabase migration to add official race average speed support.`
     : message;
 
-export async function scheduleRaceWinnerAutoCalculation(supabase: SupabaseClient, raceId: number) {
+export async function scheduleRaceWinnerAutoCalculation(supabase: AppSupabaseClient, raceId: number) {
   const eligibleAt = new Date(Date.now() + AUTO_WINNER_DELAY_MINUTES * 60_000).toISOString();
 
   const { data: updatedRace, error } = await supabase
@@ -84,7 +84,7 @@ export async function scheduleRaceWinnerAutoCalculation(supabase: SupabaseClient
 }
 
 export async function calculateRaceWinnerProfileId(
-  supabase: SupabaseClient,
+  supabase: AppSupabaseClient,
   raceId: number
 ): Promise<string | null> {
   const { data: race, error: raceError } = await supabase
@@ -185,7 +185,7 @@ export async function calculateRaceWinnerProfileId(
 }
 
 export async function finalizeRaceWinnerNow(
-  supabase: SupabaseClient,
+  supabase: AppSupabaseClient,
   raceId: number
 ): Promise<string | null> {
   const winnerProfileId = await calculateRaceWinnerProfileId(supabase, raceId);

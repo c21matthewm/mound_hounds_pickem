@@ -1,6 +1,7 @@
 import "server-only";
 
 import { createServiceRoleSupabaseClient } from "@/lib/supabase/service-role";
+import { serializeJson } from "@/lib/supabase/json";
 
 export type JobName = "fantasy-winner" | "pick-reminders";
 export type CompletedJobStatus = "degraded" | "succeeded";
@@ -13,12 +14,12 @@ type JobRunOptions<T> = {
   shouldRecordResult?: (result: T) => boolean;
 };
 
-const asSummary = (value: unknown): Record<string, unknown> => {
+const asSummary = (value: unknown) => {
   if (value && typeof value === "object" && !Array.isArray(value)) {
-    return value as Record<string, unknown>;
+    return serializeJson(value);
   }
 
-  return { result: value ?? null };
+  return serializeJson({ result: value ?? null });
 };
 
 export async function withJobRun<T>(

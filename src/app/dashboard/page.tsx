@@ -21,7 +21,7 @@ type PageProps = {
 };
 
 const statusTone = (status: RaceWeekStatus): StatusTone => {
-  if (status === "form_open") {
+  if (status === "form_open" || status === "form_pending") {
     return "info";
   }
   if (status === "picks_saved") {
@@ -116,6 +116,17 @@ export default async function DashboardPage({ searchParams }: PageProps) {
                   </p>
                   <p className="mt-0.5 text-xs font-semibold leading-5 text-slate-800">
                     {formatDateTime(raceWeek.pickLockAt)}
+                  </p>
+                </div>
+              ) : null}
+
+              {action.status === "form_pending" && raceWeek.pickOpenAt ? (
+                <div className="mt-3 border-t border-slate-100 pt-3">
+                  <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                    Picks open
+                  </p>
+                  <p className="mt-0.5 text-xs font-semibold leading-5 text-slate-800">
+                    {formatDateTime(raceWeek.pickOpenAt)}
                   </p>
                 </div>
               ) : null}

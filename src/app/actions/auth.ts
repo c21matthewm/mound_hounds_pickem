@@ -196,6 +196,29 @@ export async function signUpAction(formData: FormData) {
     errorRedirect("/signup", "The season invite code is incorrect.");
   }
 
+  const { data: existingTeam, error: teamLookupError } = await serviceSupabase
+    .from("profiles")
+    .select("id")
+    .eq("team_name", teamName)
+    .limit(1)
+    .maybeSingle<{ id: string }>();
+  if (teamLookupError) {
+    const reported = await reportAppError({
+      code: "signup-team-availability-failed",
+      context: { operation: "signup" },
+      error: teamLookupError,
+      route: "/signup",
+      subsystem: "auth"
+    });
+    errorRedirect(
+      "/signup",
+      `Team-name availability could not be checked. Please try again.${errorReference(reported)}`
+    );
+  }
+  if (existingTeam) {
+    errorRedirect("/signup", "That team name is already taken. Choose a different name.");
+  }
+
   const supabase = await createServerSupabaseClient();
   const origin = await getOrigin();
 
@@ -265,6 +288,48 @@ export async function signUpAction(formData: FormData) {
 
   invalidateScoringCache();
   messageRedirect("/login", "Check your email to confirm your account.");
+}
+
+export async function resendSignupConfirmationAction(formData: FormData) {
+  const email = asText(formData.get("email")).toLowerCase();
+
+  if (!email) {
+    errorRedirect("/resend-confirmation", "Email is required.");
+  }
+
+  const supabase = await createServerSupabaseClient();
+  const origin = await getOrigin();
+  const { error } = await supabase.auth.resend({
+    email,
+    options: {
+      emailRedirectTo: `${origin}/auth/callback?next=/onboarding`
+    },
+    type: "signup"
+  });
+
+  if (error) {
+    console.error("[auth] resend signup confirmation failed:", error.message);
+    const reported = isExpectedAuthError(error.message)
+      ? null
+      : await reportAppError({
+          code: "signup-confirmation-resend-failed",
+          context: { operation: "resend_signup_confirmation" },
+          error,
+          route: "/resend-confirmation",
+          subsystem: "auth"
+        });
+    errorRedirect(
+      "/resend-confirmation",
+      `The confirmation email could not be sent. Wait a minute and try again.${
+        reported ? errorReference(reported) : ""
+      }`
+    );
+  }
+
+  messageRedirect(
+    "/login",
+    "If that account is awaiting confirmation, a new confirmation email has been sent."
+  );
 }
 
 export async function requestPasswordResetAction(formData: FormData) {
@@ -367,9 +432,6 @@ export async function signOutAction() {
 export async function saveProfileAction(formData: FormData) {
   const fullName = asText(formData.get("full_name"));
   const teamName = asText(formData.get("team_name"));
-  const phoneNumber = asText(formData.get("phone_number"));
-  const phoneCarrier = asText(formData.get("phone_carrier"));
-  const digitsOnly = phoneNumber.replace(/\D/g, "");
 
   if (!fullName || !teamName) {
     errorRedirect("/onboarding", "Your name and team name are required.");
@@ -377,10 +439,6 @@ export async function saveProfileAction(formData: FormData) {
 
   if (fullName.length > MAX_NAME_LENGTH || teamName.length > MAX_NAME_LENGTH) {
     errorRedirect("/onboarding", "Names must be 100 characters or fewer.");
-  }
-
-  if (phoneNumber && digitsOnly.length < 10) {
-    errorRedirect("/onboarding", "Phone number must include at least 10 digits.");
   }
 
   const supabase = await createServerSupabaseClient();
@@ -391,15 +449,13 @@ export async function saveProfileAction(formData: FormData) {
   const userId = user?.id;
 
   if (authError || !userId) {
-    errorRedirect("/login", "Your session expired. Please sign in again.");
+    return errorRedirect("/login", "Your session expired. Please sign in again.");
   }
 
   const { error } = await supabase.from("profiles").upsert(
     {
       full_name: fullName,
       id: userId,
-      phone_carrier: phoneCarrier || null,
-      phone_number: phoneNumber || null,
       team_name: teamName
     },
     { onConflict: "id" }

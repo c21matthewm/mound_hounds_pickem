@@ -57,13 +57,15 @@ Email reminder values are optional while reminders are on hold:
 RESEND_API_KEY=
 RESEND_FROM_EMAIL=
 RESEND_REPLY_TO=
+LEAGUE_ADMIN_EMAIL=indymoundhounds@gmail.com
 PICK_EMAILS_ENABLED=false
-REMINDER_SMS_ENABLED=false
 ```
 
+Set `LEAGUE_ADMIN_EMAIL` to the monitored league address. It appears on the contact page and beside
+season invite-code fields so participants can request the current code.
+
 Set `PICK_EMAILS_ENABLED=true` only in the production environment after Resend is verified and the
-schedule migration is applied. Keep `REMINDER_SMS_ENABLED=false` for email-only reminders.
-Carrier-gateway delivery is opt-in because both channels can exceed the free daily quota.
+schedule migration is applied. Pick notifications are email-only.
 
 Run the app:
 
@@ -130,13 +132,28 @@ supabase/migrations/20260818_bound_recovery_jobs_and_registration.sql
 supabase/migrations/20260821_add_application_error_inbox.sql
 supabase/migrations/20260822_harden_pick_reminder_delivery.sql
 supabase/migrations/20260822_retire_five_day_pick_email.sql
+supabase/migrations/20260831_harden_season_rollover_registration.sql
+supabase/migrations/20260831_repair_timestamp_variable_collisions.sql
+supabase/migrations/20260831_retire_sms_participant_data.sql
 ```
 
 The expected production schema version is:
 
 ```text
-20260822_reminder_delivery_v1
+20260831_email_only_notifications_v1
 ```
+
+After applying a migration, regenerate the checked-in TypeScript database contract from the live
+Supabase schema:
+
+```bash
+npm run db:types
+```
+
+This read-only command uses `NEXT_PUBLIC_SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` from
+`.env.local`; it does not change database data. Before a production release, run
+`npm run verify:release` to fail if the generated contract is stale, then run the normal lint,
+typecheck, tests, and build checks.
 
 Reusable health, cron, and race-diagnostic queries are in `supabase/operations/`. The deployment
 sequence is maintained in `DEPLOY_VERCEL.md`.

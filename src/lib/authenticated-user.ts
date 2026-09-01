@@ -24,7 +24,7 @@ export async function requireAppUser(options: AppUserOptions = {}) {
 
   const { data: profile, error: profileError } = await supabase
     .from("profiles")
-    .select("id,full_name,team_name,phone_number,phone_carrier,role,is_active")
+    .select("id,full_name,team_name,role,is_active")
     .eq("id", user.id)
     .maybeSingle<ProfileRow>();
 

@@ -1,6 +1,6 @@
 import "server-only";
 
-import type { SupabaseClient } from "@supabase/supabase-js";
+import type { AppSupabaseClient } from "@/lib/supabase/types";
 import { loadAllRows } from "@/lib/supabase/paginated-query";
 
 export type HallOfFameRaceBreakdown = {
@@ -68,7 +68,7 @@ const isRaceBreakdown = (value: unknown): value is HallOfFameRaceBreakdown => {
 };
 
 export async function loadHallOfFameSnapshot(
-  supabase: SupabaseClient
+  supabase: AppSupabaseClient
 ): Promise<HallOfFameSnapshot> {
   try {
     const seasonRows = await loadAllRows<SeasonRow>("Hall of Fame seasons", (from, to) =>

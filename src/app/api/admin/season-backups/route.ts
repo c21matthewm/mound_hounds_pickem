@@ -10,6 +10,7 @@ import {
   type SeasonRestorePointSummary
 } from "@/lib/season-recovery";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
+import { isJson } from "@/lib/supabase/json";
 
 export const dynamic = "force-dynamic";
 
@@ -216,7 +217,12 @@ export async function POST(request: Request) {
     }
 
     if (action === "import") {
-      if (!body.document || typeof body.document !== "object" || Array.isArray(body.document)) {
+      if (
+        !body.document ||
+        typeof body.document !== "object" ||
+        Array.isArray(body.document) ||
+        !isJson(body.document)
+      ) {
         return NextResponse.json({ error: "Choose a valid Mound Hounds backup file." }, { status: 400 });
       }
 

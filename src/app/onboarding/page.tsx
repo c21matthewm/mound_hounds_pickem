@@ -5,7 +5,6 @@ import { ProfileButton } from "@/components/profile-button";
 import { SubmitButton } from "@/components/submit-button";
 import {
   CompactNotice,
-  Disclosure,
   FormField,
   actionControlClassName,
   fieldControlClassName
@@ -17,16 +16,6 @@ import { createServerSupabaseClient } from "@/lib/supabase/server";
 type PageProps = {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 };
-
-const CARRIERS = [
-  { label: "AT&T", value: "att" },
-  { label: "Verizon", value: "verizon" },
-  { label: "T-Mobile", value: "tmobile" },
-  { label: "Cricket", value: "cricket" },
-  { label: "US Cellular", value: "uscellular" },
-  { label: "Google Fi", value: "googlefi" },
-  { label: "Other", value: "other" }
-];
 
 export default async function OnboardingPage({ searchParams }: PageProps) {
   const params = await searchParams;
@@ -44,7 +33,7 @@ export default async function OnboardingPage({ searchParams }: PageProps) {
 
   const { data: profile, error: profileError } = await supabase
     .from("profiles")
-    .select("id,full_name,team_name,phone_number,phone_carrier,role")
+    .select("id,full_name,team_name,role")
     .eq("id", user.id)
     .maybeSingle<ProfileRow>();
 
@@ -59,7 +48,7 @@ export default async function OnboardingPage({ searchParams }: PageProps) {
   return (
     <AuthFlowShell
       action={<ProfileButton />}
-      description="Add your name and team once. Contact details remain optional while notifications are email-only."
+      description="Add your name and team once to finish setting up your league account."
       eyebrow="League Setup"
       maxWidth="max-w-2xl"
       title="Complete your profile"
@@ -101,39 +90,6 @@ export default async function OnboardingPage({ searchParams }: PageProps) {
             type="text"
           />
         </FormField>
-
-        <Disclosure
-          description="Not required for email notifications."
-          summary="Optional contact details"
-        >
-          <div className="grid gap-4 sm:grid-cols-2">
-            <FormField label="Phone number">
-              <input
-                autoComplete="tel"
-                className={fieldControlClassName()}
-                defaultValue={profile?.phone_number ?? ""}
-                name="phone_number"
-                placeholder="317-555-1212"
-                type="tel"
-              />
-            </FormField>
-
-            <FormField label="Phone carrier">
-              <select
-                className={fieldControlClassName()}
-                defaultValue={profile?.phone_carrier ?? ""}
-                name="phone_carrier"
-              >
-                <option value="">Select carrier</option>
-                {CARRIERS.map((carrier) => (
-                  <option key={carrier.value} value={carrier.value}>
-                    {carrier.label}
-                  </option>
-                ))}
-              </select>
-            </FormField>
-          </div>
-        </Disclosure>
 
         <SubmitButton
           className={actionControlClassName("primary", "mt-1")}

@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import { setSeasonParticipationAction } from "@/app/actions/auth";
 import { AuthFlowShell, AuthFormPanel } from "@/components/auth-flow-shell";
 import { ProfileButton } from "@/components/profile-button";
+import { SeasonInviteCodeHelp } from "@/components/season-invite-code-help";
 import { SubmitButton } from "@/components/submit-button";
 import {
   CompactNotice,
@@ -10,6 +11,7 @@ import {
   fieldControlClassName
 } from "@/components/ui-primitives";
 import { isProfileComplete, type ProfileRow } from "@/lib/profile";
+import { leagueAdminEmail } from "@/lib/league-contact";
 import { queryStringParam, sanitizeNextPath } from "@/lib/query";
 import { loadActiveLeagueSeason } from "@/lib/seasons";
 import { loadSeasonParticipation } from "@/lib/season-participation";
@@ -36,7 +38,7 @@ export default async function SeasonRegistrationPage({ searchParams }: PageProps
 
   const { data: profile, error: profileError } = await supabase
     .from("profiles")
-    .select("id,full_name,team_name,phone_number,phone_carrier,role,is_active")
+    .select("id,full_name,team_name,role,is_active")
     .eq("id", user.id)
     .maybeSingle<ProfileRow>();
 
@@ -57,6 +59,7 @@ export default async function SeasonRegistrationPage({ searchParams }: PageProps
   if (participation?.status === "registered") {
     redirect(next);
   }
+  const adminEmail = leagueAdminEmail();
 
   return (
     <AuthFlowShell
@@ -118,6 +121,12 @@ export default async function SeasonRegistrationPage({ searchParams }: PageProps
                 type="text"
               />
             </FormField>
+            <div className="sm:col-span-2">
+              <SeasonInviteCodeHelp
+                adminEmail={adminEmail}
+                seasonYear={activeSeason.seasonYear}
+              />
+            </div>
             {!activeSeason.registrationCodeConfiguredAt ? (
               <CompactNotice className="sm:col-span-2" tone="warning">
                 Registration is waiting for the league administrator to configure this season&apos;s

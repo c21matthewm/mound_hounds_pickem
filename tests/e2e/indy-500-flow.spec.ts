@@ -96,8 +96,6 @@ const createSeedUser = async (label: string, role: Role): Promise<SeedUser> => {
     {
       full_name: `${TEST_PREFIX} ${label} Owner`,
       id: userData.user.id,
-      phone_carrier: "verizon",
-      phone_number: "3175550100",
       role,
       team_name: teamName
     },

@@ -1,7 +1,8 @@
 import "server-only";
 
-import type { SupabaseClient } from "@supabase/supabase-js";
 import { reportAppError } from "@/lib/app-error-reporter";
+import { serializeJson } from "@/lib/supabase/json";
+import type { AppSupabaseClient } from "@/lib/supabase/types";
 
 export type AdminAuditEvent = {
   action: string;
@@ -13,13 +14,13 @@ export type AdminAuditEvent = {
 };
 
 export const recordAdminAudit = async (
-  supabase: SupabaseClient,
+  supabase: AppSupabaseClient,
   event: AdminAuditEvent
 ): Promise<void> => {
   const { error } = await supabase.rpc("write_admin_audit_event", {
     p_action: event.action,
-    p_after_state: event.afterState ?? null,
-    p_before_state: event.beforeState ?? null,
+    p_after_state: event.afterState ? serializeJson(event.afterState) : null,
+    p_before_state: event.beforeState ? serializeJson(event.beforeState) : null,
     p_entity_id: event.entityId,
     p_entity_type: event.entityType,
     p_summary: event.summary

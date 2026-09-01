@@ -7,7 +7,7 @@ export type ReminderQueueStatus = "failed" | "pending" | "sent";
 
 export type ReminderQueueRow = {
   attempt_count: number;
-  channel: "email" | "sms";
+  channel: "email";
   delivery_status: ReminderQueueStatus;
   id: number;
   last_attempt_at: string | null;

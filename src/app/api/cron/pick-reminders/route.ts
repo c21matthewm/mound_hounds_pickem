@@ -12,7 +12,7 @@ async function handleCronRequest(request: Request) {
   try {
     const result = await withJobRun("pick-reminders", sendDuePickReminders, {
       completionForResult: (summary) => {
-        const failedAttempts = summary.emailFailed + summary.smsFailed;
+        const failedAttempts = summary.emailFailed;
         const unresolvedFailures =
           summary.queueRetrying + summary.queuePermanentFailed;
         return failedAttempts > 0 || unresolvedFailures > 0
@@ -28,7 +28,6 @@ async function handleCronRequest(request: Request) {
       shouldRecordResult: (summary) =>
         summary.batchDeliveryCount > 0 ||
         summary.emailFailed > 0 ||
-        summary.smsFailed > 0 ||
         summary.queuePermanentFailed > 0
     });
     return NextResponse.json({

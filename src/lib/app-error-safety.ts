@@ -85,6 +85,7 @@ export const sanitizeAppErrorContext = (
 
 const EXPECTED_PARTICIPANT_ERRORS: Array<[RegExp, (match: RegExpMatchArray) => string]> = [
   [/^Picks are unavailable until (.+) results are published\.?$/i, (match) => `Picks are unavailable until ${sanitizeTechnicalSummary(match[1]).slice(0, 200)} results are published.`],
+  [/^The opening race pick form opens six days before qualifying\.?$/i, () => "The opening race pick form opens six days before qualifying."],
   [/^Picks are locked because (qualifying|the race) has already started\.?$/i, (match) => `Picks are locked because ${match[1]} has already started.`],
   [/^Your participant profile is inactive for the current season\.?$/i, () => "Your participant profile is inactive for the current season."],
   [/^Register for this league season before submitting picks\.?$/i, () => "Register for this league season before submitting picks."],

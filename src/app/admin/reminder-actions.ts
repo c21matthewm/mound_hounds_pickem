@@ -27,7 +27,7 @@ export async function sendPickReminderTestAction(formData: FormData) {
   const reminderTypeInput = asText(formData.get("reminder_type"));
 
   if (!raceId || !isReminderType(reminderTypeInput)) {
-    adminMutationRedirect(
+    return adminMutationRedirect(
       "error",
       "Select a valid race and reminder type for the test email.",
       "health"

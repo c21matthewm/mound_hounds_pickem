@@ -663,7 +663,6 @@ export default async function AdminPage({ searchParams }: PageProps) {
           sendReminderTestAction={sendPickReminderTestAction}
           schemaVersion={healthSchemaVersion}
           openAppErrorCount={healthOpenAppErrorCount}
-          smsEnabled={process.env.REMINDER_SMS_ENABLED?.toLowerCase() === "true"}
         />
       ) : null}
 

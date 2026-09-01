@@ -24,7 +24,10 @@ export async function finalizeHallOfFameSeasonAction(formData: FormData) {
   const seasonId = parsePositiveInteger(asText(formData.get("season_id")));
 
   if (!seasonId) {
-    redirectWithTab("error", "An active season is required before final standings can be saved.");
+    return redirectWithTab(
+      "error",
+      "An active season is required before final standings can be saved."
+    );
   }
 
   const { data: season, error: seasonError } = await supabase

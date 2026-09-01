@@ -1,4 +1,4 @@
-import type { SupabaseClient } from "@supabase/supabase-js";
+import type { AppSupabaseClient } from "@/lib/supabase/types";
 
 export type LeagueSeasonStatus = "active" | "completed" | "upcoming";
 
@@ -42,7 +42,7 @@ const SEASON_FIELDS =
   "id,season_year,display_name,status,activated_at,completed_at,registration_code_configured_at,roster_configured_at,rules_document_url";
 
 export async function loadActiveLeagueSeason(
-  supabase: SupabaseClient
+  supabase: AppSupabaseClient
 ): Promise<LeagueSeason | null> {
   const { data, error } = await supabase
     .from("league_seasons")
@@ -58,7 +58,7 @@ export async function loadActiveLeagueSeason(
 }
 
 export async function loadLeagueSeasons(
-  supabase: SupabaseClient
+  supabase: AppSupabaseClient
 ): Promise<LeagueSeason[]> {
   const { data, error } = await supabase
     .from("league_seasons")

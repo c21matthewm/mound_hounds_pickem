@@ -27,7 +27,7 @@ declare
   attempt_allowed boolean := true;
   current_count integer;
   current_key text;
-  current_time timestamptz := timezone('utc', now());
+  v_now timestamptz := now();
 begin
   if coalesce(auth.role(), '') <> 'service_role' then
     raise exception 'Service role required.';
@@ -50,22 +50,22 @@ begin
       attempt_count,
       updated_at
     )
-    values (current_key, current_time, 1, current_time)
+    values (current_key, v_now, 1, v_now)
     on conflict (key_hash) do update
     set
       window_started_at = case
         when public.registration_attempt_limits.window_started_at <=
-          current_time - make_interval(secs => p_window_seconds)
-          then current_time
+          v_now - make_interval(secs => p_window_seconds)
+          then v_now
         else public.registration_attempt_limits.window_started_at
       end,
       attempt_count = case
         when public.registration_attempt_limits.window_started_at <=
-          current_time - make_interval(secs => p_window_seconds)
+          v_now - make_interval(secs => p_window_seconds)
           then 1
         else public.registration_attempt_limits.attempt_count + 1
       end,
-      updated_at = current_time
+      updated_at = v_now
     returning attempt_count into current_count;
 
     if current_count > p_max_attempts then
@@ -74,7 +74,7 @@ begin
   end loop;
 
   delete from public.registration_attempt_limits
-  where updated_at < current_time - interval '2 days';
+  where updated_at < v_now - interval '2 days';
 
   return attempt_allowed;
 end;
@@ -159,7 +159,7 @@ security definer
 set search_path = public
 as $$
 declare
-  current_time timestamptz := timezone('utc', now());
+  v_now timestamptz := now();
   next_token uuid := extensions.gen_random_uuid();
 begin
   if coalesce(auth.role(), '') <> 'service_role' then
@@ -180,7 +180,7 @@ begin
     last_completed_at,
     updated_at
   )
-  values (p_job_name, 'running', '{}'::jsonb, null, next_token, 1, current_time, null, current_time)
+  values (p_job_name, 'running', '{}'::jsonb, null, next_token, 1, v_now, null, v_now)
   on conflict (job_name) do update
   set
     status = 'running',
@@ -188,8 +188,8 @@ begin
     error_message = null,
     run_token = next_token,
     run_count = public.job_status.run_count + 1,
-    last_started_at = current_time,
-    updated_at = current_time;
+    last_started_at = v_now,
+    updated_at = v_now;
 
   return next_token;
 end;

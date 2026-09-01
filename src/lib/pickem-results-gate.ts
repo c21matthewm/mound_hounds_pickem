@@ -1,4 +1,4 @@
-import type { SupabaseClient } from "@supabase/supabase-js";
+import type { AppSupabaseClient } from "@/lib/supabase/types";
 import {
   INDY_500_QUALIFYING_FIELD_SIZE,
   normalizeRacePickFormat,
@@ -54,7 +54,7 @@ const toPreviousRaceInfo = (race: PreviousRaceRow): PreviousRaceInfo => ({
 });
 
 const loadPreviousPickWindow = async (
-  supabase: SupabaseClient,
+  supabase: AppSupabaseClient,
   race: PickemRaceForResultsGate
 ): Promise<PreviousRaceRow[]> => {
   const { data: currentWindowRows, error: currentWindowError } = await supabase
@@ -109,7 +109,7 @@ const loadPreviousPickWindow = async (
 };
 
 export const getPreviousRaceResultsGate = async (
-  supabase: SupabaseClient,
+  supabase: AppSupabaseClient,
   race: PickemRaceForResultsGate
 ): Promise<PreviousRaceResultsGate> => {
   const previousRaces = await loadPreviousPickWindow(supabase, race);

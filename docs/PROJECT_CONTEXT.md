@@ -1,6 +1,6 @@
 # Mound Hounds Pick'em Project Context
 
-Last reviewed: 2026-07-30
+Last reviewed: 2026-08-28
 
 This is the working-memory companion to `README.md`. Keep the README focused on setup and user-facing operation; keep this file updated whenever routes, schema, scoring, admin workflows, auth behavior, or testing strategy changes.
 
@@ -16,14 +16,15 @@ Mound Hounds Pick'em is a private INDYCAR fantasy league app. Participants submi
 - Supabase `pg_cron` and `pg_net` are intended for frequent production cron calls.
 - Vercel production deploys from `main`; normal work happens on `dev`.
 - Node version is `22` from `.nvmrc`.
-- Verification scripts live in `package.json`: `npm run lint`, `npm run typecheck`, `npm run test`, `npm run build`, `npm run verify`, `npm run e2e:smoke`, and `npm run e2e`.
+- Verification scripts live in `package.json`: `npm run lint`, `npm run typecheck`, `npm run test`, `npm run build`, `npm run verify`, `npm run verify:release`, `npm run e2e:smoke`, and `npm run e2e`.
 
 ## Important Routes
 
 - `/` redirects authenticated complete profiles to `/dashboard`, incomplete profiles to `/onboarding`, and guests to `/login`.
 - `/login`, `/signup`, `/forgot-password`, `/reset-password`, and `/auth/callback` implement Supabase email/password, signup confirmation, and password recovery.
-- `/onboarding` requires full name and team name. Phone and carrier are optional while delivery is email-only.
+- `/onboarding` requires only full name and team name.
 - `/season-registration` lets a returning account join or skip the current season without admin approval.
+- Season invite-code forms link directly to `LEAGUE_ADMIN_EMAIL` when a participant needs the code.
 - `/race-center` redirects to `/dashboard` for old bookmarks.
 - `/dashboard` is the single race-week home for the next action, race context, compact quick links, and admin readiness. Profile details and sign-out live on `/profile`; the dashboard intentionally does not duplicate latest-race results.
 - Authenticated pages share Dashboard, Pick'em Form, and Standings navigation: a compact header nav on desktop/tablet and a bottom dock on mobile.
@@ -47,14 +48,21 @@ Mound Hounds Pick'em is a private INDYCAR fantasy league app. Participants submi
 - `src/lib/authenticated-user.ts` centralizes auth, profile completion, active season, and yearly registration routing.
 - Profiles persist across years. `season_participants` stores each profile's `registered` or `declined` decision for a season. A newly activated season therefore prompts returning users at their next login.
 - `src/lib/admin.ts` provides `requireAdmin()`, which redirects non-admins to the dashboard with an admin-required message.
+- Supabase Auth owns confirmation and password-recovery token delivery. Branded hosted template
+  sources live in `supabase/templates/`; deployment instructions explain how to save them in
+  Supabase without replacing the existing callback flows.
 - Supabase RLS is enabled in `supabase/schema.sql`. Participants can update their own profile details but a database trigger prevents role changes. Draft results are admin-only; participants can read published results. Admins can write drivers, races, results, and feedback.
 
 ## Data Model
 
 The consolidated database definition is `supabase/schema.sql`; migrations for existing projects are in `supabase/migrations/`.
-Indy 500 features require `supabase/migrations/20260528_add_indy_500_pick_format.sql`. Role protection and atomic draft/published results require `supabase/migrations/20260709_harden_roles_and_result_publication.sql`. Explicit seasons require `supabase/migrations/20260718_add_league_seasons_and_active_participants.sql`; yearly enrollment and resilient reminder delivery require `supabase/migrations/20260718_add_season_enrollment_and_delivery_hardening.sql`; invite-code, race-field, audit, and job-heartbeat hardening requires `supabase/migrations/20260725_harden_race_and_season_operations.sql`; shared doubleheader pick deadlines require `supabase/migrations/20260726_add_shared_pick_windows.sql`; bounded reminder queues and degraded job health require `supabase/migrations/20260729_scale_weekly_operations.sql`; atomic pick versions and guided season recovery require `supabase/migrations/20260730_atomic_picks_and_season_recovery.sql`; bounded recovery storage, sparse job history, and registration-attempt protection require `supabase/migrations/20260818_bound_recovery_jobs_and_registration.sql`; bounded first-party incident reporting requires `supabase/migrations/20260821_add_application_error_inbox.sql`.
+Indy 500 features require `supabase/migrations/20260528_add_indy_500_pick_format.sql`. Role protection and atomic draft/published results require `supabase/migrations/20260709_harden_roles_and_result_publication.sql`. Explicit seasons require `supabase/migrations/20260718_add_league_seasons_and_active_participants.sql`; yearly enrollment and resilient reminder delivery require `supabase/migrations/20260718_add_season_enrollment_and_delivery_hardening.sql`; invite-code, race-field, audit, and job-heartbeat hardening requires `supabase/migrations/20260725_harden_race_and_season_operations.sql`; shared doubleheader pick deadlines require `supabase/migrations/20260726_add_shared_pick_windows.sql`; bounded reminder queues and degraded job health require `supabase/migrations/20260729_scale_weekly_operations.sql`; atomic pick versions and guided season recovery require `supabase/migrations/20260730_atomic_picks_and_season_recovery.sql`; bounded recovery storage, sparse job history, and registration-attempt protection require `supabase/migrations/20260818_bound_recovery_jobs_and_registration.sql`; bounded first-party incident reporting requires `supabase/migrations/20260821_add_application_error_inbox.sql`; early registration with a six-day opening-round pick boundary requires `supabase/migrations/20260831_harden_season_rollover_registration.sql`; the registration and job-heartbeat timestamp repair requires `supabase/migrations/20260831_repair_timestamp_variable_collisions.sql`; email-only participant data requires `supabase/migrations/20260831_retire_sms_participant_data.sql`.
 
-- `profiles`: permanent Supabase auth identities with full name, unique team name, optional phone/carrier, role, and account eligibility.
+`src/lib/supabase/database.types.ts` is generated from the deployed PostgREST contract with
+`npm run db:types`. All browser, server, middleware, and service-role clients use that contract.
+Run `npm run verify:release` before deployment to detect schema/type drift.
+
+- `profiles`: permanent Supabase auth identities with full name, unique team name, role, and account eligibility.
 - `league_seasons`: explicit upcoming/active/completed seasons. Only one can be active.
 - `season_participants`: per-season self-registration decisions, independent from permanent profiles.
 - `season_registration_secrets`: one-way hashes for per-season private invite codes; authenticated clients cannot read this table.
@@ -74,7 +82,7 @@ Indy 500 features require `supabase/migrations/20260528_add_indy_500_pick_format
 
 Key database triggers:
 
-- `enforce_pick_deadline()` requires active-season registration and blocks insert/update after the race-specific deadline, for archived races, and while every race in the previous pick window is not yet published.
+- `enforce_pick_deadline()` requires active-season registration, keeps the opening pick window closed until six days before qualifying, and blocks insert/update after the race-specific deadline, for archived races, and while every race in the previous pick window is not yet published.
 - `protect_profile_role()` prevents a participant from assigning or changing profile roles.
 - `validate_pick_groups()` freezes and validates against the race-specific driver field so later driver changes cannot invalidate saved picks.
 - `handle_new_user()` auto-creates a profile when a Supabase auth user is created.
@@ -121,8 +129,8 @@ Key database triggers:
 - Cron auth is checked in `src/lib/cron-auth.ts`. In production, `CRON_SECRET` is required and accepted via `Authorization: Bearer <secret>` or `x-cron-secret`.
 - Fantasy winner cron calls `finalizeDueRaceWinners()` and finalizes races whose `winner_auto_eligible_at` has passed and are not manual overrides.
 - Pick reminder cron calls `sendDuePickReminders()` in `src/lib/pick-reminders.ts`.
-- Automated reminder windows are 2 days and 4 hours before the race-specific pick deadline; the league administrator sends the earlier form-open announcement manually. The deadline is qualifying start for standard races and race start for the Indy 500. A shared doubleheader sends one deduplicated weekend email listing only missing race forms. Only registered profiles without all required picks receive it. Delivery rows are prepared persistently and processed in batches of 25 with five concurrent sends; failed attempts retry with a lease and deterministic Resend idempotency key. Carrier-gateway SMS remains disabled unless explicitly enabled.
-- Reminder delivery depends on `PICK_EMAILS_ENABLED=true`, plus Resend env vars `RESEND_API_KEY`, `RESEND_FROM_EMAIL`, and optional `RESEND_REPLY_TO`. Carrier-gateway SMS is disabled unless `REMINDER_SMS_ENABLED=true`.
+- Automated reminder windows are 2 days and 4 hours before the race-specific pick deadline; the league administrator sends the earlier form-open announcement manually. The deadline is qualifying start for standard races and race start for the Indy 500. A shared doubleheader sends one deduplicated weekend email listing only missing race forms. Only registered profiles without all required picks receive it. Delivery rows are prepared persistently and processed in batches of 25 with five concurrent sends; failed attempts retry with a lease and deterministic Resend idempotency key.
+- Reminder delivery is email-only and depends on `PICK_EMAILS_ENABLED=true`, plus Resend env vars `RESEND_API_KEY`, `RESEND_FROM_EMAIL`, and optional `RESEND_REPLY_TO`.
 
 ## Storage And Assets
 

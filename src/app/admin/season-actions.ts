@@ -24,7 +24,7 @@ export async function createLeagueSeasonAction(formData: FormData) {
   const inviteCodeConfirmation = asText(formData.get("invite_code_confirmation"));
 
   if (!seasonYear || seasonYear < 2000 || seasonYear > 2100) {
-    adminRedirect("error", "Enter a valid four-digit season year.", "races");
+    return adminRedirect("error", "Enter a valid four-digit season year.", "races");
   }
   if (inviteCode.length < 8 || inviteCode.length > 64) {
     adminRedirect(
@@ -57,7 +57,11 @@ export async function createLeagueSeasonAction(formData: FormData) {
   }
 
   revalidatePath("/admin");
-  adminRedirect("message", `${seasonYear} season created. Add its schedule before activation.`, "races");
+  adminRedirect(
+    "message",
+    `${seasonYear} season created. Configure its opening driver roster when you are ready to activate it.`,
+    "races"
+  );
 }
 
 export async function setLeagueSeasonInviteCodeAction(formData: FormData) {
@@ -67,7 +71,7 @@ export async function setLeagueSeasonInviteCodeAction(formData: FormData) {
   const inviteCodeConfirmation = asText(formData.get("invite_code_confirmation"));
 
   if (!seasonId) {
-    adminRedirect("error", "Select a season before setting its invite code.", "races");
+    return adminRedirect("error", "Select a season before setting its invite code.", "races");
   }
   if (inviteCode.length < 8 || inviteCode.length > 64) {
     adminRedirect(
@@ -111,7 +115,7 @@ export async function setLeagueSeasonRulesDocumentAction(formData: FormData) {
   const rulesDocumentUrl = asText(formData.get("rules_document_url"));
 
   if (!seasonId) {
-    adminRedirect("error", "Select a season before saving its rules document.", "races");
+    return adminRedirect("error", "Select a season before saving its rules document.", "races");
   }
   if (
     rulesDocumentUrl &&
@@ -166,7 +170,7 @@ export async function activateLeagueSeasonAction(formData: FormData) {
   const seasonId = parsePositiveInteger(asText(formData.get("season_id")));
 
   if (!seasonId) {
-    adminRedirect("error", "Select a season to activate.", "races");
+    return adminRedirect("error", "Select a season to activate.", "races");
   }
 
   const { data: currentSeason, error: currentSeasonError } = await supabase

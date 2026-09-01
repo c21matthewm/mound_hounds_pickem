@@ -26,7 +26,6 @@ type PickReminderMessageInput = {
 
 export type PickReminderMessage = {
   html: string;
-  smsText: string;
   subject: string;
   text: string;
 };
@@ -102,15 +101,6 @@ export const buildPickReminderMessage = ({
     "Good luck and enjoy the race weekend!"
   ];
   const text = plainLines.join("\n");
-  const smsText = [
-    `Mound Hounds Pick'em reminder (${reminderWindow.label}):`,
-    weekendName,
-    missingRaces.length > 1
-      ? "Both race forms are needed."
-      : `Missing: ${missingRaces[0].race_name}.`,
-    `Deadline: ${pickDeadlineText} (Indianapolis time).`,
-    `Submit: ${picksUrl}`
-  ].join(" ");
   const escapedRaceRows = missingRaces
     .map(
       (missingRace) =>
@@ -161,5 +151,5 @@ export const buildPickReminderMessage = ({
   </body>
 </html>`;
 
-  return { html, smsText, subject, text };
+  return { html, subject, text };
 };
