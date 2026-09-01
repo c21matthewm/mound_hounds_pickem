@@ -10,6 +10,7 @@ import {
   actionControlClassName
 } from "@/components/ui-primitives";
 import { formatLeagueDateTime } from "@/lib/timezone";
+import { EXPECTED_SCHEMA_VERSION } from "@/lib/supabase/schema-version";
 
 export type AdminReminderHealthRow = {
   attempt_count: number;
@@ -112,10 +113,7 @@ type AdminSystemHealthProps = {
   retryFailedRemindersAction: (formData: FormData) => void | Promise<void>;
   sendReminderTestAction: (formData: FormData) => void | Promise<void>;
   schemaVersion: string | null;
-  smsEnabled: boolean;
 };
-
-const EXPECTED_SCHEMA_VERSION = "20260822_reminder_delivery_v1";
 
 const formatHealthTime = (value: string): string =>
   formatLeagueDateTime(value, { dateStyle: "medium", timeStyle: "short" });
@@ -141,8 +139,7 @@ export function AdminSystemHealth({
   resolveAppErrorAction,
   retryFailedRemindersAction,
   sendReminderTestAction,
-  schemaVersion,
-  smsEnabled
+  schemaVersion
 }: AdminSystemHealthProps) {
   const schemaReady = Boolean(
     healthContract?.healthy &&
@@ -386,8 +383,19 @@ export function AdminSystemHealth({
 
       {staleJobNames.length > 0 ? (
         <CompactNotice className="mt-3" tone="warning">
-          Missing or stale heartbeat: {staleJobNames.join(", ")}. Verify the Supabase cron job
-          before the next race deadline.
+          {staleJobNames.includes("fantasy-winner") ? (
+            <span>
+              The hourly fantasy-winner recovery job has not checked in within three hours. Race
+              result publication still recalculates the winner immediately; verify the Supabase
+              fallback cron so a failed calculation can recover automatically.
+            </span>
+          ) : null}
+          {staleJobNames.includes("pick-reminders") ? (
+            <span className={staleJobNames.includes("fantasy-winner") ? "mt-1 block" : undefined}>
+              The pick-reminder job has not checked in within 20 minutes. Verify the Supabase cron
+              before the next reminder delivery window.
+            </span>
+          ) : null}
         </CompactNotice>
       ) : null}
 
@@ -592,10 +600,6 @@ export function AdminSystemHealth({
           <div>
             <dt className="text-xs font-semibold uppercase tracking-wide text-slate-500">Health contract</dt>
             <dd className="mt-1 font-medium text-slate-900">{healthContract?.version ?? "Unavailable"}</dd>
-          </div>
-          <div>
-            <dt className="text-xs font-semibold uppercase tracking-wide text-slate-500">SMS</dt>
-            <dd className="mt-1 font-medium text-slate-900">{smsEnabled ? "Enabled" : "Not enabled"}</dd>
           </div>
         </dl>
 

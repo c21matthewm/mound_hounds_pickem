@@ -10,6 +10,8 @@
     "build": "next build",
     "cleanup:orphaned-images": "node scripts/cleanup-orphaned-images.mjs",
     "cleanup:playwright-artifacts": "node scripts/cleanup-playwright-artifacts.mjs",
+    "db:types": "node scripts/generate-supabase-types.mjs",
+    "db:types:check": "node scripts/generate-supabase-types.mjs --check",
     "dev": "next dev",
     "e2e": "playwright test",
     "e2e:smoke": "PW_READ_ONLY=1 playwright test tests/e2e/production-readonly.spec.ts",
@@ -18,7 +20,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
-    "verify": "npm run lint && npm run typecheck && npm run test && npm run build"
+    "verify": "npm run lint && npm run typecheck && npm run test && npm run build",
+    "verify:release": "npm run db:types:check && npm run verify"
   },
   "dependencies": {
     "@supabase/ssr": "0.12.0",

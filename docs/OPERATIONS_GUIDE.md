@@ -47,7 +47,6 @@ Do not commit the Resend key. Supabase stores the SMTP credential.
    RESEND_FROM_EMAIL=Mound Hounds Pick'em <picks@mail.moundhoundspickem.app>
    RESEND_REPLY_TO=<the league administrator's real email address>
    PICK_EMAILS_ENABLED=false
-   REMINDER_SMS_ENABLED=false
    ```
 
 4. Confirm the existing `NEXT_PUBLIC_SITE_URL` Production variable is `https://moundhoundspickem.app` after the custom domain is active. Email links are built from this value.
@@ -82,11 +81,9 @@ Standard-race deadlines are qualifying start. The Indianapolis 500 deadline rema
 because qualifying-order groups must be imported before that form is usable. If previous-race
 results have not been published, automated reminders wait until those results are ready.
 
-For a 90-person league on Resend's free plan, set `REMINDER_SMS_ENABLED=false` in Vercel. One email
-stage to 90 missing-pick participants leaves little daily headroom for tests or authentication
-email. Enabling carrier-gateway SMS can double that stage to 180 messages. Avoid bulk onboarding
-on the same day as a full reminder run, and check the current provider quota before enabling
-delivery.
+For a 90-person league on Resend's free plan, one email stage to every missing-pick participant
+leaves little daily headroom for tests or authentication email. Avoid bulk onboarding on the same
+day as a full reminder run, and check the current provider quota before enabling delivery.
 
 ### Qualifying schedule changes
 
@@ -189,13 +186,14 @@ configuration change. Confirm:
 - schema version is `20260822_reminder_delivery_v1` and the database contract reports healthy;
 - the expected season is active and the registered-team count is reasonable;
 - the next race and previous-results gate are correct;
-- pick email/SMS enabled states match Vercel;
+- the pick-email enabled state matches Vercel;
 - reminder queue counts progress from pending/retrying to sent without permanent failures;
 - the two reminder send times match the next race's current qualifying deadline, and an admin
   test email renders correctly before participant delivery is enabled;
 - use **Retry permanent failures** only after correcting the provider or recipient problem;
-- both scheduled jobs show a current heartbeat; the separate event list stays intentionally sparse
-  and records only useful work, degraded runs, and failures;
+- the hourly fantasy-winner recovery job shows a current heartbeat; when email reminders are
+  enabled, the reminder job does as well. The separate event list stays intentionally sparse and
+  records only useful work, degraded runs, and failures;
 - recent admin audit entries match intentional participant, race, result, and season changes.
 - the application error inbox is available and has no unexplained open incidents; repeated errors
   are grouped, and **Mark resolved** should be used only after the affected workflow is verified.

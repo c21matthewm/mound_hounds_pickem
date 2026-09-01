@@ -1,6 +1,5 @@
 import "server-only";
 
-import type { SupabaseClient } from "@supabase/supabase-js";
 import { redirect } from "next/navigation";
 import { finalizeRaceWinnerNow } from "@/lib/fantasy-winner";
 import { errorReference, reportAppError } from "@/lib/app-error-reporter";
@@ -16,6 +15,7 @@ import {
 } from "@/lib/admin-tabs";
 import { SEASON_RECOVERY_MIGRATION_FILE } from "@/lib/season-recovery";
 import { withMigrationHint } from "@/lib/supabase/migration-errors";
+import type { AppSupabaseClient } from "@/lib/supabase/types";
 
 export const asText = (value: FormDataEntryValue | null): string =>
   typeof value === "string" ? value.trim() : "";
@@ -138,7 +138,7 @@ export const reportAdminActionFailure = async ({
 };
 
 export const createSeasonSafetySnapshot = async (
-  supabase: SupabaseClient,
+  supabase: AppSupabaseClient,
   seasonId: number,
   label: string,
   source: "pre_correction" | "pre_rollover" | "result_checkpoint",
@@ -157,7 +157,7 @@ export const createSeasonSafetySnapshot = async (
 };
 
 export const createPublishedRaceCheckpoint = async (
-  supabase: SupabaseClient,
+  supabase: AppSupabaseClient,
   race: { id: number; raceName: string; roundNumber: number; seasonId: number },
   winnerOutcome: WinnerFinalizationOutcome
 ): Promise<string | null> => {
@@ -200,7 +200,7 @@ export type WinnerFinalizationOutcome = {
 };
 
 export const finalizePublishedRaceWinner = async (
-  supabase: SupabaseClient,
+  supabase: AppSupabaseClient,
   raceId: number
 ): Promise<WinnerFinalizationOutcome> => {
   try {
@@ -278,7 +278,7 @@ const driverGroupForIndex = (index: number): number => {
   return 6;
 };
 
-export async function refreshDriverStandingsAndGroups(supabase: SupabaseClient) {
+export async function refreshDriverStandingsAndGroups(supabase: AppSupabaseClient) {
   const { data: activeDrivers, error: activeDriversError } = await supabase
     .from("drivers")
     .select("id,championship_points,current_standing,driver_name")
@@ -339,7 +339,7 @@ export async function refreshDriverStandingsAndGroups(supabase: SupabaseClient) 
   }
 }
 
-export async function ensureRaceIsActive(supabase: SupabaseClient, raceId: number) {
+export async function ensureRaceIsActive(supabase: AppSupabaseClient, raceId: number) {
   const { data: race, error } = await supabase
     .from("races")
     .select("id,is_archived,pick_format")

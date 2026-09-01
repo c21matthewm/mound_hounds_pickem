@@ -73,15 +73,11 @@ RESEND_API_KEY
 RESEND_FROM_EMAIL
 RESEND_REPLY_TO
 PICK_EMAILS_ENABLED
-REMINDER_SMS_ENABLED
 LEAGUE_ADMIN_EMAIL
 ```
 
 Keep `PICK_EMAILS_ENABLED` set to `false` until the Resend domain, API key, and reminder migration
 are ready. Change it to `true` only when production delivery should begin.
-
-Set `REMINDER_SMS_ENABLED` to `false` for email-only reminders. Set it to `true` only after
-confirming the provider quota can cover both email and carrier-gateway delivery.
 
 Generate a strong cron secret locally:
 
@@ -115,6 +111,39 @@ https://moundhoundspickem.app/auth/callback
 Password reset emails also use these callback URLs. The app sends users through
 `/auth/callback?next=/reset-password`, so no separate `/reset-password` redirect URL is required.
 
+### Branded Authentication Emails
+
+The production-ready recovery template is stored at:
+
+```text
+supabase/templates/password-recovery.html
+```
+
+Supabase hosts and sends authentication emails, so this template must also be saved in the hosted
+project after code deployment:
+
+1. Open **Supabase Dashboard -> Authentication -> Email Templates**.
+2. Select **Reset password**.
+3. Set the subject to **[Mound Hounds Pick'em] Reset your password**.
+4. Replace the message body with the complete contents of
+   `supabase/templates/password-recovery.html`.
+5. Save the template, then request one reset from `/forgot-password` and confirm the button reaches
+   `/reset-password`.
+
+Keep `{{ .ConfirmationURL }}` exactly as written. Supabase replaces it with the one-time recovery
+link. Resend email tracking must remain disabled for Supabase Auth messages so it does not rewrite
+that link.
+
+Repeat the same hosted-template process for new-account confirmations:
+
+1. Select **Confirm signup** in **Authentication -> Email Templates**.
+2. Set the subject to **[Mound Hounds Pick'em] Confirm your email**.
+3. Replace the message body with the complete contents of
+   `supabase/templates/signup-confirmation.html`.
+4. Save it and verify one new account from `/signup`.
+
+The HTML belongs in Supabase, not in a Vercel environment variable or deployment setting.
+
 You can also keep the Vercel-generated callback as a fallback:
 
 ```text
@@ -133,7 +162,8 @@ Then apply `supabase/migrations/20260725_harden_race_and_season_operations.sql`,
 `supabase/migrations/20260726_add_shared_pick_windows.sql`, and
 `supabase/migrations/20260729_scale_weekly_operations.sql`, followed by
 `supabase/migrations/20260730_atomic_picks_and_season_recovery.sql`, and
-`supabase/migrations/20260818_bound_recovery_jobs_and_registration.sql`. For an existing project,
+`supabase/migrations/20260818_bound_recovery_jobs_and_registration.sql`, continuing through
+`supabase/migrations/20260831_retire_sms_participant_data.sql`. For an existing project,
 apply any missing files in `supabase/migrations/` in filename order.
 
 Most recent scoring safety migration:
@@ -401,12 +431,28 @@ It adds a service-role pre-send eligibility check and an atomic admin correction
 delays, including shared doubleheader windows. A correction preserves reminder types already sent,
 removes only unsent queue work, and recalculates future reminders from the new qualifying time.
 
-Verify them with `supabase/operations/01_verify_production_health.sql`. The schema version must be
-`20260822_reminder_delivery_v1`, and the `reminder_delivery_validation`,
+After these reminder migrations, the interim schema version is
+`20260822_reminder_delivery_v1`. The `reminder_delivery_validation`,
 `qualifying_schedule_correction`, and `two_stage_policy` checks must report `PASS`. Then open
 **Admin -> Race Week**, review the two calculated send times, preview the email, and use
 **Send test to me**. Test messages go only to the signed-in administrator and do not create or
 modify participant reminder history.
+
+Latest season-rollover policy migration:
+
+```text
+supabase/migrations/20260831_harden_season_rollover_registration.sql
+supabase/migrations/20260831_repair_timestamp_variable_collisions.sql
+supabase/migrations/20260831_retire_sms_participant_data.sql
+```
+
+Apply it after the reminder migrations. It lets an admin activate a prepared season before adding
+its schedule, and it keeps the first pick window closed until six days before qualifying. Once the
+first race field freezes, a later qualifying delay cannot re-close that already-open form. Later
+rounds remain gated by publication of the previous pick window's results. After applying it, run
+`supabase/operations/01_verify_production_health.sql`; the final schema version must be
+`20260831_email_only_notifications_v1`, and `opening_pick_window_schedule` and
+`registration_rate_limit` must report `PASS`.
 
 For the older result-publication migration, retain known historical exceptions rather than
 reconstructing missing snapshots from current standings: Race 8 has 25 official rows and a
@@ -418,17 +464,18 @@ Use this order after the final race each year:
 
 1. Publish the final race results and confirm the current standings.
 2. In **Admin -> Race Results**, save the final standings to the Hall of Fame.
-3. In **Admin -> Races**, create the next season with its private invite code, rules PDF, and at
-   least its first scheduled race.
+3. In **Admin -> Races**, create the next season with its private invite code.
 4. Use **Admin -> Drivers -> Preseason seed tools** to select the upcoming season and import the
    complete official opening roster. Omitted drivers become inactive automatically.
 5. Activate the new season in **Admin -> Races**. Activation requires both the private invite code
    and opening roster. Current driver points reset to zero and the prior
    finishing order remains the opening seed.
-6. Returning participants sign in with their existing email/password and confirm their own
+6. Add the new season rules and race schedule when they are ready. The opening-round form becomes
+   available six days before qualifying; no schedule is required just to open registration.
+7. Returning participants sign in with their existing email/password and confirm their own
    registration for the new year. No admin approval and no new account are required.
-7. Review the registered field in **Admin -> Participants**. Admin edits are for corrections only.
-8. If the official preseason field order needs correction, use **Preseason seed tools** before any
+8. Review the registered field in **Admin -> Participants**. Admin edits are for corrections only.
+9. If the official preseason field order needs correction, use **Preseason seed tools** before any
    new-season result is published.
 
 When creating races, enter only the complete event name, such as `Acura Grand Prix of Long Beach`.
@@ -454,6 +501,18 @@ https://moundhoundspickem.app/admin
 ```
 
 ## 6. Verify Production
+
+Before merging a database or application release, verify that the checked-in Supabase contract
+matches the deployed schema and run the full local quality gate:
+
+```bash
+npm run verify:release
+```
+
+If the contract check fails after an intentional migration, run `npm run db:types`, review the
+generated diff, and rerun `npm run verify:release`. Type generation reads the schema only and must
+be run from a trusted local environment containing the service-role key; never expose that key in
+client code or commit it.
 
 Open the production URL and test:
 

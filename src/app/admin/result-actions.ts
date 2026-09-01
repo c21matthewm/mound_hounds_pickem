@@ -272,7 +272,10 @@ export async function upsertResultAction(formData: FormData) {
     asText(formData.get("confirm_results_correction")) === "on";
 
   if (!raceId || !driverId || points === null || !Number.isInteger(points)) {
-    redirectWithTab("error", "Race, driver, and non-negative integer points are required.");
+    return redirectWithTab(
+      "error",
+      "Race, driver, and non-negative integer points are required."
+    );
   }
   const selectedRaceId = raceId as number;
   const selectedDriverId = driverId as number;
@@ -421,7 +424,7 @@ export async function publishSavedRaceResultsAction(formData: FormData) {
     officialWinningAverageSpeed === null ||
     !isValidAverageSpeedMph(officialWinningAverageSpeed)
   ) {
-    redirectWithTab(
+    return redirectWithTab(
       "error",
       "Race and an official winning average speed between 0 and 300 MPH are required."
     );
@@ -550,7 +553,7 @@ export async function importIndycarResultsAction(formData: FormData) {
     asText(formData.get("confirm_results_correction")) === "on";
 
   if (raceIdInput === null) {
-    redirectWithTab("error", "Select a race before importing pasted results.");
+    return redirectWithTab("error", "Select a race before importing pasted results.");
   }
   const raceId = raceIdInput as number;
 
@@ -700,7 +703,7 @@ export async function importIndycarResultsAction(formData: FormData) {
     parsed.winningAverageSpeed === null ||
     !isValidAverageSpeedMph(parsed.winningAverageSpeed)
   ) {
-    redirectWithTab(
+    return redirectWithTab(
       "error",
       "Could not determine a valid official race average speed between 0 and 300 MPH. Include the Average Speed column."
     );

@@ -2,9 +2,10 @@ import "server-only";
 
 import { createHmac } from "node:crypto";
 import { headers } from "next/headers";
-import type { SupabaseClient } from "@supabase/supabase-js";
+import type { AppSupabaseClient } from "@/lib/supabase/types";
 
-const MAX_ATTEMPTS = 10;
+const MAX_IDENTITY_ATTEMPTS = 10;
+const MAX_SHARED_IP_ATTEMPTS = 100;
 const WINDOW_SECONDS = 15 * 60;
 
 const clientAddress = async (): Promise<string> => {
@@ -32,22 +33,35 @@ export const consumeRegistrationAttempt = async ({
 }: {
   email?: string;
   profileId?: string;
-  supabase: SupabaseClient;
+  supabase: AppSupabaseClient;
 }): Promise<boolean> => {
   const address = await clientAddress();
-  const identifiers = [
-    `ip:${address}`,
+  const identityKeys = [
     email ? `email:${email.trim().toLowerCase()}` : null,
     profileId ? `profile:${profileId}` : null
   ].filter((value): value is string => Boolean(value));
-  const { data, error } = await supabase.rpc("consume_registration_attempt", {
-    p_key_hashes: identifiers.map(hashedKey),
-    p_max_attempts: MAX_ATTEMPTS,
-    p_window_seconds: WINDOW_SECONDS
-  });
 
+  if (identityKeys.length === 0) {
+    throw new Error("Registration protection requires an email or profile identifier.");
+  }
+
+  const [ipLimit, identityLimit] = await Promise.all([
+    supabase.rpc("consume_registration_attempt", {
+      p_key_hashes: [hashedKey(`ip:${address}`)],
+      p_max_attempts: MAX_SHARED_IP_ATTEMPTS,
+      p_window_seconds: WINDOW_SECONDS
+    }),
+    supabase.rpc("consume_registration_attempt", {
+      p_key_hashes: identityKeys.map(hashedKey),
+      p_max_attempts: MAX_IDENTITY_ATTEMPTS,
+      p_window_seconds: WINDOW_SECONDS
+    })
+  ]);
+
+  const error = ipLimit.error ?? identityLimit.error;
   if (error) {
     throw new Error(`Registration protection failed: ${error.message}`);
   }
-  return data === true;
+
+  return ipLimit.data === true && identityLimit.data === true;
 };

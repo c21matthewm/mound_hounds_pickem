@@ -10,7 +10,11 @@ import {
 } from "@/components/ui-primitives";
 import { requireAppUser } from "@/lib/authenticated-user";
 import { getPreviousRaceResultsGate } from "@/lib/pickem-results-gate";
-import { nextPickWindow, pickWindowRoundLabel } from "@/lib/pick-windows";
+import {
+  nextPickWindow,
+  pickWindowOpensAt,
+  pickWindowRoundLabel
+} from "@/lib/pick-windows";
 import { queryStringParam } from "@/lib/query";
 import { raceContextLabel } from "@/lib/race-label";
 import {
@@ -34,6 +38,7 @@ type DriverRow = {
 };
 
 type RaceRow = {
+  field_frozen_at: string | null;
   id: number;
   pick_format?: RacePickFormat | null;
   pick_window_key: string;
@@ -73,7 +78,7 @@ type PageProps = {
 };
 
 const PICKEM_RACE_SELECT_FIELDS =
-  "id,race_name,pick_format,pick_window_key,title_image_url,qualifying_start_at,race_date,payout,season_id,round_number";
+  "id,race_name,pick_format,pick_window_key,title_image_url,qualifying_start_at,race_date,payout,season_id,round_number,field_frozen_at";
 
 const formatRaceDate = (value: string): string =>
   formatLeagueDateTime(value, { dateStyle: "full", timeStyle: "short" });
@@ -149,6 +154,33 @@ export default async function PicksPage({ searchParams }: PageProps) {
           {profile.role === "admin"
             ? " Add the next race from the admin dashboard."
             : " The league administrator will post the next race when it is ready."}
+        </CompactNotice>
+        <ActionLink className="mt-4 w-fit" href="/dashboard" variant="secondary">
+          Back to dashboard
+        </ActionLink>
+      </AuthenticatedPageShell>
+    );
+  }
+
+  const pickOpenAt = pickWindowOpensAt(raceRows ?? [], pickWindow);
+  if (pickOpenAt && Date.parse(pickOpenAt) > now.getTime()) {
+    const openingRace = pickWindow[0];
+    return (
+      <AuthenticatedPageShell
+        description={`${raceContextLabel({
+          roundNumber: openingRace.round_number,
+          seasonYear: activeSeason.seasonYear
+        })} · ${openingRace.race_name}`}
+        eyebrow="Race Picks"
+        maxWidth="max-w-4xl"
+        title="Pick'em Form"
+      >
+        <CompactNotice className="mt-5" tone="info">
+          <h2 className="font-semibold text-slate-950">Opening-round picks are scheduled</h2>
+          <p className="mt-1 text-sm leading-6">
+            The form opens six days before qualifying, on {formatRaceDate(pickOpenAt)}. Your
+            season registration is already confirmed.
+          </p>
         </CompactNotice>
         <ActionLink className="mt-4 w-fit" href="/dashboard" variant="secondary">
           Back to dashboard

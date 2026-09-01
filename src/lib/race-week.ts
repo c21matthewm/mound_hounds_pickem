@@ -1,11 +1,11 @@
 import "server-only";
 
-import type { SupabaseClient } from "@supabase/supabase-js";
+import type { AppSupabaseClient } from "@/lib/supabase/types";
 import type { LeagueSeason } from "@/lib/seasons";
 import type { SeasonParticipation } from "@/lib/season-participation";
 import { isRegisteredForSeason } from "@/lib/season-participation";
 import { getPreviousRaceResultsGate } from "@/lib/pickem-results-gate";
-import { nextPickWindow } from "@/lib/pick-windows";
+import { nextPickWindow, pickWindowOpensAt } from "@/lib/pick-windows";
 import {
   pickLockAtForRace,
   type RacePickFormat
@@ -32,6 +32,7 @@ export type RaceWeekPick = {
 
 export type RaceWeekStatus =
   | "form_open"
+  | "form_pending"
   | "locked"
   | "no_race"
   | "no_season"
@@ -62,6 +63,7 @@ export type RaceWeekState = {
   isDoubleheader: boolean;
   pickByRaceId: Map<number, RaceWeekPick>;
   pickLockAt: string | null;
+  pickOpenAt: string | null;
   previousResultsBlocked: boolean;
   races: RaceWeekRace[];
   savedRaceCount: number;
@@ -72,7 +74,7 @@ type LoadRaceWeekStateInput = {
   activeSeason: LeagueSeason | null;
   isAdmin: boolean;
   participation: SeasonParticipation | null;
-  supabase: SupabaseClient;
+  supabase: AppSupabaseClient;
   userId: string;
   now?: Date;
 };
@@ -87,9 +89,11 @@ const actionForState = ({
   currentRace,
   isAdmin,
   isDoubleheader,
+  picksNotOpen,
   picksLocked,
   previousResultsMessage,
   registered,
+  seasonRaceCount,
   savedRaceCount,
   windowComplete,
   windowLength
@@ -98,9 +102,11 @@ const actionForState = ({
   currentRace: RaceWeekRace | null;
   isAdmin: boolean;
   isDoubleheader: boolean;
+  picksNotOpen: boolean;
   picksLocked: boolean;
   previousResultsMessage: string | null;
   registered: boolean;
+  seasonRaceCount: number;
   savedRaceCount: number;
   windowComplete: boolean;
   windowLength: number;
@@ -128,6 +134,17 @@ const actionForState = ({
   }
 
   if (!currentRace) {
+    if (seasonRaceCount === 0) {
+      return {
+        body: `Registration is open. The league administrator will post the first ${activeSeason.seasonYear} race when the schedule is ready.`,
+        href: "/leaderboard?tab=hall",
+        label: "View league history",
+        status: "no_race",
+        statusLabel: "Schedule Pending",
+        title: "First race coming soon"
+      };
+    }
+
     return {
       body: `No upcoming race is scheduled for the ${activeSeason.seasonYear} season.`,
       href: "/leaderboard",
@@ -135,6 +152,17 @@ const actionForState = ({
       status: "no_race",
       statusLabel: "Season Complete",
       title: "No upcoming race"
+    };
+  }
+
+  if (picksNotOpen) {
+    return {
+      body: "Your season registration is complete. The opening-round form becomes available six days before qualifying.",
+      href: "/picks",
+      label: "View race",
+      status: "form_pending",
+      statusLabel: "Scheduled",
+      title: "Picks open soon"
     };
   }
 
@@ -202,9 +230,11 @@ export async function loadRaceWeekState({
         currentRace: null,
         isAdmin,
         isDoubleheader: false,
+        picksNotOpen: false,
         picksLocked: false,
         previousResultsMessage: null,
         registered: false,
+        seasonRaceCount: 0,
         savedRaceCount: 0,
         windowComplete: false,
         windowLength: 0
@@ -214,6 +244,7 @@ export async function loadRaceWeekState({
       isDoubleheader: false,
       pickByRaceId: new Map(),
       pickLockAt: null,
+      pickOpenAt: null,
       previousResultsBlocked: false,
       races: [],
       savedRaceCount: 0,
@@ -234,6 +265,10 @@ export async function loadRaceWeekState({
   }
 
   const races = nextPickWindow(raceRows ?? [], now);
+  const pickOpenAt = pickWindowOpensAt(raceRows ?? [], races);
+  const picksNotOpen = Boolean(
+    pickOpenAt && Date.parse(pickOpenAt) > now.getTime()
+  );
   const { data: pickRows, error: picksError } = races.length > 0
     ? await supabase
         .from("picks")
@@ -299,9 +334,11 @@ export async function loadRaceWeekState({
       currentRace,
       isAdmin,
       isDoubleheader,
+      picksNotOpen,
       picksLocked,
       previousResultsMessage,
       registered,
+      seasonRaceCount: (raceRows ?? []).length,
       savedRaceCount,
       windowComplete,
       windowLength: races.length
@@ -311,6 +348,7 @@ export async function loadRaceWeekState({
     isDoubleheader,
     pickByRaceId,
     pickLockAt,
+    pickOpenAt,
     previousResultsBlocked: previousResultsMessage !== null,
     races,
     savedRaceCount,

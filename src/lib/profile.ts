@@ -2,8 +2,6 @@ export type ProfileRow = {
   full_name: string | null;
   id: string;
   is_active?: boolean;
-  phone_carrier: string | null;
-  phone_number: string | null;
   role: "admin" | "participant";
   team_name: string | null;
 };

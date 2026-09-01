@@ -29,7 +29,7 @@ const TEST_FLOW_PREFIX = "[TEST FLOW ";
 export async function resolveAppErrorAction(formData: FormData) {
   const eventId = parsePositiveInteger(asText(formData.get("event_id")));
   if (!eventId) {
-    adminRedirect("error", "Select a valid application error.", "health");
+    return adminRedirect("error", "Select a valid application error.", "health");
   }
 
   const { supabase, user } = await requireAdmin();
@@ -70,7 +70,7 @@ export async function retryFailedPickRemindersAction(formData: FormData) {
   const reminderType = asText(formData.get("reminder_type"));
 
   if (!raceId || !["2d", "4h"].includes(reminderType)) {
-    adminRedirect("error", "Select a valid reminder queue before retrying.", "health");
+    return adminRedirect("error", "Select a valid reminder queue before retrying.", "health");
   }
 
   const { data: race, error: raceError } = await supabase
@@ -217,7 +217,7 @@ export async function updateFeedbackStatusAction(formData: FormData) {
   };
 
   if (!feedbackId || !["new", "in_review", "resolved"].includes(status)) {
-    redirectWithFeedbackState("error", "Select a valid feedback status.");
+    return redirectWithFeedbackState("error", "Select a valid feedback status.");
   }
 
   const { data: existing, error: existingError } = await supabase

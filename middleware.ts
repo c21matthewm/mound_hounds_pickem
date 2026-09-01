@@ -1,8 +1,9 @@
 import { createServerClient } from "@supabase/ssr";
 import { type NextRequest, NextResponse } from "next/server";
+import type { Database } from "./src/lib/supabase/database.types";
 import { getSupabaseEnv } from "./src/lib/supabase/env";
 
-const AUTH_ROUTE_PREFIXES = ["/login", "/signup"];
+const AUTH_ROUTE_PREFIXES = ["/login", "/resend-confirmation", "/signup"];
 const PROTECTED_ROUTE_PREFIXES = [
   "/dashboard",
   "/onboarding",
@@ -37,7 +38,7 @@ export async function middleware(request: NextRequest) {
     request
   });
 
-  const supabase = createServerClient(url, anonKey, {
+  const supabase = createServerClient<Database>(url, anonKey, {
     cookies: {
       getAll() {
         return request.cookies.getAll();

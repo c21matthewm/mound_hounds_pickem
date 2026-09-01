@@ -1,4 +1,4 @@
-import type { SupabaseClient } from "@supabase/supabase-js";
+import type { AppSupabaseClient } from "@/lib/supabase/types";
 
 export type SeasonParticipationStatus = "declined" | "registered";
 
@@ -19,7 +19,7 @@ type SeasonParticipationRow = {
 };
 
 export async function loadSeasonParticipation(
-  supabase: SupabaseClient,
+  supabase: AppSupabaseClient,
   seasonId: number,
   profileId: string
 ): Promise<SeasonParticipation | null> {

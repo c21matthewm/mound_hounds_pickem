@@ -1,6 +1,7 @@
 import "server-only";
 
 import { createClient } from "@supabase/supabase-js";
+import type { Database } from "./database.types";
 import { getSupabaseEnv } from "./env";
 
 export function createServiceRoleSupabaseClient() {
@@ -13,7 +14,7 @@ export function createServiceRoleSupabaseClient() {
     );
   }
 
-  return createClient(url, serviceRoleKey, {
+  return createClient<Database>(url, serviceRoleKey, {
     auth: {
       autoRefreshToken: false,
       persistSession: false

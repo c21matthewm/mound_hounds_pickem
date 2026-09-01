@@ -52,6 +52,12 @@ describe("application error safety", () => {
         "Try again."
       )
     ).toBe("Picks are unavailable until Music City Grand Prix results are published.");
+    expect(
+      participantSafeErrorMessage(
+        "The opening race pick form opens six days before qualifying.",
+        "Try again."
+      )
+    ).toBe("The opening race pick form opens six days before qualifying.");
     expect(participantSafeErrorMessage("database password=secret", "Try again.")).toBe(
       "Try again."
     );

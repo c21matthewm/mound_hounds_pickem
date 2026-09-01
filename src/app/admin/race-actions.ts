@@ -64,7 +64,7 @@ export async function correctPickWindowQualifyingStartAction(formData: FormData)
     asText(formData.get("confirm_schedule_correction")) === "on";
 
   if (!raceId || !qualifyingStartInput) {
-    adminMutationRedirect(
+    return adminMutationRedirect(
       "error",
       "Select a race and corrected qualifying start.",
       "races"
@@ -80,7 +80,7 @@ export async function correctPickWindowQualifyingStartAction(formData: FormData)
 
   const qualifyingStartAt = parseLeagueDateTimeLocalInput(qualifyingStartInput);
   if (!qualifyingStartAt || Date.parse(qualifyingStartAt) <= Date.now()) {
-    adminMutationRedirect(
+    return adminMutationRedirect(
       "error",
       "The corrected qualifying start must be a valid future Indianapolis time.",
       "races"
@@ -145,7 +145,7 @@ export async function createRaceAction(formData: FormData) {
   const qualifyingStartAt = parseLeagueDateTimeLocalInput(qualifyingStartInput);
 
   if (!raceName || payoutValue === null || !roundNumber || !seasonId) {
-    redirectWithTab(
+    return redirectWithTab(
       "error",
       "Season, round, race name, qualifying start, race start, and payout are required."
     );
@@ -322,7 +322,7 @@ export async function createRaceAction(formData: FormData) {
 
   const insertedRaceId = insertedRace?.id;
   if (!insertedRaceId) {
-    redirectWithTab("error", "Race was created but no id was returned.");
+    return redirectWithTab("error", "Race was created but no id was returned.");
   }
 
   if (titleImageFile) {
@@ -404,7 +404,7 @@ export async function updateRaceAction(formData: FormData) {
     asText(formData.get("allow_schedule_correction")) === "on";
 
   if (!raceId || !raceName || payoutValue === null || !roundNumber || !seasonId) {
-    redirectWithTab(
+    return redirectWithTab(
       "error",
       "Race id, season, round, race name, qualifying start, race start, and payout are required."
     );
@@ -691,7 +691,11 @@ export async function setRacePickWindowAction(formData: FormData) {
   const partnerId = parsePositiveInteger(asText(formData.get("pick_window_partner_id")));
 
   if (!raceId) {
-    adminMutationRedirect("error", "Select a race before changing its shared deadline.", "races");
+    return adminMutationRedirect(
+      "error",
+      "Select a race before changing its shared deadline.",
+      "races"
+    );
   }
 
   const raceFields =
@@ -749,7 +753,7 @@ export async function setRacePickWindowAction(formData: FormData) {
   const currentPartner = (currentWindow ?? []).find((windowRace) => windowRace.id !== race.id);
   if (!partnerId) {
     if (!currentPartner) {
-      adminMutationRedirect(
+      return adminMutationRedirect(
         "message",
         `${race.race_name} already uses a standalone pick deadline.`,
         "races"
@@ -783,7 +787,7 @@ export async function setRacePickWindowAction(formData: FormData) {
     revalidatePath("/picks");
     revalidatePath("/dashboard");
     revalidatePath("/race-center");
-    adminMutationRedirect(
+    return adminMutationRedirect(
       "message",
       `${race.race_name} now uses a standalone pick deadline.`,
       "races"

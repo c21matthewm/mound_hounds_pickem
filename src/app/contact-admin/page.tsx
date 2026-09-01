@@ -4,10 +4,11 @@ import {
   SectionHeader
 } from "@/components/ui-primitives";
 import { requireAppUser } from "@/lib/authenticated-user";
+import { leagueAdminEmail } from "@/lib/league-contact";
 
 export default async function ContactAdminPage() {
   await requireAppUser({ requireSeasonDecision: true });
-  const adminEmail = process.env.LEAGUE_ADMIN_EMAIL ?? "indymoundhounds@gmail.com";
+  const adminEmail = leagueAdminEmail();
 
   return (
     <AuthenticatedPageShell

@@ -1,6 +1,5 @@
 import "server-only";
 
-import type { SupabaseClient } from "@supabase/supabase-js";
 import { unstable_cache } from "next/cache";
 import { createServiceRoleSupabaseClient } from "@/lib/supabase/service-role";
 import {
@@ -23,6 +22,8 @@ import {
 } from "@/lib/season-scoring-model";
 import { loadAllRows } from "@/lib/supabase/paginated-query";
 import { SCORING_CACHE_TAG } from "@/lib/scoring-cache";
+import type { Tables } from "@/lib/supabase/database.types";
+import type { AppSupabaseClient } from "@/lib/supabase/types";
 
 export type {
   LeaderboardRow,
@@ -33,66 +34,64 @@ export type {
   RaceBreakdownColumn
 } from "@/lib/season-scoring-model";
 
-type DriverRow = {
-  group_number: number;
-  id: number;
-};
+type DriverRow = Pick<Tables<"drivers">, "group_number" | "id">;
 
-type DriverNameRow = {
-  driver_name: string;
-  group_number: number;
-  id: number;
-};
+type DriverNameRow = Pick<
+  Tables<"drivers">,
+  "driver_name" | "group_number" | "id"
+>;
 
-type PickRow = {
-  average_speed: number;
-  driver_group1_id: number;
-  driver_group2_id: number;
-  driver_group3_id: number;
-  driver_group4_id: number;
-  driver_group5_id: number;
-  driver_group6_id: number;
-  driver_group7_id: number | null;
-  driver_group8_id: number | null;
-  race_id: number;
-  user_id: string;
-};
+type PickRow = Pick<
+  Tables<"picks">,
+  | "average_speed"
+  | "driver_group1_id"
+  | "driver_group2_id"
+  | "driver_group3_id"
+  | "driver_group4_id"
+  | "driver_group5_id"
+  | "driver_group6_id"
+  | "driver_group7_id"
+  | "driver_group8_id"
+  | "race_id"
+  | "user_id"
+>;
 
-type ProfileRow = {
-  full_name: string | null;
-  id: string;
-  is_active: boolean;
-  role: "admin" | "participant";
-  team_name: string;
-};
+type ProfileRow = Pick<
+  Tables<"profiles">,
+  "full_name" | "id" | "is_active" | "team_name"
+>;
 
-type SeasonParticipantRow = {
-  profile_id: string;
-};
+type SeasonParticipantRow = Pick<Tables<"season_participants">, "profile_id">;
 
-type RaceRow = {
-  id: number;
-  official_winning_average_speed: number | string | null;
+type RaceDatabaseRow = Pick<
+  Tables<"races">,
+  | "id"
+  | "official_winning_average_speed"
+  | "pick_format"
+  | "race_date"
+  | "race_name"
+  | "results_status"
+  | "round_number"
+  | "season_id"
+>;
+
+type RaceRow = Omit<RaceDatabaseRow, "pick_format" | "results_status"> & {
   pick_format: RacePickFormat;
-  race_date: string;
-  race_name: string;
-  round_number: number;
-  season_id: number;
   results_status: "draft" | "published";
 };
 
-type ResultRow = {
-  driver_id: number;
-  points: number;
-  race_id: number;
-};
+const toRaceRow = (race: RaceDatabaseRow): RaceRow => ({
+  ...race,
+  pick_format: normalizeRacePickFormat(race.pick_format),
+  results_status: race.results_status === "published" ? "published" : "draft"
+});
 
-type RaceDriverGroupRow = {
-  driver_id: number;
-  group_number: number;
-  qualifying_position?: number | null;
-  race_id: number;
-};
+type ResultRow = Pick<Tables<"results">, "driver_id" | "points" | "race_id">;
+
+type RaceDriverGroupRow = Pick<
+  Tables<"race_driver_groups">,
+  "driver_id" | "group_number" | "race_id"
+>;
 
 type Participant = {
   displayName: string;
@@ -101,7 +100,7 @@ type Participant = {
 };
 
 const loadRegisteredProfiles = async (
-  supabase: SupabaseClient,
+  supabase: AppSupabaseClient,
   seasonId: number
 ): Promise<ProfileRow[]> => {
   const registrations = await loadAllRows<SeasonParticipantRow>(
@@ -123,7 +122,7 @@ const loadRegisteredProfiles = async (
   return loadAllRows<ProfileRow>("registered profiles", (from, to) =>
     supabase
       .from("profiles")
-      .select("id,team_name,role,full_name,is_active")
+      .select("id,team_name,full_name,is_active")
       .in("id", profileIds)
       .eq("is_active", true)
       .order("team_name", { ascending: true })
@@ -172,29 +171,30 @@ const loadSeasonScoringModelUncached = async (
 ): Promise<SeasonScoringModel> => {
   const supabase = createServiceRoleSupabaseClient();
 
-  const [profiles, races, drivers] = await Promise.all([
-      loadRegisteredProfiles(supabase, seasonId),
-      loadAllRows<RaceRow>("published races", (from, to) =>
-        supabase
-          .from("races")
-          .select(
-            "id,race_name,pick_format,race_date,official_winning_average_speed,results_status,season_id,round_number"
-          )
-          .eq("is_archived", false)
-          .eq("results_status", "published")
-          .eq("season_id", seasonId)
-          .order("round_number", { ascending: true })
-          .order("id", { ascending: true })
-          .range(from, to)
-      ),
-      loadAllRows<DriverRow>("drivers", (from, to) =>
-        supabase
-          .from("drivers")
-          .select("id,group_number")
-          .order("id", { ascending: true })
-          .range(from, to)
-      )
-    ]);
+  const [profiles, raceDatabaseRows, drivers] = await Promise.all([
+    loadRegisteredProfiles(supabase, seasonId),
+    loadAllRows<RaceDatabaseRow>("published races", (from, to) =>
+      supabase
+        .from("races")
+        .select(
+          "id,race_name,pick_format,race_date,official_winning_average_speed,results_status,season_id,round_number"
+        )
+        .eq("is_archived", false)
+        .eq("results_status", "published")
+        .eq("season_id", seasonId)
+        .order("round_number", { ascending: true })
+        .order("id", { ascending: true })
+        .range(from, to)
+    ),
+    loadAllRows<DriverRow>("drivers", (from, to) =>
+      supabase
+        .from("drivers")
+        .select("id,group_number")
+        .order("id", { ascending: true })
+        .range(from, to)
+    )
+  ]);
+  const races = raceDatabaseRows.map(toRaceRow);
 
   const publishedRaceIds = races.map((race) => race.id);
   const [picks, results, raceDriverGroups]: [PickRow[], ResultRow[], RaceDriverGroupRow[]] =
@@ -278,20 +278,22 @@ async function buildPicksByRaceSnapshotUncached(
   const supabase = createServiceRoleSupabaseClient();
   const nowIso = new Date().toISOString();
 
-  const [profiles, seasonRaceRows, drivers] = await Promise.all([
+  const [profiles, seasonRaceDatabaseRows, drivers] = await Promise.all([
     loadRegisteredProfiles(supabase, seasonId),
-    loadAllRows<RaceRow & { qualifying_start_at: string }>("locked season races", (from, to) =>
-      supabase
-        .from("races")
-        .select(
-          "id,race_name,pick_format,race_date,qualifying_start_at,official_winning_average_speed,results_status,season_id,round_number"
-        )
-        .eq("is_archived", false)
-        .eq("season_id", seasonId)
-        .lte("qualifying_start_at", nowIso)
-        .order("round_number", { ascending: false })
-        .order("id", { ascending: false })
-        .range(from, to)
+    loadAllRows<RaceDatabaseRow & Pick<Tables<"races">, "qualifying_start_at">>(
+      "locked season races",
+      (from, to) =>
+        supabase
+          .from("races")
+          .select(
+            "id,race_name,pick_format,race_date,qualifying_start_at,official_winning_average_speed,results_status,season_id,round_number"
+          )
+          .eq("is_archived", false)
+          .eq("season_id", seasonId)
+          .lte("qualifying_start_at", nowIso)
+          .order("round_number", { ascending: false })
+          .order("id", { ascending: false })
+          .range(from, to)
     ),
     loadAllRows<DriverNameRow>("drivers", (from, to) =>
       supabase
@@ -302,7 +304,10 @@ async function buildPicksByRaceSnapshotUncached(
     )
   ]);
 
-  const raceRows = seasonRaceRows;
+  const raceRows = seasonRaceDatabaseRows.map((race) => ({
+    ...toRaceRow(race),
+    qualifying_start_at: race.qualifying_start_at
+  }));
 
   const participants: Participant[] = profiles
     .filter((profile) => typeof profile.team_name === "string" && profile.team_name.trim().length > 0)

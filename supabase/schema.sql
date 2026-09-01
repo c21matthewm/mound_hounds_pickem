@@ -20,8 +20,6 @@ create table if not exists public.profiles (
   id uuid primary key references auth.users(id) on delete cascade,
   full_name text check (full_name is null or length(trim(full_name)) between 1 and 100),
   team_name text not null unique check (length(trim(team_name)) between 1 and 100),
-  phone_number text,
-  phone_carrier text,
   role text not null default 'participant' check (role in ('admin', 'participant')),
   is_active boolean not null default true,
   created_at timestamptz not null default timezone('utc', now()),
@@ -186,7 +184,7 @@ create table if not exists public.pick_reminders (
   race_id bigint not null references public.races(id) on delete cascade,
   user_id uuid not null references public.profiles(id) on delete cascade,
   reminder_type text not null check (reminder_type in ('2d', '4h')),
-  channel text not null check (channel in ('email', 'sms')),
+  channel text not null check (channel = 'email'),
   recipient text not null,
   delivery_status text not null default 'pending' check (delivery_status in ('pending', 'sent', 'failed')),
   delivery_id text,
@@ -1813,5 +1811,7 @@ to authenticated;
 -- supabase/migrations/20260822_harden_pick_reminder_delivery.sql
 -- The two-stage email policy is maintained in:
 -- supabase/migrations/20260822_retire_five_day_pick_email.sql
+-- Registration-first season activation and the opening-round availability boundary are maintained in:
+-- supabase/migrations/20260831_harden_season_rollover_registration.sql
 -- Apply these migrations after this consolidated baseline in filename order. Keeping deployment
 -- migrations canonical prevents security, pick-window, and operations logic from diverging.

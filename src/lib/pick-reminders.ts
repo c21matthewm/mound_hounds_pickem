@@ -1,6 +1,6 @@
 import "server-only";
 
-import type { SupabaseClient } from "@supabase/supabase-js";
+import type { AppSupabaseClient } from "@/lib/supabase/types";
 import {
   buildPickReminderMessage,
   type PickReminderRace
@@ -24,15 +24,13 @@ import { loadActiveLeagueSeason } from "@/lib/seasons";
 import { canonicalSiteOrigin } from "@/lib/site-url";
 import { createServiceRoleSupabaseClient } from "@/lib/supabase/service-role";
 
-type ReminderChannel = "email" | "sms";
+type ReminderChannel = "email";
 
 type UpcomingRace = PickReminderRace;
 
 type ProfileForReminder = {
   full_name: string | null;
   id: string;
-  phone_carrier: string | null;
-  phone_number: string | null;
   team_name: string | null;
 };
 
@@ -64,64 +62,10 @@ type PickReminderSummary = {
     | "no_missing_participants"
     | "delivery_batch_processed";
   reminderType: ReminderType | null;
-  smsDeliveryEnabled: boolean;
-  smsFailed: number;
-  smsSent: number;
-  smsSkippedAlreadySent: number;
-  smsSkippedNoGatewayAddress: number;
-};
-
-const SMS_GATEWAY_DOMAIN_BY_CARRIER: Record<string, string | null> = {
-  att: "txt.att.net",
-  cricket: "sms.cricketwireless.net",
-  googlefi: "msg.fi.google.com",
-  other: null,
-  tmobile: "tmomail.net",
-  uscellular: "email.uscc.net",
-  verizon: "vtext.com"
-};
-
-const normalizePhoneToTenDigits = (raw: string | null): string | null => {
-  if (!raw) {
-    return null;
-  }
-
-  const digitsOnly = raw.replace(/\D/g, "");
-
-  if (digitsOnly.length === 10) {
-    return digitsOnly;
-  }
-
-  if (digitsOnly.length === 11 && digitsOnly.startsWith("1")) {
-    return digitsOnly.slice(1);
-  }
-
-  return null;
-};
-
-const toSmsGatewayAddress = (
-  phoneNumber: string | null,
-  carrier: string | null
-): string | null => {
-  if (!carrier) {
-    return null;
-  }
-
-  const normalizedPhone = normalizePhoneToTenDigits(phoneNumber);
-  if (!normalizedPhone) {
-    return null;
-  }
-
-  const gatewayDomain = SMS_GATEWAY_DOMAIN_BY_CARRIER[carrier];
-  if (!gatewayDomain) {
-    return null;
-  }
-
-  return `${normalizedPhone}@${gatewayDomain}`;
 };
 
 const loadAuthEmailsByUserId = async (
-  supabase: SupabaseClient,
+  supabase: AppSupabaseClient,
   userIds: string[]
 ): Promise<Map<string, string>> => {
   const targetIds = new Set(userIds);
@@ -165,7 +109,7 @@ const loadAuthEmailsByUserId = async (
 };
 
 const claimReminderSlot = async (
-  supabase: SupabaseClient,
+  supabase: AppSupabaseClient,
   raceId: number,
   userId: string,
   reminderType: ReminderType,
@@ -188,7 +132,7 @@ const claimReminderSlot = async (
 };
 
 const markReminderSent = async (
-  supabase: SupabaseClient,
+  supabase: AppSupabaseClient,
   reminderId: number,
   deliveryId: string | null
 ) => {
@@ -209,7 +153,7 @@ const markReminderSent = async (
 };
 
 const markReminderFailed = async (
-  supabase: SupabaseClient,
+  supabase: AppSupabaseClient,
   reminderId: number,
   reason: string
 ) => {
@@ -255,7 +199,7 @@ const reminderContextsMatch = (
 };
 
 const discardUnsentReminder = async (
-  supabase: SupabaseClient,
+  supabase: AppSupabaseClient,
   reminderId: number
 ): Promise<void> => {
   const { error } = await supabase
@@ -270,7 +214,7 @@ const discardUnsentReminder = async (
 };
 
 const loadFreshReminderContext = async (
-  supabase: SupabaseClient,
+  supabase: AppSupabaseClient,
   reminderId: number
 ): Promise<FreshReminderContext | null> => {
   const { data, error } = await supabase.rpc(
@@ -352,7 +296,6 @@ export async function sendDuePickReminders(): Promise<PickReminderSummary> {
   const supabase = createServiceRoleSupabaseClient();
   const now = new Date();
   const emailDeliveryEnabled = process.env.PICK_EMAILS_ENABLED?.trim().toLowerCase() === "true";
-  const smsDeliveryEnabled = process.env.REMINDER_SMS_ENABLED?.trim().toLowerCase() === "true";
   const emptySummary = (
     reason: PickReminderSummary["reason"],
     raceId: number | null = null,
@@ -374,12 +317,7 @@ export async function sendDuePickReminders(): Promise<PickReminderSummary> {
     raceName,
     reason,
     remainingDeliveries: 0,
-    reminderType,
-    smsDeliveryEnabled,
-    smsFailed: 0,
-    smsSent: 0,
-    smsSkippedAlreadySent: 0,
-    smsSkippedNoGatewayAddress: 0
+    reminderType
   });
 
   if (!emailDeliveryEnabled) {
@@ -477,7 +415,7 @@ export async function sendDuePickReminders(): Promise<PickReminderSummary> {
   const { data: participants, error: participantsError } = registeredProfileIds.length
     ? await supabase
         .from("profiles")
-        .select("id,full_name,team_name,phone_number,phone_carrier")
+        .select("id,full_name,team_name")
         .in("id", registeredProfileIds)
         .eq("is_active", true)
     : { data: [], error: null };
@@ -531,7 +469,6 @@ export async function sendDuePickReminders(): Promise<PickReminderSummary> {
     }
   >();
   let emailSkippedNoAddress = 0;
-  let smsSkippedNoGatewayAddress = 0;
 
   [...participantsMissingPicks]
     .sort((left, right) => left.id.localeCompare(right.id))
@@ -545,23 +482,6 @@ export async function sendDuePickReminders(): Promise<PickReminderSummary> {
         });
       } else {
         emailSkippedNoAddress += 1;
-      }
-
-      if (!smsDeliveryEnabled) {
-        return;
-      }
-      const smsAddress = toSmsGatewayAddress(
-        participant.phone_number,
-        participant.phone_carrier
-      );
-      if (smsAddress) {
-        desiredDeliveryByKey.set(`${participant.id}:sms`, {
-          channel: "sms",
-          participant,
-          recipient: smsAddress
-        });
-      } else {
-        smsSkippedNoGatewayAddress += 1;
       }
     });
 
@@ -641,11 +561,7 @@ export async function sendDuePickReminders(): Promise<PickReminderSummary> {
         emailFailed: 0,
         emailSent: 0,
         emailSkippedAlreadySent: 0,
-        emailSkippedNoAddress: 0,
-        smsFailed: 0,
-        smsSent: 0,
-        smsSkippedAlreadySent: 0,
-        smsSkippedNoGatewayAddress: 0
+        emailSkippedNoAddress: 0
       };
       const participant = participantById.get(queueRow.user_id);
       const desiredDelivery = desiredDeliveryByKey.get(
@@ -655,83 +571,21 @@ export async function sendDuePickReminders(): Promise<PickReminderSummary> {
         return counts;
       }
       const recipient = desiredDelivery.recipient;
-
-      if (queueRow.channel === "email") {
-        let reminderId: number | null = null;
-        try {
-          reminderId = await claimReminderSlot(
-            supabase,
-            upcomingRace.id,
-            participant.id,
-            reminderWindow.key,
-            "email",
-            recipient
-          );
-
-          if (!reminderId) {
-            counts.emailSkippedAlreadySent = 1;
-          } else {
-            const claimedReminderId = reminderId;
-            const freshContext = await loadFreshReminderContext(supabase, claimedReminderId);
-            if (!freshContext) {
-              await discardUnsentReminder(supabase, claimedReminderId);
-              return counts;
-            }
-            const message = buildPickReminderMessage({
-              missingRaces: freshContext.missingRaces,
-              races: freshContext.races,
-              recipientName: participant.full_name,
-              reminderWindow,
-              siteUrl
-            });
-            const sendResult = await sendResendEmail({
-              beforeSend: async () =>
-                reminderContextsMatch(
-                  freshContext,
-                  await loadFreshReminderContext(supabase, claimedReminderId)
-                ),
-              html: message.html,
-              idempotencyKey: `pick-${upcomingRace.id}-${participant.id}-${reminderWindow.key}-email`,
-              subject: message.subject,
-              text: message.text,
-              to: recipient
-            });
-            if (sendResult.skipped) {
-              await discardUnsentReminder(supabase, claimedReminderId);
-              return counts;
-            }
-            await markReminderSent(supabase, claimedReminderId, sendResult.id);
-            counts.emailSent = 1;
-          }
-        } catch (error) {
-          const reason =
-            error instanceof Error ? error.message : "Unknown email reminder send failure.";
-          counts.emailFailed = 1;
-          console.error(`[pick-reminders] Email failed for profile ${participant.id}: ${reason}`);
-          if (reminderId) {
-            await markReminderFailed(supabase, reminderId, reason).catch((markError) => {
-              console.error("[pick-reminders] Failed recording email error:", markError);
-            });
-          }
-        }
-        return counts;
-      }
-
-      let smsReminderId: number | null = null;
+      let reminderId: number | null = null;
       try {
-        smsReminderId = await claimReminderSlot(
+        reminderId = await claimReminderSlot(
           supabase,
           upcomingRace.id,
           participant.id,
           reminderWindow.key,
-          "sms",
+          "email",
           recipient
         );
 
-        if (!smsReminderId) {
-          counts.smsSkippedAlreadySent = 1;
+        if (!reminderId) {
+          counts.emailSkippedAlreadySent = 1;
         } else {
-          const claimedReminderId = smsReminderId;
+          const claimedReminderId = reminderId;
           const freshContext = await loadFreshReminderContext(supabase, claimedReminderId);
           if (!freshContext) {
             await discardUnsentReminder(supabase, claimedReminderId);
@@ -750,9 +604,10 @@ export async function sendDuePickReminders(): Promise<PickReminderSummary> {
                 freshContext,
                 await loadFreshReminderContext(supabase, claimedReminderId)
               ),
-            idempotencyKey: `pick-${upcomingRace.id}-${participant.id}-${reminderWindow.key}-sms`,
+            html: message.html,
+            idempotencyKey: `pick-${upcomingRace.id}-${participant.id}-${reminderWindow.key}-email`,
             subject: message.subject,
-            text: message.smsText,
+            text: message.text,
             to: recipient
           });
           if (sendResult.skipped) {
@@ -760,15 +615,16 @@ export async function sendDuePickReminders(): Promise<PickReminderSummary> {
             return counts;
           }
           await markReminderSent(supabase, claimedReminderId, sendResult.id);
-          counts.smsSent = 1;
+          counts.emailSent = 1;
         }
       } catch (error) {
-        const reason = error instanceof Error ? error.message : "Unknown SMS reminder send failure.";
-        counts.smsFailed = 1;
-        console.error(`[pick-reminders] SMS failed for profile ${participant.id}: ${reason}`);
-        if (smsReminderId) {
-          await markReminderFailed(supabase, smsReminderId, reason).catch((markError) => {
-            console.error("[pick-reminders] Failed recording SMS error:", markError);
+        const reason =
+          error instanceof Error ? error.message : "Unknown email reminder send failure.";
+        counts.emailFailed = 1;
+        console.error(`[pick-reminders] Email failed for profile ${participant.id}: ${reason}`);
+        if (reminderId) {
+          await markReminderFailed(supabase, reminderId, reason).catch((markError) => {
+            console.error("[pick-reminders] Failed recording email error:", markError);
           });
         }
       }
@@ -782,22 +638,13 @@ export async function sendDuePickReminders(): Promise<PickReminderSummary> {
       emailFailed: sum.emailFailed + row.emailFailed,
       emailSent: sum.emailSent + row.emailSent,
       emailSkippedAlreadySent: sum.emailSkippedAlreadySent + row.emailSkippedAlreadySent,
-      emailSkippedNoAddress: sum.emailSkippedNoAddress + row.emailSkippedNoAddress,
-      smsFailed: sum.smsFailed + row.smsFailed,
-      smsSent: sum.smsSent + row.smsSent,
-      smsSkippedAlreadySent: sum.smsSkippedAlreadySent + row.smsSkippedAlreadySent,
-      smsSkippedNoGatewayAddress:
-        sum.smsSkippedNoGatewayAddress + row.smsSkippedNoGatewayAddress
+      emailSkippedNoAddress: sum.emailSkippedNoAddress + row.emailSkippedNoAddress
     }),
     {
       emailFailed: 0,
       emailSent: 0,
       emailSkippedAlreadySent: 0,
-      emailSkippedNoAddress: 0,
-      smsFailed: 0,
-      smsSent: 0,
-      smsSkippedAlreadySent: 0,
-      smsSkippedNoGatewayAddress: 0
+      emailSkippedNoAddress: 0
     }
   );
 
@@ -833,14 +680,6 @@ export async function sendDuePickReminders(): Promise<PickReminderSummary> {
     raceName: upcomingRaceName,
     reason: "delivery_batch_processed",
     remainingDeliveries: queueSummary.pending + queueSummary.retrying,
-    reminderType: reminderWindow.key,
-    smsDeliveryEnabled,
-    smsSkippedAlreadySent:
-      totals.smsSkippedAlreadySent +
-      queueRows.filter(
-        (row) => row.channel === "sms" && row.delivery_status === "sent"
-      ).length,
-    smsSkippedNoGatewayAddress:
-      totals.smsSkippedNoGatewayAddress + smsSkippedNoGatewayAddress
+    reminderType: reminderWindow.key
   };
 }

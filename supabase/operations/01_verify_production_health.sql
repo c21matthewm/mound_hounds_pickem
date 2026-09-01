@@ -5,7 +5,7 @@ with checks as (
     'schema'::text as check_group,
     'schema_version'::text as check_name,
     case
-      when metadata.value = '20260822_reminder_delivery_v1' then 'PASS'
+      when metadata.value = '20260831_email_only_notifications_v1' then 'PASS'
       else 'WARN'
     end as status,
     coalesce(metadata.value, 'missing') as details
@@ -43,6 +43,37 @@ with checks as (
   union all
 
   select
+    'privacy',
+    'email_only_participant_data',
+    case
+      when count(*) = 0 then 'PASS'
+      else 'WARN'
+    end,
+    format('legacy_profile_columns=%s', count(*))
+  from information_schema.columns column_info
+  where column_info.table_schema = 'public'
+    and column_info.table_name = 'profiles'
+    and column_info.column_name in ('phone_number', 'phone_carrier')
+
+  union all
+
+  select
+    'reminders',
+    'email_only_delivery',
+    case
+      when count(*) filter (where reminder.channel <> 'email') = 0 then 'PASS'
+      else 'WARN'
+    end,
+    format(
+      'email_rows=%s, non_email_rows=%s',
+      count(*) filter (where reminder.channel = 'email'),
+      count(*) filter (where reminder.channel <> 'email')
+    )
+  from public.pick_reminders reminder
+
+  union all
+
+  select
     'function',
     required.name,
     case when to_regprocedure(required.signature) is not null then 'PASS' else 'WARN' end,
@@ -58,6 +89,7 @@ with checks as (
       ('reminder_delivery_claim', 'public.claim_pick_reminder_delivery(bigint,uuid,text,text,text)'),
       ('reminder_delivery_validation', 'public.validate_pick_reminder_delivery(bigint)'),
       ('qualifying_schedule_correction', 'public.correct_pick_window_qualifying_start(bigint,timestamptz)'),
+      ('opening_pick_window_schedule', 'public.pick_window_opens_at(bigint)'),
       ('registration_rate_limit', 'public.consume_registration_attempt(text[],integer,integer)'),
       ('job_heartbeat_start', 'public.start_job_status(text)'),
       ('job_heartbeat_finish', 'public.finish_job_status(text,uuid,text,jsonb,text,boolean)'),

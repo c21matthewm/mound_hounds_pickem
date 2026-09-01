@@ -1,6 +1,6 @@
 import "server-only";
 
-import type { SupabaseClient } from "@supabase/supabase-js";
+import type { AppSupabaseClient } from "@/lib/supabase/types";
 import type {
   DriverRow,
   PickSummaryRow,
@@ -44,7 +44,7 @@ export const formatOptionalDecimal = (value: number | null, digits = 3): string 
 export const ADMIN_RACE_FIELDS =
   "id,race_name,pick_format,pick_window_key,title_image_url,qualifying_start_at,race_date,payout,official_winning_average_speed,results_status,results_published_at,is_archived,archived_at,winner_profile_id,winner_source,winner_is_manual_override,winner_auto_eligible_at,winner_set_at,season_id,round_number,field_frozen_at";
 
-export const loadAdminRaces = async (supabase: SupabaseClient, seasonId: number) =>
+export const loadAdminRaces = async (supabase: AppSupabaseClient, seasonId: number) =>
   supabase
     .from("races")
     .select(ADMIN_RACE_FIELDS)
@@ -52,7 +52,7 @@ export const loadAdminRaces = async (supabase: SupabaseClient, seasonId: number)
     .order("race_date", { ascending: false });
 
 export const loadAdminFeedback = (
-  supabase: SupabaseClient,
+  supabase: AppSupabaseClient,
   status: string,
   page: number,
   pageSize: number
@@ -75,7 +75,7 @@ export const loadAdminFeedback = (
 };
 
 export const loadAdminResultRaces = async (
-  supabase: SupabaseClient,
+  supabase: AppSupabaseClient,
   seasonId: number
 ) =>
   supabase
@@ -100,7 +100,7 @@ export const paginatedAdminLoad = async <T,>(
   }
 };
 
-export const loadRaceDriverGroups = async (supabase: SupabaseClient, raceIds: number[]) =>
+export const loadRaceDriverGroups = async (supabase: AppSupabaseClient, raceIds: number[]) =>
   paginatedAdminLoad<RaceDriverGroupRow>("race driver groups", (from, to) =>
     supabase
       .from("race_driver_groups")
@@ -111,7 +111,7 @@ export const loadRaceDriverGroups = async (supabase: SupabaseClient, raceIds: nu
       .range(from, to)
   );
 
-export const loadAdminPicks = async (supabase: SupabaseClient, raceIds: number[]) =>
+export const loadAdminPicks = async (supabase: AppSupabaseClient, raceIds: number[]) =>
   paginatedAdminLoad<PickSummaryRow>("admin picks", (from, to) =>
     supabase
       .from("picks")

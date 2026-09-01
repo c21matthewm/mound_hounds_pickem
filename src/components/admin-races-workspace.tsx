@@ -118,7 +118,7 @@ export function AdminRacesWorkspace({
 
         <Disclosure
           className="mt-5 bg-slate-50"
-          description="Create seasons, configure invite codes and rules, then activate a prepared season."
+          description="Create seasons, configure the invite code and opening roster, then activate registration. Rules and races can be added afterward."
           summary={`Season management · ${activeSeason ? `${activeSeason.season_year} active` : "No active season"}`}
         >
             <div className="grid gap-2">
@@ -146,7 +146,7 @@ export function AdminRacesWorkspace({
                         <input name="season_id" type="hidden" value={season.id} />
                         <label className="block">
                           <span className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-slate-500">
-                            Rules PDF path / URL
+                            Rules PDF path / URL (optional)
                           </span>
                           <input
                             className="w-52 rounded-md ui-control-border border border-slate-300 px-2.5 py-2 text-xs"

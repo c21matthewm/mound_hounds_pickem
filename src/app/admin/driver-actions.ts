@@ -99,7 +99,7 @@ export async function createDriverAction(formData: FormData) {
 
   const insertedDriverId = insertedDriver?.id;
   if (!insertedDriverId) {
-    redirectWithTab("error", "Driver was created but no id was returned.");
+    return redirectWithTab("error", "Driver was created but no id was returned.");
   }
 
   if (imageFile) {
@@ -456,7 +456,10 @@ export async function importChampionshipStandingsAction(formData: FormData) {
   const seasonId = parsePositiveInteger(asText(formData.get("season_id")));
 
   if (!rawPaste || !seasonId) {
-    redirectWithTab("error", "Select a season and paste the standings table before importing.");
+    return redirectWithTab(
+      "error",
+      "Select a season and paste the standings table before importing."
+    );
   }
 
   const parsed = parseChampionshipStandingsPaste(rawPaste);

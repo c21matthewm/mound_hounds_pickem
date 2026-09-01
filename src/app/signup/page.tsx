@@ -2,7 +2,9 @@ import Link from "next/link";
 import { queryStringParam } from "@/lib/query";
 import { signUpAction } from "@/app/actions/auth";
 import { AuthFlowShell, AuthFormPanel } from "@/components/auth-flow-shell";
+import { SeasonInviteCodeHelp } from "@/components/season-invite-code-help";
 import { loadActiveLeagueSeason } from "@/lib/seasons";
+import { leagueAdminEmail } from "@/lib/league-contact";
 import { createServiceRoleSupabaseClient } from "@/lib/supabase/service-role";
 import { SubmitButton } from "@/components/submit-button";
 import {
@@ -22,12 +24,13 @@ export default async function SignupPage({ searchParams }: PageProps) {
   const message = queryStringParam(params.message);
   const activeSeason = await loadActiveLeagueSeason(createServiceRoleSupabaseClient());
   const registrationOpen = Boolean(activeSeason?.registrationCodeConfiguredAt);
+  const adminEmail = leagueAdminEmail();
 
   return (
     <AuthFlowShell
       description={
         registrationOpen && activeSeason
-          ? `Create your permanent account and join the ${activeSeason.seasonYear} league season.`
+          ? "Create your permanent account and join the current league season."
           : activeSeason
             ? "Registration will open when the league administrator finishes the season setup."
             : "Account registration will open when the next league season is active."
@@ -95,6 +98,13 @@ export default async function SignupPage({ searchParams }: PageProps) {
           />
         </FormField>
 
+        {activeSeason ? (
+          <SeasonInviteCodeHelp
+            adminEmail={adminEmail}
+            seasonYear={activeSeason.seasonYear}
+          />
+        ) : null}
+
         <FormField label="Email">
           <input
             required
@@ -134,6 +144,16 @@ export default async function SignupPage({ searchParams }: PageProps) {
         >
           Create account
         </SubmitButton>
+
+        <p className="text-center text-xs text-slate-600">
+          Already created your account but didn&apos;t receive the confirmation email?{" "}
+          <Link
+            className="font-semibold text-blue-700 underline"
+            href="/resend-confirmation"
+          >
+            Resend it
+          </Link>
+        </p>
         </form>
       </AuthFormPanel>
     </AuthFlowShell>
