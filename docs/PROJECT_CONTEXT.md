@@ -1,6 +1,6 @@
 # Mound Hounds Pick'em Project Context
 
-Last reviewed: 2026-08-28
+Last reviewed: 2026-09-06
 
 This is the working-memory companion to `README.md`. Keep the README focused on setup and user-facing operation; keep this file updated whenever routes, schema, scoring, admin workflows, auth behavior, or testing strategy changes.
 
@@ -27,6 +27,7 @@ Mound Hounds Pick'em is a private INDYCAR fantasy league app. Participants submi
 - Season invite-code forms link directly to `LEAGUE_ADMIN_EMAIL` when a participant needs the code.
 - `/race-center` redirects to `/dashboard` for old bookmarks.
 - `/dashboard` is the single race-week home for the next action, race context, compact quick links, and admin readiness. Profile details and sign-out live on `/profile`; the dashboard intentionally does not duplicate latest-race results.
+- After the final scheduled race starts, the dashboard shows "Awaiting final results" until every non-archived race in the active season has published results. Participants can view current standings; admins can open the first unpublished race. Only a fully published season shows "Season Complete" and "View final standings". An empty schedule remains "Schedule Pending".
 - Authenticated pages share Dashboard, Pick'em Form, and Standings navigation: a compact header nav on desktop/tablet and a bottom dock on mobile.
 - `/more` keeps secondary mobile navigation for rules, feedback, contact, and admin out of the primary race-week view.
 - `/picks` shows the active race, pick lock state, saved submission snapshot, driver groups, average-speed input, local draft recovery, and an unsaved-change guard. Standard races show six groups; Indy 500 races show eight groups after qualifying order import.
@@ -62,6 +63,15 @@ Indy 500 features require `supabase/migrations/20260528_add_indy_500_pick_format
 `npm run db:types`. All browser, server, middleware, and service-role clients use that contract.
 Run `npm run verify:release` before deployment to detect schema/type drift.
 
+Portable recovery files require
+`supabase/migrations/20260904_fix_portable_season_backups.sql`. The expected schema contract is
+`20260904_portable_season_backups_v2`. The admin-only `export_season_restore_point` RPC returns a
+version-2 envelope containing exact `snapshotText`; JavaScript must preserve this string rather
+than parsing/re-serializing its numbers. `import_season_restore_point_v2` verifies the transported
+bytes and delegates to the existing transactional import with a canonical internal checksum.
+Stored points remain version 1. Legacy files retain strict checksum validation; mismatches require
+a fresh export from the original stored point rather than silently bypassing validation.
+
 - `profiles`: permanent Supabase auth identities with full name, unique team name, role, and account eligibility.
 - `league_seasons`: explicit upcoming/active/completed seasons. Only one can be active.
 - `season_participants`: per-season self-registration decisions, independent from permanent profiles.
@@ -71,6 +81,7 @@ Run `npm run verify:release` before deployment to detect schema/type drift.
 - `picks`: one authoritative current row per user/race with average speed, six required standard driver IDs, and two nullable Indy-only driver IDs. Each successful resubmission atomically replaces this scoring row.
 - `pick_submission_versions`: append-only audit history for successful pick saves; these rows are not used directly for scoring.
 - `app_error_events`: admin-only, sanitized application incidents. Repeated errors are grouped; resolved incidents expire after 30 days and total retained incidents are capped at 500.
+- Shared error handling recognizes Supabase/PostgREST objects' string `message` fields as well as ordinary errors and strings. Participant messages still use an explicit allowlist, technical summaries are redacted, and database `details`/`hint` fields are not included.
 - `results`: official driver points per race.
 - `race_driver_groups`: race-specific group snapshot used to keep scoring stable after standings/groups refresh; for Indy 500 it stores qualifying position and groups 1-8.
 - `feedback_items`: participant feedback submissions with new/in-review/resolved workflow state.
@@ -78,6 +89,7 @@ Run `npm run verify:release` before deployment to detect schema/type drift.
 - `app_metadata`: small deployment contract table; the admin health page checks its schema version.
 - `admin_audit_events` and `job_runs`: admin mutation history and scheduled-job heartbeat/failure records.
 - `hall_of_fame_seasons` and `hall_of_fame_entries`: immutable final standings snapshots independent of live profiles, races, and picks.
+- Legacy spreadsheet seasons can use standalone Hall of Fame headers and final rank/team/points entries with an empty `race_breakdown`; historical accounts and race records are not required. Hall of Fame finalization archives the current standings but leaves the season active until the next season is activated.
 - `season_restore_points`: immutable, checksummed active-season snapshots used by guided backup and recovery.
 
 Key database triggers:
@@ -113,6 +125,7 @@ Key database triggers:
 - The Race Results tab has an Indianapolis 500 qualifying-order importer that expects positions 1-33, maps drivers by normalized name, and writes `race_driver_groups.qualifying_position` plus derived groups.
 - Manual entries save draft rows and temporarily remove a corrected race from published scoring. Draft publication requires every snapshotted driver plus official winning average speed.
 - Bulk import uses `publish_race_results()` to publish a unique, contiguous official finishing order atomically. Standard-race drivers in the pickable snapshot but absent from that order are stored as zero-point nonstarters; Indianapolis still requires all 33 drivers. The server validates field membership even if client preview is bypassed.
+- Imported winning average speed must come from exactly one first-place row and be greater than 0 and no more than 300 MPH. Missing, malformed, or ambiguous winning speeds block preview and publication; another driver's speed is never substituted.
 - Publication refreshes championship points from published races only, updates groups, revalidates app paths, and recalculates the fantasy winner immediately. A pending timestamp and hourly cron provide fallback recovery after a temporary calculation failure.
 - Race winner can be manually overridden or auto-calculated with `src/lib/fantasy-winner.ts`.
 - Auto-calculation ranks the full participant/admin field using the same weekly scoring model shown on the leaderboard, including lowest-possible-score fallback rows for teams without submitted picks.
@@ -122,6 +135,9 @@ Key database triggers:
 - Race management loads one selected season at a time. Recovery creates portable downloads,
   automatic post-publication snapshots, previews, checksum validation, and transactional restore.
 - Race Week reports the schema contract, active season, registration count, next-race gate, delivery toggles, reminder queue totals, degraded cron runs, targeted failed-delivery retries, application incidents, and admin audit history.
+- Recovery route handlers expire scoring data with `revalidateTag` and immediate expiration;
+  Server Actions retain `updateTag`. A cache-refresh failure after a committed restore returns
+  success with a separate warning and the safety-point identifier, preventing an accidental retry.
 - Admin mutations are separated by domain under `src/app/admin/*-actions.ts`; tab-specific server workspaces live under `src/components/admin-*-workspace.tsx`. `src/app/admin/page.tsx` owns authorization, tab-scoped loading, and orchestration rather than every form implementation.
 
 ## Cron And Notifications
@@ -150,6 +166,12 @@ Key database triggers:
 ## Testing
 
 - Vitest unit tests cover the shared 90-participant season scoring model, weekly ranking, bounded reminder queues, reminder-window boundaries, race lifecycle rules, and both admin text import parsers.
+- Recovery endpoint tests cover immediate cache invalidation, truthful post-commit responses,
+  authorization, and preservation of portable snapshot bytes through download/upload.
+- `npm run test:recovery:db` tests the actual PostgreSQL recovery functions in a disposable local
+  Docker container with no network and no application credentials. It requires Docker and an
+  already-cached PostgreSQL image; see `docs/SEASON_RECOVERY.md`. It is opt-in and is not part of
+  `npm run verify`.
 
 - Playwright config starts `npm run dev -- --port 3007` unless `PW_USE_EXISTING_SERVER=1` is set.
 - Read-only production smoke: `tests/e2e/production-readonly.spec.ts` checks public pages and protected redirects without creating data.

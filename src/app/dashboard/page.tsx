@@ -21,10 +21,10 @@ type PageProps = {
 };
 
 const statusTone = (status: RaceWeekStatus): StatusTone => {
-  if (status === "form_open" || status === "form_pending") {
+  if (status === "form_open" || status === "form_pending" || status === "season_results_pending") {
     return "info";
   }
-  if (status === "picks_saved") {
+  if (status === "picks_saved" || status === "season_complete") {
     return "success";
   }
   if (status === "waiting_results" || status === "registration_required") {
@@ -83,12 +83,12 @@ export default async function DashboardPage({ searchParams }: PageProps) {
 
           <div className="min-w-0 flex-1 overflow-hidden rounded-lg ui-panel border border-slate-200 bg-white shadow-sm">
             <div className="p-3 sm:p-4">
-              <div className="flex min-w-0 items-start justify-between gap-2 sm:gap-3">
+              <div className="flex min-w-0 flex-wrap items-start justify-between gap-2 sm:gap-3">
                 <div className="flex min-w-0 flex-wrap items-center gap-2">
                   <h2 className="text-base font-semibold text-slate-950">{action.title}</h2>
                   <StatusChip tone={statusTone(action.status)}>{action.statusLabel}</StatusChip>
                 </div>
-                <ActionLink className="shrink-0" href={action.href}>
+                <ActionLink className="max-w-full" href={action.href}>
                   {action.label}
                 </ActionLink>
               </div>

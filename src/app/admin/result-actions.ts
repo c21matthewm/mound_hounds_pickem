@@ -376,6 +376,7 @@ export async function upsertResultAction(formData: FormData) {
   revalidatePath("/admin");
   revalidatePath("/leaderboard");
   revalidatePath("/picks");
+  revalidatePath("/dashboard");
 
   const [raceNameRes, driverNameRes, raceResultCountRes] = await Promise.all([
     supabase.from("races").select("race_name").eq("id", selectedRaceId).maybeSingle(),
@@ -705,7 +706,7 @@ export async function importIndycarResultsAction(formData: FormData) {
   ) {
     return redirectWithTab(
       "error",
-      "Could not determine a valid official race average speed between 0 and 300 MPH. Include the Average Speed column."
+      "Could not read the winning driver's average speed. Include exactly one first-place row with an Average Speed greater than 0 and no more than 300 MPH."
     );
   }
 

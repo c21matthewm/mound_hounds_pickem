@@ -135,12 +135,13 @@ supabase/migrations/20260822_retire_five_day_pick_email.sql
 supabase/migrations/20260831_harden_season_rollover_registration.sql
 supabase/migrations/20260831_repair_timestamp_variable_collisions.sql
 supabase/migrations/20260831_retire_sms_participant_data.sql
+supabase/migrations/20260904_fix_portable_season_backups.sql
 ```
 
 The expected production schema version is:
 
 ```text
-20260831_email_only_notifications_v1
+20260904_portable_season_backups_v2
 ```
 
 After applying a migration, regenerate the checked-in TypeScript database contract from the live
@@ -154,6 +155,12 @@ This read-only command uses `NEXT_PUBLIC_SUPABASE_URL` and `SUPABASE_SERVICE_ROL
 `.env.local`; it does not change database data. Before a production release, run
 `npm run verify:release` to fail if the generated contract is stale, then run the normal lint,
 typecheck, tests, and build checks.
+
+Portable backup downloads use format version 2, preserving the database snapshot text and
+checksum through download and import. Apply the portable-backup migration before deploying this
+version. Existing internal restore points remain unchanged and can be downloaded in the new
+format. Version-1 files import only when their original checksum still matches; see
+`docs/SEASON_RECOVERY.md` for compatibility and isolated recovery testing.
 
 Reusable health, cron, and race-diagnostic queries are in `supabase/operations/`. The deployment
 sequence is maintained in `DEPLOY_VERCEL.md`.
@@ -181,7 +188,8 @@ where p.id = u.id
 4. Participants submit picks before the race-specific pick deadline.
 5. After a race, use bulk import to preview and atomically publish the official finishing order, or
    save individual manual rows as drafts. Pickable standard drivers omitted from the official order
-   are saved automatically as zero-point nonstarters.
+   are saved automatically as zero-point nonstarters. Bulk imports require a valid Average Speed
+   on the first-place driver's row; correct that cell if preview rejects it.
 6. Draft rows stay hidden and do not affect standings. Publish a complete draft with the official
    winning average speed to refresh championship standings/groups and calculate the fantasy winner.
 7. Use the leaderboard tabs to review standings, locked picks by race, participant analytics, and

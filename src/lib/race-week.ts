@@ -38,6 +38,8 @@ export type RaceWeekStatus =
   | "no_season"
   | "picks_saved"
   | "registration_required"
+  | "season_complete"
+  | "season_results_pending"
   | "waiting_results";
 
 export type RaceWeekAction = {
@@ -93,7 +95,7 @@ const actionForState = ({
   picksLocked,
   previousResultsMessage,
   registered,
-  seasonRaceCount,
+  seasonRaces,
   savedRaceCount,
   windowComplete,
   windowLength
@@ -106,7 +108,7 @@ const actionForState = ({
   picksLocked: boolean;
   previousResultsMessage: string | null;
   registered: boolean;
-  seasonRaceCount: number;
+  seasonRaces: readonly RaceWeekRace[];
   savedRaceCount: number;
   windowComplete: boolean;
   windowLength: number;
@@ -122,6 +124,31 @@ const actionForState = ({
     };
   }
 
+  if (!currentRace && seasonRaces.length > 0) {
+    const pendingResultRace = seasonRaces.find((race) => race.results_status !== "published");
+    if (pendingResultRace) {
+      return {
+        body: `The ${activeSeason.seasonYear} standings will be final once all race results are posted. You can view the current standings in the meantime.`,
+        href: isAdmin
+          ? `/admin?tab=results&result_race_id=${pendingResultRace.id}`
+          : "/leaderboard",
+        label: isAdmin ? "Post race results" : "View current standings",
+        status: "season_results_pending",
+        statusLabel: "Results Pending",
+        title: "Awaiting final results"
+      };
+    }
+
+    return {
+      body: `All results for the ${activeSeason.seasonYear} season have been posted. View the final standings to see where every team finished.`,
+      href: "/leaderboard",
+      label: "View final standings",
+      status: "season_complete",
+      statusLabel: "Season Complete",
+      title: "Final standings are ready"
+    };
+  }
+
   if (!registered) {
     return {
       body: `Confirm your team for the ${activeSeason.seasonYear} season before making picks.`,
@@ -134,24 +161,13 @@ const actionForState = ({
   }
 
   if (!currentRace) {
-    if (seasonRaceCount === 0) {
-      return {
-        body: `Registration is open. The league administrator will post the first ${activeSeason.seasonYear} race when the schedule is ready.`,
-        href: "/leaderboard?tab=hall",
-        label: "View league history",
-        status: "no_race",
-        statusLabel: "Schedule Pending",
-        title: "First race coming soon"
-      };
-    }
-
     return {
-      body: `No upcoming race is scheduled for the ${activeSeason.seasonYear} season.`,
-      href: "/leaderboard",
-      label: "View standings",
+      body: `Registration is open. The league administrator will post the first ${activeSeason.seasonYear} race when the schedule is ready.`,
+      href: "/leaderboard?tab=hall",
+      label: "View league history",
       status: "no_race",
-      statusLabel: "Season Complete",
-      title: "No upcoming race"
+      statusLabel: "Schedule Pending",
+      title: "First race coming soon"
     };
   }
 
@@ -234,7 +250,7 @@ export async function loadRaceWeekState({
         picksLocked: false,
         previousResultsMessage: null,
         registered: false,
-        seasonRaceCount: 0,
+        seasonRaces: [],
         savedRaceCount: 0,
         windowComplete: false,
         windowLength: 0
@@ -264,8 +280,9 @@ export async function loadRaceWeekState({
     throw new Error(`Failed loading race-week schedule: ${racesError.message}`);
   }
 
-  const races = nextPickWindow(raceRows ?? [], now);
-  const pickOpenAt = pickWindowOpensAt(raceRows ?? [], races);
+  const seasonRaces = raceRows ?? [];
+  const races = nextPickWindow(seasonRaces, now);
+  const pickOpenAt = pickWindowOpensAt(seasonRaces, races);
   const picksNotOpen = Boolean(
     pickOpenAt && Date.parse(pickOpenAt) > now.getTime()
   );
@@ -338,7 +355,7 @@ export async function loadRaceWeekState({
       picksLocked,
       previousResultsMessage,
       registered,
-      seasonRaceCount: (raceRows ?? []).length,
+      seasonRaces,
       savedRaceCount,
       windowComplete,
       windowLength: races.length

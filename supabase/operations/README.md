@@ -24,7 +24,7 @@ query is only an editor document; deleting it does not remove functions, tables,
 that were already created in the database.
 
 After `01_verify_production_health.sql` reports schema
-`20260831_email_only_notifications_v1`, the old saved migration bundles and one-off Race 2/Race 8
+`20260904_portable_season_backups_v2`, the old saved migration bundles and one-off Race 2/Race 8
 diagnostic queries can be deleted from the Supabase SQL Editor. Their canonical copies remain in
 `supabase/migrations` and Git history.
 
@@ -44,6 +44,7 @@ diagnostic queries can be deleted from the Supabase SQL Editor. Their canonical 
 | Season rollover and opening-round picks | `migrations/20260831_harden_season_rollover_registration.sql` | Delete saved copy after verification |
 | Operational timestamp repair | `migrations/20260831_repair_timestamp_variable_collisions.sql` | Delete saved copy after verification |
 | Email-only participant data | `migrations/20260831_retire_sms_participant_data.sql` | Delete saved copy after verification |
+| Portable season backups | `migrations/20260904_fix_portable_season_backups.sql` | Delete saved copy after verification |
 | Race IDs 48/128 diagnostics | `operations/03_diagnose_race_results.sql` | Delete old one-off copies |
 | Admin/cron setup query | Deployment docs plus `operations/02_configure_cron_jobs.sql` | Delete after cron replacement |
 | Old 493-line consolidated schema | Obsolete predecessor of `supabase/schema.sql` | Delete and do not rerun |

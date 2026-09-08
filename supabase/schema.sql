@@ -1813,5 +1813,9 @@ to authenticated;
 -- supabase/migrations/20260822_retire_five_day_pick_email.sql
 -- Registration-first season activation and the opening-round availability boundary are maintained in:
 -- supabase/migrations/20260831_harden_season_rollover_registration.sql
+-- Timestamp repairs, email-only profiles, and portable backup envelopes are maintained in:
+-- supabase/migrations/20260831_repair_timestamp_variable_collisions.sql
+-- supabase/migrations/20260831_retire_sms_participant_data.sql
+-- supabase/migrations/20260904_fix_portable_season_backups.sql
 -- Apply these migrations after this consolidated baseline in filename order. Keeping deployment
 -- migrations canonical prevents security, pick-window, and operations logic from diverging.
