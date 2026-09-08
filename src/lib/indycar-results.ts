@@ -1,3 +1,5 @@
+import { isValidAverageSpeedMph } from "@/lib/race-format";
+
 export type ParsedIndycarResultRow = {
   averageSpeed: number | null;
   carNumber: string | null;
@@ -133,12 +135,14 @@ export function parseIndycarResultsPaste(rawInput: string): ParsedIndycarResults
     });
   });
 
-  const winnerRowByPosition = rows.find((row) => row.position === 1 && row.averageSpeed !== null) ?? null;
-  const winnerRowFallback = rows.find((row) => row.averageSpeed !== null) ?? null;
+  const winnerRows = rows.filter((row) => row.position === 1);
+  const winnerSpeed = winnerRows.length === 1 ? winnerRows[0].averageSpeed : null;
 
   return {
     ignoredLineCount,
     rows,
-    winningAverageSpeed: winnerRowByPosition?.averageSpeed ?? winnerRowFallback?.averageSpeed ?? null
+    // Another driver's speed cannot establish the official first-place tiebreaker.
+    winningAverageSpeed:
+      winnerSpeed !== null && isValidAverageSpeedMph(winnerSpeed) ? winnerSpeed : null
   };
 }

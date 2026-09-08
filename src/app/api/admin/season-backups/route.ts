@@ -1,13 +1,14 @@
 import { NextResponse } from "next/server";
-import { revalidatePath } from "next/cache";
+import { revalidatePath, revalidateTag } from "next/cache";
 import { verifyAdminRequestToken } from "@/lib/admin-request-token";
-import { invalidateScoringCache } from "@/lib/scoring-cache";
+import { sanitizeTechnicalSummary } from "@/lib/app-error-safety";
+import { SCORING_CACHE_TAG } from "@/lib/scoring-cache";
 import { canonicalSiteOrigin } from "@/lib/site-url";
 import {
   SEASON_BACKUP_FORMAT,
   SEASON_BACKUP_FORMAT_VERSION,
-  seasonBackupFilename,
-  type SeasonRestorePointSummary
+  PORTABLE_SEASON_BACKUP_MIGRATION_FILE,
+  seasonBackupFilename
 } from "@/lib/season-recovery";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
 import { isJson } from "@/lib/supabase/json";
@@ -99,7 +100,7 @@ const parseRequestBody = async (request: Request): Promise<Record<string, unknow
 };
 
 const refreshRecoveredPages = (): void => {
-  invalidateScoringCache();
+  revalidateTag(SCORING_CACHE_TAG, { expire: 0 });
   revalidatePath("/admin");
   revalidatePath("/dashboard");
   revalidatePath("/picks");
@@ -117,45 +118,40 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: "Select a restore point to download." }, { status: 400 });
   }
 
-  const { data, error } = await admin.supabase
-    .from("season_restore_points")
-    .select(
-      "id,season_id,season_year,label,source,schema_version,format_version,row_counts,checksum,created_at,snapshot"
-    )
-    .eq("id", restorePointId)
-    .maybeSingle<
-      SeasonRestorePointSummary & {
-        snapshot: Record<string, unknown>;
-      }
-    >();
+  // The RPC casts the snapshot to text in PostgreSQL. Never parse/re-serialize
+  // snapshotText in JavaScript: doing so changes fixed-scale numeric values.
+  const { data, error } = await admin.supabase.rpc("export_season_restore_point", {
+    p_restore_point_id: restorePointId
+  });
 
   if (error || !data) {
     return NextResponse.json(
       { error: error?.message ?? "Restore point was not found." },
-      { status: error ? 500 : 404 }
+      { status: error && error.code !== "P0002" ? 500 : 404 }
     );
   }
 
-  const document = {
-    backupId: data.id,
-    checksum: data.checksum,
-    createdAt: data.created_at,
-    format: SEASON_BACKUP_FORMAT,
-    formatVersion: SEASON_BACKUP_FORMAT_VERSION,
-    label: data.label,
-    rowCounts: data.row_counts,
-    schemaVersion: data.schema_version,
-    seasonYear: data.season_year,
-    snapshot: data.snapshot,
-    source: data.source
-  };
+  if (
+    typeof data !== "object" || Array.isArray(data) ||
+    data.format !== SEASON_BACKUP_FORMAT ||
+    data.formatVersion !== SEASON_BACKUP_FORMAT_VERSION ||
+    typeof data.snapshotText !== "string" ||
+    typeof data.checksum !== "string" || !/^[0-9a-f]{64}$/i.test(data.checksum) ||
+    typeof data.createdAt !== "string" || typeof data.label !== "string" ||
+    typeof data.seasonYear !== "number" || !Number.isInteger(data.seasonYear)
+  ) {
+    return NextResponse.json(
+      { error: `The backup export could not be verified. Apply ${PORTABLE_SEASON_BACKUP_MIGRATION_FILE} before downloading backups.` },
+      { status: 500 }
+    );
+  }
   const filename = seasonBackupFilename({
-    createdAt: data.created_at,
+    createdAt: data.createdAt,
     label: data.label,
-    seasonYear: data.season_year
+    seasonYear: data.seasonYear
   });
 
-  return new NextResponse(`${JSON.stringify(document, null, 2)}\n`, {
+  return new NextResponse(`${JSON.stringify(data, null, 2)}\n`, {
     headers: {
       "Cache-Control": "private, no-store",
       "Content-Disposition": `attachment; filename="${filename}"`,
@@ -226,7 +222,7 @@ export async function POST(request: Request) {
         return NextResponse.json({ error: "Choose a valid Mound Hounds backup file." }, { status: 400 });
       }
 
-      const { data, error } = await admin.supabase.rpc("import_season_restore_point", {
+      const { data, error } = await admin.supabase.rpc("import_season_restore_point_v2", {
         p_document: body.document
       });
       if (error) {
@@ -273,7 +269,20 @@ export async function POST(request: Request) {
         throw new Error(error.message);
       }
 
-      refreshRecoveredPages();
+      try {
+        refreshRecoveredPages();
+      } catch (refreshError) {
+        // The restore RPC has committed. A cache failure must not suggest retrying it.
+        console.error(
+          "[season-recovery] Restore committed, but cache refresh failed:",
+          sanitizeTechnicalSummary(refreshError)
+        );
+        return NextResponse.json({
+          data,
+          warning:
+            "Season data was restored, but cached pages could not be refreshed. Some views may temporarily show old data. Do not repeat the restore."
+        });
+      }
       return NextResponse.json({ data });
     }
 

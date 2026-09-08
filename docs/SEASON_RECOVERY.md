@@ -34,6 +34,24 @@ The restore runs in one database transaction. If any validation or insert fails,
 rolls back instead of leaving a partial restore. Immediately before replacement, the database
 creates a separate pre-restore safety point.
 
+If the app reports that the season was restored but cached pages could not be refreshed, the
+database restore already succeeded. Keep the displayed safety-point identifier, do not repeat
+the restore, and resolve the cache-refresh problem before relying on displayed standings.
+
+## Portable file compatibility
+
+New downloads use backup envelope version 2. The `snapshotText` string contains the exact
+PostgreSQL snapshot representation; the checksum covers those UTF-8 bytes. Keep this string
+intact. The importer validates it before converting to the existing internal snapshot format.
+Internal restore points remain version 1, retain their original checksums, and can be downloaded
+again in the new portable format.
+
+Older version-1 files are accepted only if their original checksum still matches. Earlier
+downloads could lose decimal formatting, such as `190.000` becoming `190`, and fail that check
+without anyone editing the file. If this occurs, download a new copy from the original stored
+restore point after applying the migration. If the original point is unavailable, preserve the
+file for investigation; the app does not bypass checksum verification or silently repair it.
+
 ## What is included
 
 - The selected league season's participant registrations
@@ -68,9 +86,31 @@ supabase/migrations/20260730_atomic_picks_and_season_recovery.sql
 supabase/migrations/20260818_bound_recovery_jobs_and_registration.sql
 supabase/migrations/20260821_add_application_error_inbox.sql
 supabase/migrations/20260822_harden_pick_reminder_delivery.sql
+supabase/migrations/20260822_retire_five_day_pick_email.sql
+supabase/migrations/20260831_harden_season_rollover_registration.sql
+supabase/migrations/20260831_repair_timestamp_variable_collisions.sql
+supabase/migrations/20260831_retire_sms_participant_data.sql
+supabase/migrations/20260904_fix_portable_season_backups.sql
 ```
 
 Then open **Admin > Race Week** while signed in as an administrator. The expected schema
-version is `20260822_reminder_delivery_v1`. Run
+version is `20260904_portable_season_backups_v2`. Regenerate the database types with
+`npm run db:types` after applying the migration, then run `npm run verify:release`. Run
 `supabase/operations/01_verify_production_health.sql` and confirm that every `schema`, `function`,
 and `storage` row reports `PASS` before relying on restore for a live incident.
+
+## Isolated recovery regression test
+
+Run `npm run test:recovery:db` with local Docker running and a cached `postgres:17` image.
+`SEASON_BACKUP_TEST_IMAGE` can select another already-cached compatible PostgreSQL image.
+The runner creates its own disposable container with networking disabled, refuses remote Docker
+hosts, never pulls an image, and never reads `.env.local` or connects to an existing database.
+
+It loads the repository's recovery functions and representative fixture tables, exports a backup,
+passes it through JavaScript download/upload serialization, imports it, and restores changed data.
+Checks cover decimal formatting, Unicode, checksum tampering, legacy compatibility, admin access,
+and the pre-restore safety snapshot. Supabase authentication is represented by local fixture
+functions; unrelated application triggers and RLS policies are outside this focused test.
+
+`npm run test:recovery:db -- --check-fixtures` checks that the required SQL definitions can be
+loaded from the repository without starting Docker. It does not execute or validate PostgreSQL.

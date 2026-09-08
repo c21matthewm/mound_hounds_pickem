@@ -1,8 +1,11 @@
 export const SEASON_RECOVERY_MIGRATION_FILE =
   "supabase/migrations/20260818_bound_recovery_jobs_and_registration.sql";
+export const PORTABLE_SEASON_BACKUP_MIGRATION_FILE =
+  "supabase/migrations/20260904_fix_portable_season_backups.sql";
 
 export const SEASON_BACKUP_FORMAT = "mound-hounds-season-backup";
-export const SEASON_BACKUP_FORMAT_VERSION = 1;
+// The portable envelope is version 2; stored database snapshots remain version 1.
+export const SEASON_BACKUP_FORMAT_VERSION = 2;
 
 export type SeasonRecoveryRowCounts = Record<string, number>;
 

@@ -112,6 +112,17 @@ regains focus.
 
 The admin can use **Refresh Final Standings** if a published result is legitimately corrected later. The archive is stored independently from user profiles, picks, drivers, and race results.
 
+The dashboard waits for every non-archived race's results to be published before announcing that
+final standings are ready. Saving the Hall of Fame snapshot is a separate archival step; the
+current season remains active until the next season is activated.
+
+Older spreadsheet seasons can be stored directly as Hall of Fame archives. Prepare the season
+year and race count, plus each team's final rank, team name, and total points. The tables
+`hall_of_fame_seasons` and `hall_of_fame_entries` do not require historical participant accounts
+or race records; `race_breakdown` can be an empty array. Preserve the original ranks and
+tiebreak decisions, including which team was champion. The existing **Finalize Season** control
+calculates the active season and is not a spreadsheet importer.
+
 ## Image storage maintenance
 
 New driver and race uploads are resized and converted to WebP before upload. Replacing, clearing, or deleting a managed image also removes the previous object after the database update succeeds.
@@ -183,7 +194,7 @@ admin must explicitly authorize forced removal; normal profile edits do not remo
 Open **Admin > Race Week** after a migration, deployment, season rollover, or notification
 configuration change. Confirm:
 
-- schema version is `20260822_reminder_delivery_v1` and the database contract reports healthy;
+- schema version is `20260904_portable_season_backups_v2` and the database contract reports healthy;
 - the expected season is active and the registered-team count is reasonable;
 - the next race and previous-results gate are correct;
 - the pick-email enabled state matches Vercel;
@@ -206,7 +217,11 @@ The latest matching database migrations are
 `supabase/migrations/20260818_bound_recovery_jobs_and_registration.sql`, and
 `supabase/migrations/20260821_add_application_error_inbox.sql`, and
 `supabase/migrations/20260822_harden_pick_reminder_delivery.sql`, and
-`supabase/migrations/20260822_retire_five_day_pick_email.sql`. Run them in filename order in
+`supabase/migrations/20260822_retire_five_day_pick_email.sql`, and
+`supabase/migrations/20260831_harden_season_rollover_registration.sql`, and
+`supabase/migrations/20260831_repair_timestamp_variable_collisions.sql`, and
+`supabase/migrations/20260831_retire_sms_participant_data.sql`, and
+`supabase/migrations/20260904_fix_portable_season_backups.sql`. Run them in filename order in
 Supabase SQL Editor before deploying this application version. They are additive and keep existing
 2026 registrations intact. After they succeed, set the 2026 invite code in the admin interface
 before accepting any new 2026 participants.

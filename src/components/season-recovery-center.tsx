@@ -20,6 +20,7 @@ type Props = {
 type RecoveryResponse<T> = {
   data?: T;
   error?: string;
+  warning?: string;
 };
 
 const RECOVERY_ENDPOINT = "/api/admin/season-backups";
@@ -65,7 +66,7 @@ const sourceTone = (
 const postRecoveryAction = async <T,>(
   payload: Record<string, unknown>,
   requestToken: string
-): Promise<T> => {
+): Promise<{ data: T; warning?: string }> => {
   const response = await fetch(RECOVERY_ENDPOINT, {
     body: JSON.stringify({ ...payload, requestToken }),
     headers: {
@@ -78,7 +79,7 @@ const postRecoveryAction = async <T,>(
   if (!response.ok || result.error || result.data === undefined) {
     throw new Error(result.error ?? "Season recovery request failed.");
   }
-  return result.data;
+  return { data: result.data, warning: result.warning };
 };
 
 const triggerDownload = (restorePointId: string): void => {
@@ -97,6 +98,7 @@ export function SeasonRecoveryCenter({ activeSeason, requestToken, restorePoints
   const [confirmationYear, setConfirmationYear] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  const [warning, setWarning] = useState<string | null>(null);
   const [preview, setPreview] = useState<SeasonRestorePreview | null>(null);
   const [selectedId, setSelectedId] = useState(restorePoints[0]?.id ?? "");
 
@@ -117,6 +119,7 @@ export function SeasonRecoveryCenter({ activeSeason, requestToken, restorePoints
     setBusyAction(name);
     setError(null);
     setMessage(null);
+    setWarning(null);
     try {
       await action();
     } catch (actionError) {
@@ -132,7 +135,7 @@ export function SeasonRecoveryCenter({ activeSeason, requestToken, restorePoints
         throw new Error("Activate a season before creating a backup.");
       }
 
-      const created = await postRecoveryAction<{ id: string }>(
+      const { data: created } = await postRecoveryAction<{ id: string }>(
         {
           action: "create",
           label: `Manual download before weekly operations ${new Date().toISOString()}`,
@@ -158,7 +161,7 @@ export function SeasonRecoveryCenter({ activeSeason, requestToken, restorePoints
         throw new Error("The selected file is not valid JSON.");
       }
 
-      const imported = await postRecoveryAction<{ id: string; seasonYear: number }>(
+      const { data: imported } = await postRecoveryAction<{ id: string; seasonYear: number }>(
         { action: "import", document },
         requestToken
       );
@@ -178,7 +181,7 @@ export function SeasonRecoveryCenter({ activeSeason, requestToken, restorePoints
       if (!selectedPoint) {
         throw new Error("Select a restore point first.");
       }
-      const nextPreview = await postRecoveryAction<SeasonRestorePreview>(
+      const { data: nextPreview } = await postRecoveryAction<SeasonRestorePreview>(
         { action: "preview", restorePointId: selectedPoint.id },
         requestToken
       );
@@ -203,7 +206,7 @@ export function SeasonRecoveryCenter({ activeSeason, requestToken, restorePoints
         return;
       }
 
-      const restored = await postRecoveryAction<{
+      const { data: restored, warning: refreshWarning } = await postRecoveryAction<{
         restoredAt: string;
         safetyPointId: string;
       }>(
@@ -219,6 +222,7 @@ export function SeasonRecoveryCenter({ activeSeason, requestToken, restorePoints
       setMessage(
         `Season restored successfully. A pre-restore safety point (${restored.safetyPointId}) was retained.`
       );
+      setWarning(refreshWarning ?? null);
       router.refresh();
     });
 
@@ -243,6 +247,7 @@ export function SeasonRecoveryCenter({ activeSeason, requestToken, restorePoints
 
       {error ? <CompactNotice className="mt-4" tone="danger">{error}</CompactNotice> : null}
       {message ? <CompactNotice className="mt-4" tone="success">{message}</CompactNotice> : null}
+      {warning ? <CompactNotice className="mt-4" tone="warning">{warning}</CompactNotice> : null}
 
       <div className="mt-5 border-y border-slate-200 py-5">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">

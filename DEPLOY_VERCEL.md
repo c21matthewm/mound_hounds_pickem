@@ -449,10 +449,27 @@ supabase/migrations/20260831_retire_sms_participant_data.sql
 Apply it after the reminder migrations. It lets an admin activate a prepared season before adding
 its schedule, and it keeps the first pick window closed until six days before qualifying. Once the
 first race field freezes, a later qualifying delay cannot re-close that already-open form. Later
-rounds remain gated by publication of the previous pick window's results. After applying it, run
-`supabase/operations/01_verify_production_health.sql`; the final schema version must be
-`20260831_email_only_notifications_v1`, and `opening_pick_window_schedule` and
-`registration_rate_limit` must report `PASS`.
+rounds remain gated by publication of the previous pick window's results. The interim schema
+version is `20260831_email_only_notifications_v1`; continue with the recovery migration below.
+
+Latest portable-backup migration:
+
+```text
+supabase/migrations/20260904_fix_portable_season_backups.sql
+```
+
+Apply it before deploying this application version. It adds admin-only export/import RPCs for
+version-2 backup files, preserving exact snapshot text and checksums. Existing stored restore
+points are unchanged; valid version-1 files remain importable. Files with mismatching legacy
+checksums must be downloaded again from the original stored point, as described in
+`docs/SEASON_RECOVERY.md`.
+
+Regenerate the database contract with `npm run db:types`, then run `npm run verify:release`.
+The checked-in pending RPC declarations allow local validation before migration; regeneration
+replaces those declarations with the deployed contract and its new hash.
+Run `supabase/operations/01_verify_production_health.sql`; the final schema version must be
+`20260904_portable_season_backups_v2`, and the `season_backup_export`, `season_backup_import`,
+`opening_pick_window_schedule`, and `registration_rate_limit` checks must report `PASS`.
 
 For the older result-publication migration, retain known historical exceptions rather than
 reconstructing missing snapshots from current standings: Race 8 has 25 official rows and a

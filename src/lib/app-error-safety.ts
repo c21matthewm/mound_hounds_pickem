@@ -28,8 +28,22 @@ const sanitizeUrl = (value: string): string => {
   }
 };
 
-export const errorMessage = (error: unknown): string =>
-  error instanceof Error ? error.message : typeof error === "string" ? error : "Unknown error";
+export const errorMessage = (error: unknown): string => {
+  if (typeof error === "string") {
+    return error;
+  }
+
+  if (
+    error !== null &&
+    typeof error === "object" &&
+    "message" in error &&
+    typeof error.message === "string"
+  ) {
+    return error.message;
+  }
+
+  return "Unknown error";
+};
 
 export const sanitizeTechnicalSummary = (error: unknown): string => {
   const normalized = errorMessage(error)

@@ -163,7 +163,7 @@ export function AdminResultsImportForm({
 
     if (parsed.winningAverageSpeed === null) {
       setPreviewError(
-        "Could not determine the official race average speed. Make sure the Average Speed column is included."
+        "Could not read the winning driver's average speed. Include exactly one first-place row with an Average Speed greater than 0 and no more than 300 MPH."
       );
       setPreviewState(null);
       return;
