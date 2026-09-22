@@ -227,7 +227,9 @@ export async function finalizeDueRaceWinners(): Promise<{
 
   const { data: races, error: racesError } = await supabase
     .from("races")
-    .select("id")
+    .select("id,league_seasons!inner(status)")
+    .eq("league_seasons.status", "active")
+    .eq("results_status", "published")
     .eq("is_archived", false)
     .eq("winner_is_manual_override", false)
     .not("winner_auto_eligible_at", "is", null)

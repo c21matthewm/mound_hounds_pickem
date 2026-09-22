@@ -45,7 +45,7 @@ export async function requireAppUser(options: AppUserOptions = {}) {
     redirect("/season-registration");
   }
 
-  if (options.requireRegistration && !isRegisteredForSeason(participation)) {
+  if (activeSeason && options.requireRegistration && !isRegisteredForSeason(participation)) {
     if (activeSeason && profile.is_active && !participation) {
       redirect("/season-registration");
     }

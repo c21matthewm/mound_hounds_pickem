@@ -1,5 +1,7 @@
 import "server-only";
 
+import { randomUUID } from "node:crypto";
+
 import { createServiceRoleSupabaseClient } from "@/lib/supabase/service-role";
 import { deleteManagedImage, optimizeUploadedImage } from "@/lib/supabase/managed-images";
 
@@ -83,7 +85,7 @@ export async function uploadRaceTitleImage(params: {
   const service = createServiceRoleSupabaseClient();
 
   const safeName = slugify(raceName) || `race-${raceId}`;
-  const path = `races/${raceId}/${safeName}-${Date.now()}.webp`;
+  const path = `races/${raceId}/${safeName}-${randomUUID()}.webp`;
   const optimizedImage = await optimizeUploadedImage(file, {
     height: 900,
     quality: 82,
@@ -93,7 +95,7 @@ export async function uploadRaceTitleImage(params: {
   const { error: uploadError } = await service.storage.from(RACE_IMAGE_BUCKET).upload(path, optimizedImage, {
     cacheControl: "31536000",
     contentType: "image/webp",
-    upsert: true
+    upsert: false
   });
 
   if (uploadError) {

@@ -27,6 +27,9 @@ season standings, league rules, feedback, and admin operations.
 - Highest and lowest benchmark scores are calculated from the best/worst driver in each
   race-specific group.
 - Average speed tiebreaks apply only to first-place ties for a race.
+- Season standings rank by total points, then points in the latest completed race, then points
+  in the second-to-last completed race. No earlier race or average-speed guess breaks a season
+  tie. An unresolved first-place tie pauses finalization until the league determines one champion.
 - Accounts and profiles are permanent. Participation is registered separately for each season, so
   returning users sign in with the same credentials and confirm whether they are joining that year.
 
@@ -73,7 +76,14 @@ Run the app:
 npm run dev
 ```
 
-Open `http://localhost:3000`.
+Open `http://localhost:3000`. To use the league's usual local/mobile development port instead:
+
+```bash
+npm run dev -- --hostname 0.0.0.0 --port 3007
+```
+
+Open `http://localhost:3007` on this computer, or `http://<computer-LAN-IP>:3007` on a phone
+connected to the same Wi-Fi. Use the computer's current LAN address.
 
 ## Verification
 
@@ -119,7 +129,7 @@ For a fresh Supabase project, run the consolidated schema:
 supabase/schema.sql
 ```
 
-Then apply the migrations named at the bottom of that file in filename order. For an existing
+Then apply the migrations listed below in filename order. For an existing
 project, apply only migration files in `supabase/migrations/` that have not already been run.
 Migration history is intentionally not squashed or replaced by SQL Editor documents.
 
@@ -177,8 +187,10 @@ where p.id = u.id
 
 ## Admin Workflow
 
-1. Create or activate the league season, then import preseason championship standings or manage
-   drivers manually.
+1. Open **Admin > Seasons & League** to create a season and set its code. Configure the opening
+   roster in **Drivers & Groups**, then activate when ready. Save/review the outgoing final
+   standings and select **Complete [year] season** first. No season needs to be active between
+   years; completing a season retains its history and creates a recovery backup.
 2. Add races with a separate season and round, full event name, race start, qualifying start,
    payout, and optional title image.
    For a doubleheader, create the first race normally, then create the consecutive second race
@@ -194,12 +206,44 @@ where p.id = u.id
    winning average speed to refresh championship standings/groups and calculate the fantasy winner.
 7. Use the leaderboard tabs to review standings, locked picks by race, participant analytics, and
    finalized Hall of Fame seasons.
-8. Use **Admin > Race Week** to verify the schema contract, active season, next-race result
-   gate, registration count, reminder schedule and preview, queue totals, degraded cron runs,
-   application error inbox, and failed-delivery retry controls. Send tests only from the dedicated
-   test control; it never changes participant reminder history.
+8. Use **Admin > Race Week** for preparation, picks/reminders, results/audit, and winner stages.
+   Use **System Health** for schema checks, job history, the error inbox, and manual winner recovery.
+   The dedicated reminder test control sends only to the signed-in admin and preserves participant history.
 9. Use **Admin > Recovery** to create and download a portable season backup before unusual
    database work. Follow `docs/SEASON_RECOVERY.md` if a restore is ever needed.
+
+The expanded Admin workspace and step-by-step setup are documented in
+[Admin expansion progress](docs/ADMIN_EXPANSION_PROGRESS.md). Seven optional capability migrations
+enable role delegation, historical imports, field freezing, driver/participant batches, rules
+documents, explicit season completion, off-season profile editing, and capability diagnostics:
+
+```text
+supabase/migrations/20260913_admin_role_delegation.sql
+supabase/migrations/20260913_add_historical_hall_of_fame_import.sql
+supabase/migrations/20260913_admin_freeze_race_field.sql
+supabase/migrations/20260919_bulk_driver_roster.sql
+supabase/migrations/20260919_admin_bulk_participants.sql
+supabase/migrations/20260919_add_season_rules_documents.sql
+supabase/migrations/20260921_season_completion.sql
+```
+
+All seven migrations are installed in the current project, and the regenerated database contract
+was verified on 2026-09-22. For other installations, apply each needed complete file separately
+in Supabase SQL Editor. Their controls require the associated
+RPC; the expected base schema version stays unchanged. Installation does not change account roles,
+freeze fields or create archives. The 2025/2026 historical archives already exist and must not be
+re-imported. Do not rerun the completed prelaunch cleanup. Follow the migration, Admin closeout
+and release checks in [the 2026-09-21 review](docs/RELEASE_REVIEW_20260921.md).
+
+Admin now includes group previews, local deadline countdowns, missing-pick email copying,
+selected-season participant controls and paginated audit search. Storage maintenance remains
+read-only; it does not delete the candidates it reports. Earlier images are retained when a
+driver/race image is replaced or its record deleted, preserving recovery references.
+
+Run `npm run test:admin:ui` under Node 22 for the offline admin component suite. It checks mobile
+and desktop layouts plus key form interactions using fictional data and mocked actions, with
+all browser network requests blocked. No dev server, credentials, or live database is needed.
+Screenshots and temporary build files are written outside the repository.
 
 Example paste formats live in:
 
@@ -236,7 +280,7 @@ Vercel production deploys from `main`.
 - `/leaderboard`: current standings, picks by race, analytics, and Hall of Fame archives
 - `/feedback`: participant bug/improvement submissions
 - `/rules`: in-app rules PDF viewer
-- `/admin`: admin-only participants, drivers, races, results, feedback, system health, and recovery
+- `/admin`: admin-only Race Week, Seasons & League, Participants, Drivers & Groups, Race Calendar, System Health, Recovery, and Feedback
 - `/api/admin/season-backups`: admin-authenticated backup download/preview/restore endpoint
 - `/api/cron/fantasy-winner`: protected hourly fallback for fantasy winner finalization
 - `/api/cron/pick-reminders`: protected pick reminder cron

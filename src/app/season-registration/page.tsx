@@ -1,3 +1,4 @@
+import { SeasonInviteCodeInput } from "@/components/season-invite-code-input";
 import { redirect } from "next/navigation";
 import { setSeasonParticipationAction } from "@/app/actions/auth";
 import { AuthFlowShell, AuthFormPanel } from "@/components/auth-flow-shell";
@@ -109,7 +110,7 @@ export default async function SeasonRegistrationPage({ searchParams }: PageProps
               description="The code confirms that this permanent account belongs in the private league."
               label="Season invite code"
             >
-              <input
+              <SeasonInviteCodeInput
                 required
                 autoCapitalize="none"
                 autoComplete="off"

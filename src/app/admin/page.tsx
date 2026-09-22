@@ -1,3 +1,13 @@
+import { parseAdminCapabilities } from "@/lib/admin-capabilities";
+import { AdminSeasonsWorkspace, type AdminArchiveSummary } from "@/components/admin-seasons-workspace";
+import { AdminRaceWeekWorkspace } from "@/components/admin-race-week-workspace";
+import { AdminRemindersWorkspace } from "@/components/admin-reminders-workspace";
+import { AdminMissingPicks } from "@/components/admin-missing-picks";
+import { selectRaceWeekPhase, missingPickParticipants } from "@/lib/admin-race-week";
+import { parseAdminAuditQuery, type AdminAuditLogData } from "@/lib/admin-audit-log";
+import { loadAdminAuditLog } from "@/lib/admin-audit-log-data";
+import { loadAdminAttention } from "@/lib/admin-attention";
+import { loadAdminParticipantEmails } from "@/lib/admin-participant-emails";
 import {
   cleanupTestFlowDataAction,
   resolveAppErrorAction,
@@ -17,7 +27,6 @@ import { AdminWorkspaceNav } from "@/components/admin-workspace-nav";
 import {
   AdminSystemHealth,
   type AdminAppErrorRow,
-  type AdminAuditHealthRow,
   type AdminJobRunHealthRow,
   type AdminReminderPreview,
   type AdminReminderQueueHealth,
@@ -31,12 +40,12 @@ import { errorReference, reportAppError } from "@/lib/app-error-reporter";
 import { buildPickReminderMessage } from "@/lib/pick-reminder-message";
 import { getPreviousRaceResultsGate } from "@/lib/pickem-results-gate";
 import {
-  nextPickWindow,
+  racesInPickWindow,
   pickWindowDisplayName,
   pickWindowRoundLabel
 } from "@/lib/pick-windows";
 import { queryStringParam } from "@/lib/query";
-import { normalizeRacePickFormat, pickLockAtForRace } from "@/lib/race-format";
+import { pickLockAtForRace } from "@/lib/race-format";
 import {
   summarizeReminderQueue,
   type ReminderQueueRow
@@ -81,13 +90,16 @@ export default async function AdminPage({ searchParams }: PageProps) {
   const message = queryStringParam(params.message);
   const error = queryStringParam(params.error);
   const activeTab = parseAdminTab(queryStringParam(params.tab));
+  const isRaceWeek = activeTab === "race-week" || activeTab === "results";
   const requestedRaceSeasonId = parsePositiveQueryInteger(
     queryStringParam(params.race_season_id)
   );
+  const requestedRecoverySeasonId = parsePositiveQueryInteger(queryStringParam(params.recovery_season_id));
   const requestedResultRaceId = parsePositiveQueryInteger(
     queryStringParam(params.result_race_id)
   );
   const participantQuery = (queryStringParam(params.participant_q) ?? "").trim();
+  const requestedParticipantSeasonId = parsePositiveQueryInteger(queryStringParam(params.participant_season_id));
   const participantStatus = queryStringParam(params.participant_status) ?? "all";
   const feedbackStatusInput = queryStringParam(params.feedback_status) ?? "all";
   const feedbackStatus = ["all", "new", "in_review", "resolved"].includes(
@@ -99,6 +111,7 @@ export default async function AdminPage({ searchParams }: PageProps) {
   const feedbackPageSize = 20;
 
   const { profile, supabase, user } = await requireAdmin();
+  const currentTime = new Date().getTime();
   const throwAdminLoadError = async (
     code: string,
     loadFailure: unknown,
@@ -127,51 +140,64 @@ export default async function AdminPage({ searchParams }: PageProps) {
     .order("season_year", { ascending: false });
   const loadedSeasons = (seasonsResponse.data ?? []) as LeagueSeasonRow[];
   const loadedActiveSeason = loadedSeasons.find((season) => season.status === "active") ?? null;
+  const participantSeasons = loadedSeasons.filter(season => season.status !== "completed");
+  const selectedParticipantSeason = participantSeasons.find(season => season.id === requestedParticipantSeasonId)
+    ?? loadedActiveSeason ?? participantSeasons[0] ?? null;
   const selectedRaceSeason =
     loadedSeasons.find((season) => season.id === requestedRaceSeasonId) ??
     loadedActiveSeason ??
     loadedSeasons[0] ??
     null;
+  const selectedRecoverySeason = loadedSeasons.find(season => season.id === requestedRecoverySeasonId)
+    ?? loadedActiveSeason ?? loadedSeasons.find(season => season.status === "completed") ?? loadedSeasons[0] ?? null;
   const emptyResponse = { data: [], error: null };
   const emptyCountResponse = { count: 0, data: [], error: null };
 
+  const hasActiveCalendar = isRaceWeek || activeTab === "seasons" ||
+    (activeTab === "races" && selectedRaceSeason?.id === loadedActiveSeason?.id);
   const [
+    attention,
     driversResponse,
     racesResponse,
     profilesResponse,
     feedbackResponse,
     seasonParticipantsResponse,
+    selectedParticipantsResponse,
     participantPicksResponse,
     restorePointsResponse
   ] = await Promise.all([
-    activeTab === "drivers" || activeTab === "results" ? supabase
+    loadAdminAttention(supabase, {seasonId:loadedActiveSeason?.id ?? null, now:currentTime,
+      loadErrors:activeTab !== "health", loadRaces:!hasActiveCalendar}),
+    activeTab === "drivers" || isRaceWeek ? supabase
       .from("drivers")
       .select("id,driver_name,image_url,current_standing,group_number,is_active,championship_points")
       .order("current_standing", { ascending: true }) : emptyResponse,
     activeTab === "races" && selectedRaceSeason
       ? loadAdminRaces(supabase, selectedRaceSeason.id)
-      : activeTab === "results" && loadedActiveSeason
+      : (isRaceWeek || activeTab === "seasons") && loadedActiveSeason
         ? loadAdminResultRaces(supabase, loadedActiveSeason.id)
         : emptyResponse,
-    activeTab === "participants" || activeTab === "races" || activeTab === "results" || activeTab === "feedback" ? supabase
-      .from("profiles")
-      .select("id,full_name,team_name,role,is_active")
-      .in("role", ["participant", "admin"])
-      .order("team_name", { ascending: true }) : emptyResponse,
+    activeTab === "participants" || activeTab === "races" || isRaceWeek || activeTab === "feedback"
+      ? paginatedAdminLoad<WinnerProfileRow>("admin profiles", (from, to) => supabase.from("profiles")
+        .select("id,full_name,team_name,role,is_active").in("role", ["participant", "admin"])
+        .order("team_name", { ascending: true }).order("id", { ascending: true }).range(from, to).returns<WinnerProfileRow[]>())
+      : emptyResponse,
     activeTab === "feedback"
       ? loadAdminFeedback(supabase, feedbackStatus, feedbackPage, feedbackPageSize)
       : emptyCountResponse,
-    loadedActiveSeason && (activeTab === "participants" || activeTab === "races" || activeTab === "results" || activeTab === "health")
-      ? activeTab === "health"
-        ? supabase
-            .from("season_participants")
-            .select("profile_id,status,profiles!inner(is_active)")
-            .eq("season_id", loadedActiveSeason.id)
-            .eq("profiles.is_active", true)
-        : supabase
-            .from("season_participants")
-            .select("profile_id,status")
-            .eq("season_id", loadedActiveSeason.id)
+    loadedActiveSeason && (activeTab === "participants" || isRaceWeek)
+      ? paginatedAdminLoad<SeasonParticipantRow>("season participants", (from, to) => {
+          let query = supabase.from("season_participants")
+            .select(isRaceWeek ? "profile_id,status,profiles!inner(is_active)" : "profile_id,status")
+            .eq("season_id", loadedActiveSeason.id).order("profile_id", {ascending: true});
+          if (isRaceWeek) query = query.eq("profiles.is_active", true);
+          return query.range(from, to).returns<SeasonParticipantRow[]>();
+        })
+      : emptyResponse,
+    activeTab === "participants" && selectedParticipantSeason && selectedParticipantSeason.id !== loadedActiveSeason?.id
+      ? paginatedAdminLoad<SeasonParticipantRow>("selected season participants", (from, to) => supabase
+        .from("season_participants").select("profile_id,status").eq("season_id", selectedParticipantSeason.id)
+        .order("profile_id", {ascending:true}).range(from, to).returns<SeasonParticipantRow[]>())
       : emptyResponse,
     loadedActiveSeason && activeTab === "participants"
       ? paginatedAdminLoad<ParticipantPickCountRow>("participant pick counts", (from, to) =>
@@ -184,13 +210,13 @@ export default async function AdminPage({ searchParams }: PageProps) {
             .range(from, to)
         )
       : emptyResponse,
-    loadedActiveSeason && activeTab === "recovery"
+    selectedRecoverySeason && activeTab === "recovery"
       ? supabase
           .from("season_restore_points")
           .select(
             "id,season_id,season_year,label,source,retention_key,snapshot_bytes,schema_version,format_version,row_counts,checksum,created_at"
           )
-          .eq("season_id", loadedActiveSeason.id)
+          .eq("season_id", selectedRecoverySeason.id)
           .order("created_at", { ascending: false })
           .limit(1000)
       : emptyResponse
@@ -205,24 +231,21 @@ export default async function AdminPage({ searchParams }: PageProps) {
     currentSeasonRaces.find((race) => race.results_status !== "published") ??
     currentSeasonRaces.at(-1) ??
     null;
+  const raceWeekPhase = selectRaceWeekPhase(activeTab === "results" ? "results" : queryStringParam(params.phase), selectedResultRace, currentTime);
   const resultRaceIds = selectedResultRace ? [selectedResultRace.id] : [];
-  const [resultsResponse, picksResponse, raceDriverGroupsResponse] =
-    activeTab === "results" && resultRaceIds.length > 0
-      ? await Promise.all([
-          paginatedAdminLoad<ResultRow>("active-season race results", (from, to) =>
-            supabase
-              .from("results")
-              .select("id,race_id,driver_id,points")
-              .in("race_id", resultRaceIds)
-              .order("race_id", { ascending: false })
-              .order("points", { ascending: false })
-              .order("id", { ascending: true })
-              .range(from, to)
-          ),
-          loadAdminPicks(supabase, resultRaceIds),
-          loadRaceDriverGroups(supabase, resultRaceIds)
-        ])
-      : [emptyResponse, emptyResponse, emptyResponse];
+  const loadResults = isRaceWeek && raceWeekPhase === "results" && resultRaceIds.length > 0;
+  const loadField = isRaceWeek && resultRaceIds.length > 0 &&
+    (raceWeekPhase === "results" || (raceWeekPhase === "preparation" && selectedResultRace?.field_frozen_at));
+  const [resultsResponse, picksResponse, raceDriverGroupsResponse] = await Promise.all([
+    loadResults ? paginatedAdminLoad<ResultRow>("active-season race results", (from, to) =>
+      supabase.from("results").select("id,race_id,driver_id,points")
+        .in("race_id", resultRaceIds).order("race_id", { ascending: false })
+        .order("points", { ascending: false }).order("id", { ascending: true })
+        .range(from, to)
+    ) : emptyResponse,
+    loadResults ? loadAdminPicks(supabase, resultRaceIds) : emptyResponse,
+    loadField ? loadRaceDriverGroups(supabase, resultRaceIds) : emptyResponse
+  ]);
 
   const loadError =
     driversResponse.error?.message ??
@@ -233,6 +256,7 @@ export default async function AdminPage({ searchParams }: PageProps) {
     picksResponse.error?.message ??
     raceDriverGroupsResponse.error?.message ??
     seasonParticipantsResponse.error?.message ??
+    selectedParticipantsResponse.error?.message ??
     participantPicksResponse.error?.message ??
     restorePointsResponse.error?.message ??
     seasonsResponse.error?.message;
@@ -246,6 +270,9 @@ export default async function AdminPage({ searchParams }: PageProps) {
   const results: ResultRow[] = (resultsResponse.data ?? []) as ResultRow[];
   const winnerProfiles: WinnerProfileRow[] = (profilesResponse.data ?? []) as WinnerProfileRow[];
   const seasonParticipants = (seasonParticipantsResponse.data ?? []) as SeasonParticipantRow[];
+  const selectedSeasonDecisions = selectedParticipantSeason?.id === loadedActiveSeason?.id
+    ? seasonParticipants : (selectedParticipantsResponse.data ?? []) as SeasonParticipantRow[];
+  const selectedDecisionById = new Map(selectedSeasonDecisions.map(row => [row.profile_id, row.status]));
   const registeredProfileIds = new Set(
     seasonParticipants
       .filter((participant) => participant.status === "registered")
@@ -261,12 +288,17 @@ export default async function AdminPage({ searchParams }: PageProps) {
   const activeParticipants = winnerProfiles.filter((participant) =>
     participant.is_active && registeredProfileIds.has(participant.id)
   );
+  const participantEmails = activeTab === "participants" || (isRaceWeek && raceWeekPhase === "picks")
+    ? await loadAdminParticipantEmails(winnerProfiles.map(participant => participant.id))
+    : {emailsByProfileId: new Map<string,string>(), warning: null};
   const adminParticipantRows: AdminParticipantRow[] = winnerProfiles.map((participant) => ({
+    email: participantEmails.emailsByProfileId.get(participant.id) ?? null,
     fullName: participant.full_name,
     id: participant.id,
     isActive: participant.is_active,
     pickCount: participantPickCounts.get(participant.id) ?? 0,
     registered: registeredProfileIds.has(participant.id),
+    enrollmentStatus: selectedDecisionById.get(participant.id) ?? null,
     role: participant.role,
     teamName: participant.team_name
   }));
@@ -280,36 +312,30 @@ export default async function AdminPage({ searchParams }: PageProps) {
   const raceDriverGroups: RaceDriverGroupRow[] = (
     raceDriverGroupsResponse.data ?? []
   ) as RaceDriverGroupRow[];
-  const activeIndy500Races =
-    selectedResultRace &&
-    normalizeRacePickFormat(selectedResultRace.pick_format) === "indy_500"
-      ? [selectedResultRace]
-      : [];
   const unpublishedSeasonRaces = currentSeasonRaces.filter(
     (race) => race.results_status !== "published"
   );
   const finalSeasonRace = [...currentSeasonRaces]
     .sort((a, b) => Date.parse(a.race_date) - Date.parse(b.race_date))
     .at(-1);
-  const currentTime = new Date().getTime();
   const canFinalizeSeason =
     currentSeasonRaces.length > 0 &&
     unpublishedSeasonRaces.length === 0 &&
     Boolean(finalSeasonRace && Date.parse(finalSeasonRace.race_date) <= currentTime);
-  const hallOfFameSeasonResponse = activeSeason && activeTab === "results"
-    ? await supabase
-      .from("hall_of_fame_seasons")
-      .select("id,finalized_at,participant_count,race_count")
-      .eq("season_year", activeSeason.season_year)
-      .maybeSingle<{
-      finalized_at: string;
-      id: number;
-      participant_count: number;
-      race_count: number;
-      }>()
-    : { data: null, error: null };
-  const savedHallOfFameSeason = hallOfFameSeasonResponse.data ?? null;
-  const hallOfFameMigrationReady = !hallOfFameSeasonResponse.error;
+  const archiveResponse = activeTab === "seasons"
+    ? await supabase.from("hall_of_fame_seasons")
+      .select("id,season_year,champion_team_name,champion_total_points,finalized_at,participant_count,race_count")
+      .order("season_year", {ascending: false})
+    : emptyResponse;
+  if (archiveResponse.error) await throwAdminLoadError("admin-archive-load-failed", archiveResponse.error, "load_archives");
+  const archives = (archiveResponse.data ?? []) as AdminArchiveSummary[];
+  const activeArchive = archives.find(archive => archive.season_year === activeSeason?.season_year);
+  const refreshableArchiveResponse = activeArchive
+    ? await supabase.from("hall_of_fame_entries").select("id")
+      .eq("season_id", activeArchive.id).neq("race_breakdown", "[]").limit(1)
+    : emptyResponse;
+  if (refreshableArchiveResponse.error) await throwAdminLoadError("admin-archive-source-load-failed", refreshableArchiveResponse.error, "load_archive_source");
+  const canRefreshArchive = !activeArchive || Boolean(refreshableArchiveResponse.data?.length);
   const scoringAudits = buildScoringAudits({
     drivers,
     participants: activeParticipants,
@@ -347,12 +373,13 @@ export default async function AdminPage({ searchParams }: PageProps) {
   let healthPickCount = 0;
   let healthPreviousResultsStatus = "No upcoming race is scheduled.";
   let healthSchemaVersion: string | null = null;
+  let healthCapabilities = parseAdminCapabilities(null, true);
   let healthReminderRows: AdminReminderHealthRow[] = [];
   let healthReminderQueue: AdminReminderQueueHealth | null = null;
   let healthReminderPreview: AdminReminderPreview | null = null;
   let healthJobRuns: AdminJobRunHealthRow[] = [];
   let healthJobEvents: AdminJobRunHealthRow[] = [];
-  let healthAuditRows: AdminAuditHealthRow[] = [];
+  let healthAuditLog: AdminAuditLogData | null = null;
   let healthAppErrors: AdminAppErrorRow[] = [];
   let healthAppErrorInboxReady = true;
   let healthAppErrorInboxIssue: string | null = null;
@@ -367,11 +394,11 @@ export default async function AdminPage({ searchParams }: PageProps) {
     const [
       metadataResponse,
       reminderResponse,
-      nextRaceResponse,
       jobStatusResponse,
       jobEventsResponse,
       auditResponse,
       healthContractResponse,
+      capabilityResponse,
       appErrorsResponse
     ] = await Promise.all([
       supabase.from("app_metadata").select("value").eq("key", "schema_version").maybeSingle(),
@@ -380,17 +407,6 @@ export default async function AdminPage({ searchParams }: PageProps) {
         .select("delivery_status,reminder_type,attempt_count,last_error,updated_at")
         .order("updated_at", { ascending: false })
         .limit(10),
-      activeSeason
-        ? supabase
-            .from("races")
-            .select(
-              "id,race_name,pick_format,pick_window_key,qualifying_start_at,race_date,results_status,season_id,round_number,field_frozen_at"
-            )
-            .eq("season_id", activeSeason.id)
-            .eq("is_archived", false)
-            .order("round_number", { ascending: true })
-            .returns<HealthRaceRow[]>()
-        : Promise.resolve({ data: [], error: null }),
       supabase
         .from("job_status")
         .select("job_name,status,summary,error_message,last_started_at,last_completed_at")
@@ -400,12 +416,9 @@ export default async function AdminPage({ searchParams }: PageProps) {
         .select("job_name,status,summary,error_message,started_at,completed_at")
         .order("started_at", { ascending: false })
         .limit(12),
-      supabase
-        .from("admin_audit_events")
-        .select("action,entity_type,summary,created_at")
-        .order("created_at", { ascending: false })
-        .limit(8),
+      loadAdminAuditLog(supabase, parseAdminAuditQuery(params)),
       supabase.rpc("get_app_health_contract"),
+      supabase.rpc("get_admin_capability_status"),
       supabase
         .from("app_error_events")
         .select(
@@ -420,20 +433,16 @@ export default async function AdminPage({ searchParams }: PageProps) {
     if (
       metadataResponse.error ||
       reminderResponse.error ||
-      nextRaceResponse.error ||
       jobStatusResponse.error ||
       jobEventsResponse.error ||
-      auditResponse.error ||
       healthContractResponse.error
     ) {
       await throwAdminLoadError(
         "admin-health-load-failed",
         metadataResponse.error?.message ??
           reminderResponse.error?.message ??
-          nextRaceResponse.error?.message ??
           jobStatusResponse.error?.message ??
           jobEventsResponse.error?.message ??
-          auditResponse.error?.message ??
           healthContractResponse.error?.message ??
           "Failed loading system health.",
         "load_health"
@@ -441,6 +450,7 @@ export default async function AdminPage({ searchParams }: PageProps) {
     }
 
     healthSchemaVersion = metadataResponse.data?.value ?? null;
+    healthCapabilities = parseAdminCapabilities(capabilityResponse.data, Boolean(capabilityResponse.error));
     healthReminderRows = (reminderResponse.data ?? []) as AdminReminderHealthRow[];
     healthJobRuns = (jobStatusResponse.data ?? []).map((row) => ({
       completed_at: row.last_completed_at,
@@ -451,7 +461,7 @@ export default async function AdminPage({ searchParams }: PageProps) {
       summary: row.summary
     })) as AdminJobRunHealthRow[];
     healthJobEvents = (jobEventsResponse.data ?? []) as AdminJobRunHealthRow[];
-    healthAuditRows = (auditResponse.data ?? []) as AdminAuditHealthRow[];
+    healthAuditLog = auditResponse;
     healthAppErrorInboxReady = !appErrorsResponse.error;
     healthAppErrorInboxIssue = appErrorsResponse.error
       ? /app_error_events|relation .* does not exist|schema cache/i.test(
@@ -476,9 +486,12 @@ export default async function AdminPage({ searchParams }: PageProps) {
             version: string;
           })
         : null;
-    healthNextRaces = nextPickWindow(nextRaceResponse.data ?? [], new Date());
-    healthNextRace = healthNextRaces[0] ?? null;
+  }
 
+  let missingParticipants: WinnerProfileRow[] = [];
+  if (isRaceWeek && raceWeekPhase === "picks" && selectedResultRace) {
+    healthNextRaces = racesInPickWindow(currentSeasonRaces, selectedResultRace);
+    healthNextRace = healthNextRaces[0] ?? null;
     if (healthNextRace) {
       const pickDeadline = pickLockAtForRace(healthNextRace);
       const reminderWindow = getReminderWindow(
@@ -486,27 +499,25 @@ export default async function AdminPage({ searchParams }: PageProps) {
       );
       const [healthPicksResponse, gate, queueResponse, reminderHistoryResponse] = await Promise.all([
         registeredProfileIds.size > 0
-          ? supabase
-              .from("picks")
-              .select("race_id,user_id")
-              .in("race_id", healthNextRaces.map((race) => race.id))
-              .in("user_id", Array.from(registeredProfileIds))
-          : Promise.resolve({ data: [], error: null }),
-        getPreviousRaceResultsGate(supabase, healthNextRace),
+          ? paginatedAdminLoad<{race_id:number; user_id:string}>("pick-window submissions", (from,to) => supabase
+              .from("picks").select("race_id,user_id").in("race_id", healthNextRaces.map(race => race.id))
+              .order("race_id", {ascending:true}).order("user_id", {ascending:true}).range(from,to))
+          : Promise.resolve({data: [], error: null}),
+        getPreviousRaceResultsGate(supabase, healthNextRace, {
+          includeDiagnostics: true,
+          seasonRaces: currentSeasonRaces
+        }),
         reminderWindow
-          ? supabase
+          ? paginatedAdminLoad<ReminderQueueRow>("reminder queue", (from,to) => supabase
               .from("pick_reminders")
-              .select(
-                "id,user_id,channel,recipient,delivery_status,attempt_count,last_attempt_at,lease_expires_at"
-              )
-              .eq("race_id", healthNextRace.id)
-              .eq("reminder_type", reminderWindow.key)
-          : Promise.resolve({ data: [], error: null }),
-        supabase
-          .from("pick_reminders")
-          .select("reminder_type,delivery_status,channel")
-          .eq("race_id", healthNextRace.id)
-          .eq("channel", "email")
+              .select("id,user_id,channel,recipient,delivery_status,attempt_count,last_attempt_at,lease_expires_at")
+              .eq("race_id", healthNextRace!.id).eq("reminder_type", reminderWindow.key)
+              .order("id", {ascending:true}).range(from,to).returns<ReminderQueueRow[]>())
+          : Promise.resolve({data: [], error: null}),
+        paginatedAdminLoad<{reminder_type:string; delivery_status:string; channel:string}>("reminder history", (from,to) => supabase
+          .from("pick_reminders").select("reminder_type,delivery_status,channel")
+          .eq("race_id", healthNextRace!.id).eq("channel", "email")
+          .order("id", {ascending:true}).range(from,to))
       ]);
       if (healthPicksResponse.error || queueResponse.error || reminderHistoryResponse.error) {
         await throwAdminLoadError(
@@ -515,10 +526,11 @@ export default async function AdminPage({ searchParams }: PageProps) {
           "load_reminder_health"
         );
       }
-      const healthPickRows = (healthPicksResponse.data ?? []) as Array<{
+      const healthPickRows = ((healthPicksResponse.data ?? []) as Array<{
         race_id: number;
         user_id: string;
-      }>;
+      }>).filter(row => registeredProfileIds.has(row.user_id));
+      missingParticipants = missingPickParticipants(activeParticipants, healthNextRaces.map(race => race.id), healthPickRows);
       healthPickCount = healthPickRows.length;
       healthPreviousResultsStatus =
         gate.status === "ready" ? "Ready: previous results are published." : gate.shortMessage;
@@ -616,7 +628,7 @@ export default async function AdminPage({ searchParams }: PageProps) {
       {message ? (
         <CompactNotice
           className="mt-6"
-          data-testid={activeTab === "results" ? "admin-results-save-alert" : undefined}
+          data-testid={isRaceWeek ? "admin-results-save-alert" : undefined}
           tone="success"
         >
           {message}
@@ -629,38 +641,26 @@ export default async function AdminPage({ searchParams }: PageProps) {
         </CompactNotice>
       ) : null}
 
-      <AdminWorkspaceNav activeTab={activeTab} />
+      <AdminWorkspaceNav activeTab={activeTab}
+        openErrorCount={activeTab === "health" ? (healthAppErrorInboxReady ? healthOpenAppErrorCount : null) : attention.openErrors}
+        unpublishedRaceCount={hasActiveCalendar ? currentSeasonRaces.filter(race => race.results_status !== "published" && Date.parse(race.race_date) <= currentTime).length : attention.unpublishedRaces} />
 
       {activeTab === "health" ? (
         <AdminSystemHealth
-          activeSeasonName={activeSeason?.display_name ?? null}
           appErrorInboxReady={healthAppErrorInboxReady}
           appErrorInboxIssue={healthAppErrorInboxIssue}
           appErrors={healthAppErrors}
-          auditRows={healthAuditRows}
+          auditLog={healthAuditLog!}
           cleanupTestFlowDataAction={cleanupTestFlowDataAction}
           currentTime={currentTime}
           emailEnabled={process.env.PICK_EMAILS_ENABLED?.toLowerCase() === "true"}
           healthContract={healthContract}
+          capabilities={healthCapabilities}
+          activeSeasonYear={activeSeason?.season_year ?? null}
           jobEvents={healthJobEvents}
           jobRuns={healthJobRuns}
-          nextRace={healthNextRace ? {
-            expectedPickCount: registeredProfileIds.size * healthNextRaces.length,
-            fieldFrozen: healthNextRaces.every((race) => Boolean(race.field_frozen_at)),
-            pickLockAt: pickLockAtForRace(healthNextRace),
-            pickCount: healthPickCount,
-            previousResultsStatus: healthPreviousResultsStatus,
-            raceName: pickWindowDisplayName(healthNextRaces, healthNextRace.race_name),
-            roundLabel: pickWindowRoundLabel(healthNextRaces),
-            roundNumber: healthNextRace.round_number
-          } : null}
-          registeredTeamCount={registeredProfileIds.size}
-          reminderQueue={healthReminderQueue}
-          reminderPreview={healthReminderPreview}
           reminderRows={healthReminderRows}
           resolveAppErrorAction={resolveAppErrorAction}
-          retryFailedRemindersAction={retryFailedPickRemindersAction}
-          sendReminderTestAction={sendPickReminderTestAction}
           schemaVersion={healthSchemaVersion}
           openAppErrorCount={healthOpenAppErrorCount}
         />
@@ -668,6 +668,9 @@ export default async function AdminPage({ searchParams }: PageProps) {
 
       {activeTab === "recovery" ? (
         <SeasonRecoveryCenter
+          key={selectedRecoverySeason?.id ?? "no-season"}
+          seasons={seasons.map(season => ({id:season.id,seasonYear:season.season_year,status:season.status}))}
+          selectedSeasonId={selectedRecoverySeason?.id ?? null}
           activeSeason={
             activeSeason
               ? { id: activeSeason.id, seasonYear: activeSeason.season_year }
@@ -680,6 +683,12 @@ export default async function AdminPage({ searchParams }: PageProps) {
 
       {activeTab === "participants" ? (
         <AdminParticipantsWorkspace
+          key={selectedParticipantSeason?.id ?? "no-season"}
+          activeSeasonId={activeSeason?.id ?? null}
+          selectedParticipantSeasonId={selectedParticipantSeason?.id ?? null}
+          participantSeasons={participantSeasons.map(season => ({id:season.id,seasonYear:season.season_year,status:season.status as "active"|"upcoming"}))}
+          currentAdminId={user.id}
+          emailWarning={participantEmails.warning}
           activeSeasonYear={activeSeason?.season_year ?? null}
           initialQuery={participantQuery}
           initialStatus={participantStatus}
@@ -695,43 +704,37 @@ export default async function AdminPage({ searchParams }: PageProps) {
         />
       ) : null}
 
+      {activeTab === "seasons" ? <AdminSeasonsWorkspace activeSeason={activeSeason} seasons={seasons} archives={archives}
+        currentSeasonRaces={currentSeasonRaces} canFinalizeSeason={canFinalizeSeason} canRefreshArchive={canRefreshArchive} finalSeasonRace={finalSeasonRace}
+        unpublishedSeasonRaces={unpublishedSeasonRaces} siteOrigin={canonicalSiteOrigin()} /> : null}
+
       {activeTab === "races" ? (
-        <AdminRacesWorkspace
-          activeParticipants={activeParticipants}
-          activeSeason={activeSeason}
-          currentSeasonRaces={currentSeasonRaces}
-          pickWindowPartnerByRaceId={pickWindowPartnerByRaceId}
-          races={races}
-          racesByPickWindow={racesByPickWindow}
-          seasonById={seasonById}
-          seasons={seasons}
-          selectedRaceSeason={selectedRaceSeason}
-          teamNameByProfileId={teamNameByProfileId}
-        />
+        <AdminRacesWorkspace activeSeason={activeSeason} pickWindowPartnerByRaceId={pickWindowPartnerByRaceId}
+          races={races} racesByPickWindow={racesByPickWindow} seasonById={seasonById} seasons={seasons}
+          selectedRaceSeason={selectedRaceSeason} teamNameByProfileId={teamNameByProfileId} />
       ) : null}
 
-      {activeTab === "results" ? (
-        <AdminResultsWorkspace
-          activeIndy500Races={activeIndy500Races}
-          activeParticipants={activeParticipants}
-          activeSeason={activeSeason}
-          canFinalizeSeason={canFinalizeSeason}
-          currentSeasonRaces={currentSeasonRaces}
-          driverNameById={driverNameById}
-          drivers={drivers}
-          finalSeasonRace={finalSeasonRace}
-          hallOfFameMigrationReady={hallOfFameMigrationReady}
-          pickRows={pickRows}
-          raceById={raceById}
-          raceDriverGroups={raceDriverGroups}
-          results={results}
-          savedHallOfFameSeason={savedHallOfFameSeason}
-          scoringAudits={scoringAudits}
-          selectedResultRace={selectedResultRace}
-          sortedResults={sortedResults}
-          unpublishedSeasonRaces={unpublishedSeasonRaces}
-        />
-      ) : null}
+      {isRaceWeek ? <AdminRaceWeekWorkspace key={`${selectedResultRace?.id}-${raceWeekPhase}`} race={selectedResultRace}
+        drivers={drivers} snapshot={raceDriverGroups} currentTime={currentTime} races={currentSeasonRaces} phase={raceWeekPhase} participants={activeParticipants} teamNameByProfileId={teamNameByProfileId}>
+        {raceWeekPhase === "results" ? <AdminResultsWorkspace activeParticipants={activeParticipants}
+          driverNameById={driverNameById} drivers={drivers} pickRows={pickRows} raceById={raceById}
+          raceDriverGroups={raceDriverGroups} scoringAudits={scoringAudits}
+          selectedResultRace={selectedResultRace} sortedResults={sortedResults} /> : null}
+        {raceWeekPhase === "picks" && selectedResultRace ? <>
+          <AdminMissingPicks participants={missingParticipants.map(participant => ({id:participant.id, teamName:participant.team_name, email:participantEmails.emailsByProfileId.get(participant.id) ?? null}))}
+            total={activeParticipants.length} emailWarning={participantEmails.warning} />
+          <AdminRemindersWorkspace selectedRaceId={selectedResultRace.id} emailEnabled={process.env.PICK_EMAILS_ENABLED?.toLowerCase() === "true"}
+            reminderQueue={healthReminderQueue} reminderPreview={healthReminderPreview}
+            retryFailedRemindersAction={retryFailedPickRemindersAction} sendReminderTestAction={sendPickReminderTestAction}
+            nextRace={healthNextRace ? {
+              expectedPickCount: registeredProfileIds.size * healthNextRaces.length,
+              pickLockAt: pickLockAtForRace(healthNextRace), pickCount: healthPickCount,
+              previousResultsStatus: healthPreviousResultsStatus,
+              raceName: pickWindowDisplayName(healthNextRaces, healthNextRace.race_name),
+              roundLabel: pickWindowRoundLabel(healthNextRaces), roundNumber: healthNextRace.round_number
+            } : null} />
+        </> : null}
+      </AdminRaceWeekWorkspace> : null}
 
       {activeTab === "feedback" ? (
         <AdminFeedbackWorkspace

@@ -13,10 +13,12 @@ export type PickemRaceForResultsGate = {
   race_name: string;
   round_number: number;
   season_id: number;
-  results_status?: "draft" | "published" | null;
 };
 
-type PreviousRaceRow = PickemRaceForResultsGate;
+export type PickemSeasonRaceForResultsGate = PickemRaceForResultsGate & {
+  is_archived?: boolean;
+  results_status: "draft" | "published";
+};
 
 export type PreviousRaceInfo = {
   id: number;
@@ -25,72 +27,91 @@ export type PreviousRaceInfo = {
   roundNumber: number;
 };
 
-export type PreviousRaceResultsGate =
+export type PreviousRaceResultsDiagnostics = {
+  expectedResultCount: number;
+  missingResultCount: number;
+  resultCount: number;
+};
+
+export type PreviousRaceResultsGate = {
+  diagnostics: PreviousRaceResultsDiagnostics | null;
+  previousRaces: PreviousRaceInfo[];
+} & (
   | {
-      expectedResultCount: number | null;
       previousRace: PreviousRaceInfo | null;
-      previousRaces: PreviousRaceInfo[];
-      resultCount: number;
       status: "ready";
     }
   | {
-      expectedResultCount: number;
       message: string;
-      missingResultCount: number;
       previousRace: PreviousRaceInfo;
-      previousRaces: PreviousRaceInfo[];
-      resultCount: number;
       shortMessage: string;
       status: "blocked";
-    };
+    }
+);
 
-const countValue = (value: number | null): number => (typeof value === "number" ? value : 0);
+type ResultsGateOptions = {
+  // Pass the complete season query, never a future-only or current-window subset.
+  seasonRaces?: readonly PickemSeasonRaceForResultsGate[];
+  // Only administrative callers can read unpublished result rows under RLS.
+  includeDiagnostics?: boolean;
+};
 
-const toPreviousRaceInfo = (race: PreviousRaceRow): PreviousRaceInfo => ({
+// The schema permits unique rounds 1–99 within a season. Read one extra row to
+// detect an unexpected oversized schedule instead of silently truncating it.
+const MAX_SEASON_RACES = 99;
+
+const toPreviousRaceInfo = (race: PickemRaceForResultsGate): PreviousRaceInfo => ({
   id: race.id,
   raceDate: race.race_date,
   raceName: race.race_name,
   roundNumber: race.round_number
 });
 
-const loadPreviousPickWindow = async (
+/** Resolve the previous shared window from a complete season schedule. */
+export const previousPickWindowRaces = (
+  seasonRaces: readonly PickemSeasonRaceForResultsGate[],
+  race: PickemRaceForResultsGate
+): PickemSeasonRaceForResultsGate[] => {
+  const races = seasonRaces
+    .filter((candidate) => candidate.season_id === race.season_id && !candidate.is_archived)
+    .sort((left, right) => left.round_number - right.round_number);
+  const currentRace = races.find((candidate) => candidate.id === race.id);
+  const uniqueIds = new Set(races.map((candidate) => candidate.id));
+  const uniqueRounds = new Set(races.map((candidate) => candidate.round_number));
+
+  if (
+    !currentRace ||
+    currentRace.round_number !== race.round_number ||
+    currentRace.pick_window_key !== race.pick_window_key ||
+    races.length > MAX_SEASON_RACES ||
+    uniqueIds.size !== races.length ||
+    uniqueRounds.size !== races.length ||
+    races.some((candidate) =>
+      !Number.isInteger(candidate.round_number) ||
+      candidate.round_number < 1 ||
+      candidate.round_number > MAX_SEASON_RACES ||
+      !candidate.pick_window_key
+    )
+  ) {
+    throw new Error("Cannot check previous results without a valid complete season schedule.");
+  }
+
+  const firstWindowRace = races.find(
+    (candidate) => candidate.pick_window_key === race.pick_window_key
+  )!;
+  const previousAnchor = races
+    .filter((candidate) => candidate.round_number < firstWindowRace.round_number)
+    .at(-1);
+
+  return previousAnchor
+    ? races.filter((candidate) => candidate.pick_window_key === previousAnchor.pick_window_key)
+    : [];
+};
+
+const loadSeasonRaces = async (
   supabase: AppSupabaseClient,
   race: PickemRaceForResultsGate
-): Promise<PreviousRaceRow[]> => {
-  const { data: currentWindowRows, error: currentWindowError } = await supabase
-    .from("races")
-    .select("round_number")
-    .eq("is_archived", false)
-    .eq("season_id", race.season_id)
-    .eq("pick_window_key", race.pick_window_key)
-    .order("round_number", { ascending: true })
-    .limit(1);
-
-  if (currentWindowError) {
-    throw new Error(`Failed to load the current pick window: ${currentWindowError.message}`);
-  }
-
-  const firstRound =
-    (currentWindowRows?.[0] as { round_number?: number } | undefined)?.round_number ??
-    race.round_number;
-  const { data: previousAnchor, error: previousAnchorError } = await supabase
-    .from("races")
-    .select("pick_window_key")
-    .eq("is_archived", false)
-    .eq("season_id", race.season_id)
-    .lt("round_number", firstRound)
-    .order("round_number", { ascending: false })
-    .limit(1)
-    .maybeSingle<{ pick_window_key: string }>();
-
-  if (previousAnchorError) {
-    throw new Error(`Failed to load the previous pick window: ${previousAnchorError.message}`);
-  }
-
-  if (!previousAnchor) {
-    return [];
-  }
-
+): Promise<PickemSeasonRaceForResultsGate[]> => {
   const { data, error } = await supabase
     .from("races")
     .select(
@@ -98,42 +119,25 @@ const loadPreviousPickWindow = async (
     )
     .eq("is_archived", false)
     .eq("season_id", race.season_id)
-    .eq("pick_window_key", previousAnchor.pick_window_key)
-    .order("round_number", { ascending: true });
+    .order("round_number", { ascending: true })
+    .limit(MAX_SEASON_RACES + 1)
+    .returns<PickemSeasonRaceForResultsGate[]>();
 
   if (error) {
-    throw new Error(`Failed to load previous pick-window races: ${error.message}`);
+    throw new Error(`Failed to load the season schedule for previous results: ${error.message}`);
   }
 
-  return (data ?? []) as PreviousRaceRow[];
+  return data ?? [];
 };
 
-export const getPreviousRaceResultsGate = async (
+const loadResultDiagnostics = async (
   supabase: AppSupabaseClient,
-  race: PickemRaceForResultsGate
-): Promise<PreviousRaceResultsGate> => {
-  const previousRaces = await loadPreviousPickWindow(supabase, race);
-
-  if (previousRaces.length === 0) {
-    return {
-      expectedResultCount: null,
-      previousRace: null,
-      previousRaces: [],
-      resultCount: 0,
-      status: "ready"
-    };
-  }
-
-  const previousRaceIds = previousRaces.map((previousRace) => previousRace.id);
+  previousRaces: readonly PickemSeasonRaceForResultsGate[]
+): Promise<PreviousRaceResultsDiagnostics> => {
+  const previousRaceIds = previousRaces.map((race) => race.id);
   const [resultsResponse, snapshotResponse, activeDriversResponse] = await Promise.all([
-    supabase
-      .from("results")
-      .select("race_id")
-      .in("race_id", previousRaceIds),
-    supabase
-      .from("race_driver_groups")
-      .select("race_id")
-      .in("race_id", previousRaceIds),
+    supabase.from("results").select("race_id").in("race_id", previousRaceIds),
+    supabase.from("race_driver_groups").select("race_id").in("race_id", previousRaceIds),
     supabase
       .from("drivers")
       .select("id", { count: "exact", head: true })
@@ -152,68 +156,69 @@ export const getPreviousRaceResultsGate = async (
     throw new Error(`Failed to count active drivers: ${activeDriversResponse.error.message}`);
   }
 
-  const resultCountByRace = new Map<number, number>();
   const snapshotCountByRace = new Map<number, number>();
-  (resultsResponse.data ?? []).forEach((row) => {
-    resultCountByRace.set(row.race_id, (resultCountByRace.get(row.race_id) ?? 0) + 1);
-  });
   (snapshotResponse.data ?? []).forEach((row) => {
     snapshotCountByRace.set(row.race_id, (snapshotCountByRace.get(row.race_id) ?? 0) + 1);
   });
-  const activeDriverCount = countValue(activeDriversResponse.count);
-  const raceReadiness = previousRaces.map((previousRace) => {
-    const resultCount = resultCountByRace.get(previousRace.id) ?? 0;
+  const expectedResultCount = previousRaces.reduce((total, previousRace) => {
     const snapshotCount = snapshotCountByRace.get(previousRace.id) ?? 0;
-    const pickFormat = normalizeRacePickFormat(previousRace.pick_format);
-    const fallbackExpectedCount =
-      pickFormat === "indy_500" ? INDY_500_QUALIFYING_FIELD_SIZE : activeDriverCount;
-    const expectedResultCount = Math.max(snapshotCount || fallbackExpectedCount, 1);
+    const fallbackCount = normalizeRacePickFormat(previousRace.pick_format) === "indy_500"
+      ? INDY_500_QUALIFYING_FIELD_SIZE
+      : (activeDriversResponse.count ?? 0);
+    return total + Math.max(snapshotCount || fallbackCount, 1);
+  }, 0);
+  const resultCount = resultsResponse.data?.length ?? 0;
 
-    return {
-      expectedResultCount,
-      ready:
-        previousRace.results_status === "published" ||
-        (previousRace.results_status == null && resultCount >= expectedResultCount),
-      resultCount
-    };
-  });
-  const expectedResultCount = raceReadiness.reduce(
-    (total, readiness) => total + readiness.expectedResultCount,
-    0
-  );
-  const resultCount = raceReadiness.reduce(
-    (total, readiness) => total + readiness.resultCount,
-    0
+  return {
+    expectedResultCount,
+    missingResultCount: Math.max(0, expectedResultCount - resultCount),
+    resultCount
+  };
+};
+
+export const getPreviousRaceResultsGate = async (
+  supabase: AppSupabaseClient,
+  race: PickemRaceForResultsGate,
+  { seasonRaces, includeDiagnostics = false }: ResultsGateOptions = {}
+): Promise<PreviousRaceResultsGate> => {
+  const previousRaces = previousPickWindowRaces(
+    seasonRaces ?? await loadSeasonRaces(supabase, race),
+    race
   );
   const previousRaceInfo = previousRaces.map(toPreviousRaceInfo);
-  const previousRace = previousRaceInfo[previousRaceInfo.length - 1];
+  const previousRace = previousRaceInfo.at(-1) ?? null;
+  const unpublishedRaces = previousRaces.filter(
+    (candidate) => candidate.results_status !== "published"
+  );
 
-  if (raceReadiness.every((readiness) => readiness.ready)) {
+  // Publication is also the database pick-deadline trigger's readiness rule.
+  // Counts are diagnostics, not a substitute for an administrator publishing.
+  if (!previousRace || unpublishedRaces.length === 0) {
     return {
-      expectedResultCount,
+      diagnostics: null,
       previousRace,
       previousRaces: previousRaceInfo,
-      resultCount,
       status: "ready"
     };
   }
 
-  const countText = `${resultCount}/${expectedResultCount} result rows saved`;
-  const unpublishedNames = previousRaces
-    .filter((_, index) => !raceReadiness[index].ready)
-    .map((previousRace) => previousRace.race_name);
-  const previousWindowLabel =
-    previousRaces.length > 1 ? "both doubleheader races" : previousRace.raceName;
-  const waitingLabel = unpublishedNames.join(" and ");
+  const diagnostics = includeDiagnostics
+    ? await loadResultDiagnostics(supabase, previousRaces)
+    : null;
+  const countText = diagnostics
+    ? ` (${diagnostics.resultCount}/${diagnostics.expectedResultCount} result rows saved)`
+    : "";
+  const waitingLabel = unpublishedRaces.map((candidate) => candidate.race_name).join(" and ");
+  const previousWindowLabel = previousRaces.length > 1
+    ? "both doubleheader races"
+    : previousRace.raceName;
 
   return {
-    expectedResultCount,
-    message: `The ${race.race_name} Pick'em form will open after results for ${previousWindowLabel} are published and driver groups refresh (${countText}).`,
-    missingResultCount: Math.max(0, expectedResultCount - resultCount),
+    diagnostics,
+    message: `Picks for ${race.race_name} are unavailable until results for ${previousWindowLabel} are published and driver groups refresh${countText}.`,
     previousRace,
     previousRaces: previousRaceInfo,
-    resultCount,
-    shortMessage: `Waiting on ${waitingLabel} results (${countText}).`,
+    shortMessage: `Waiting for ${waitingLabel} results to be published${countText}.`,
     status: "blocked"
   };
 };

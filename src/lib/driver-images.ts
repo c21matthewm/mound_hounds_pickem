@@ -1,5 +1,7 @@
 import "server-only";
 
+import { randomUUID } from "node:crypto";
+
 import { createServiceRoleSupabaseClient } from "@/lib/supabase/service-role";
 import { deleteManagedImage, optimizeUploadedImage } from "@/lib/supabase/managed-images";
 
@@ -83,7 +85,7 @@ export async function uploadDriverHeadshot(params: {
   const service = createServiceRoleSupabaseClient();
 
   const safeName = slugify(driverName) || `driver-${driverId}`;
-  const path = `drivers/${driverId}/${safeName}-${Date.now()}.webp`;
+  const path = `drivers/${driverId}/${safeName}-${randomUUID()}.webp`;
   const optimizedImage = await optimizeUploadedImage(file, {
     height: 640,
     quality: 78,
@@ -93,7 +95,7 @@ export async function uploadDriverHeadshot(params: {
   const { error: uploadError } = await service.storage.from(DRIVER_IMAGE_BUCKET).upload(path, optimizedImage, {
     cacheControl: "31536000",
     contentType: "image/webp",
-    upsert: true
+    upsert: false
   });
 
   if (uploadError) {

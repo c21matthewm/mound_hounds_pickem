@@ -124,6 +124,9 @@ export function StandingsTable({
       description={`${firstVisible}-${lastVisible} of ${sortedRows.length} teams`}
       title={seasonYear ? `${seasonYear} Standings` : "Season Standings"}
     >
+      <p className="border-b border-slate-200 px-3 py-2 text-xs leading-5 text-slate-600">
+        Equal season totals are ranked by the latest race score, then the previous race score.
+      </p>
       <div className="grid grid-cols-4 gap-1 border-b border-slate-200 bg-white p-2 md:hidden">
         {([
           ["currentStanding", "Rank"],

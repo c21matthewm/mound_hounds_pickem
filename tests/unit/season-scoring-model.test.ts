@@ -85,6 +85,32 @@ const raceDriverGroups = races.flatMap((race) =>
     }))
 );
 
+// Each team's score comes from its group-one driver; the other groups score zero.
+// This isolates cumulative ranks while exercising the actual race projection.
+const modelForRaceScores = (
+  pointsByRace: number[][],
+  schedule: SeasonScoringRace[] = races.slice(0, pointsByRace.length)
+) => {
+  const selectedRaces = races.slice(0, pointsByRace.length);
+  const selectedParticipants = participants.slice(0, pointsByRace[0]?.length ?? 2);
+  return buildSeasonScoringModel({
+    drivers,
+    participants: selectedParticipants,
+    picks: selectedParticipants.flatMap((_, index) =>
+      selectedRaces.map((race) => pickFor(index, race))
+    ),
+    raceDriverGroups: raceDriverGroups.filter((row) => row.race_id <= selectedRaces.length),
+    races: schedule,
+    results: selectedRaces.flatMap((race, index) =>
+      drivers.filter((driver) => driver.group_number <= 6).map((driver) => ({
+        driver_id: driver.id,
+        points: driver.group_number === 1 ? (pointsByRace[index][driver.id - 1] ?? 0) : 0,
+        race_id: race.id
+      }))
+    )
+  });
+};
+
 describe("season scoring model", () => {
   it("builds one consistent 90-team, 18-race model for standings and analytics", () => {
     const model = buildSeasonScoringModel({
@@ -214,5 +240,121 @@ describe("season scoring model", () => {
       1,
       1
     ]);
+  });
+
+  it("breaks equal season totals with the latest race and keeps analytics and movement consistent", () => {
+    const model = modelForRaceScores([[60, 40, 30, 10], [40, 60, 20, 0]]);
+    const rows = model.leaderboardSnapshot.leaderboardRows;
+
+    expect(rows.map((row) => [row.teamName, row.totalPoints, row.currentStanding, row.change])).toEqual([
+      [participants[1].teamName, 100, 1, 1],
+      [participants[0].teamName, 100, 2, -1],
+      [participants[2].teamName, 50, 3, 0],
+      [participants[3].teamName, 10, 4, 0]
+    ]);
+    rows.forEach((row) => {
+      expect(model.analyticsByUserId[row.userId].summary.currentStanding).toBe(row.currentStanding);
+      expect(model.analyticsByUserId[row.userId].summary.totalPoints).toBe(row.totalPoints);
+    });
+    expect(model.analyticsByUserId[participants[0].id].raceRows.map((row) => row.weeklyFinish)).toEqual([1, 2]);
+    expect(model.analyticsByUserId[participants[1].id].raceRows.map((row) => row.weeklyFinish)).toEqual([2, 1]);
+  });
+
+  it("uses the second-to-last race when totals and the latest race match", () => {
+    const model = modelForRaceScores([[60, 40, 30, 10], [40, 60, 20, 0], [20, 20, 10, 0]]);
+    const leaders = model.leaderboardSnapshot.leaderboardRows.slice(0, 2);
+
+    expect(leaders.map((row) => [row.teamName, row.totalPoints, row.currentStanding, row.change])).toEqual([
+      [participants[1].teamName, 120, 1, 0],
+      [participants[0].teamName, 120, 2, 0]
+    ]);
+    leaders.forEach((row) => {
+      expect(model.analyticsByUserId[row.userId].summary.currentStanding).toBe(row.currentStanding);
+    });
+  });
+
+  it("prioritizes total points over the latest race and the latest race over the previous one", () => {
+    const model = modelForRaceScores([[130, 40, 30, 50], [0, 60, 40, 30], [0, 20, 50, 30]]);
+
+    expect(model.leaderboardSnapshot.leaderboardRows.map((row) => [row.teamName, row.totalPoints])).toEqual([
+      [participants[0].teamName, 130],
+      [participants[2].teamName, 120],
+      [participants[1].teamName, 120],
+      [participants[3].teamName, 110]
+    ]);
+  });
+
+  it("resolves a three-way points tie using both race comparisons", () => {
+    const model = modelForRaceScores([[40, 50, 60], [40, 50, 40], [40, 20, 20]]);
+
+    expect(model.leaderboardSnapshot.leaderboardRows.map((row) => [row.teamName, row.currentStanding])).toEqual([
+      [participants[0].teamName, 1],
+      [participants[1].teamName, 2],
+      [participants[2].teamName, 3]
+    ]);
+  });
+
+  it("applies the same tiebreak below first place", () => {
+    const model = modelForRaceScores([[100, 60, 40, 10], [100, 40, 60, 0]]);
+
+    expect(model.leaderboardSnapshot.leaderboardRows.map((row) => [row.teamName, row.currentStanding])).toEqual([
+      [participants[0].teamName, 1],
+      [participants[2].teamName, 2],
+      [participants[1].teamName, 3],
+      [participants[3].teamName, 4]
+    ]);
+  });
+
+  it("stops after the last two races even when an earlier race would break the tie", () => {
+    const model = modelForRaceScores([[60, 40, 10], [40, 60, 0], [20, 20, 0], [10, 10, 0]]);
+
+    expect(model.leaderboardSnapshot.leaderboardRows.map((row) => [row.teamName, row.currentStanding])).toEqual([
+      [participants[0].teamName, 1],
+      [participants[1].teamName, 1],
+      [participants[2].teamName, 3]
+    ]);
+  });
+
+  it("retains competition ranks for unresolved ties below the champion", () => {
+    const model = modelForRaceScores([[100, 60, 40, 0], [100, 40, 60, 0], [100, 20, 20, 0], [100, 10, 10, 0]]);
+    expect(model.leaderboardSnapshot.leaderboardRows.map((row) => row.currentStanding)).toEqual([1, 2, 2, 4]);
+  });
+
+  it("treats a zero-point final race as a score and still uses the previous race", () => {
+    const model = modelForRaceScores([[60, 40], [40, 60], [0, 0]]);
+    expect(model.leaderboardSnapshot.leaderboardRows.map((row) => row.teamName)).toEqual([
+      participants[1].teamName, participants[0].teamName
+    ]);
+  });
+
+  it("uses completed season rounds from an unsorted schedule without including future races", () => {
+    const schedule = [races[4], races[2], races[0], races[3], races[1]];
+    const original = structuredClone(schedule);
+    const model = modelForRaceScores([[60, 40], [40, 60], [20, 20]], schedule);
+    expect(model.leaderboardSnapshot.raceColumns.map((race) => race.raceId)).toEqual([1, 2, 3]);
+    expect(model.leaderboardSnapshot.leaderboardRows.map((row) => row.teamName)).toEqual([
+      participants[1].teamName, participants[0].teamName
+    ]);
+    expect(schedule).toEqual(original);
+  });
+
+  it("has no standings before any race has results", () => {
+    const model = modelForRaceScores([], races);
+    expect(model.leaderboardSnapshot.leaderboardRows).toEqual([]);
+    expect(model.analyticsByUserId[participants[0].id].summary.currentStanding).toBeNull();
+  });
+
+  it("recalculates the second-to-last-race tiebreak after a correction without changing old snapshots", () => {
+    const original = modelForRaceScores([[70, 30], [20, 60], [10, 10]]);
+    const corrected = modelForRaceScores([[30, 70], [60, 20], [10, 10]]);
+
+    expect(corrected.leaderboardSnapshot.leaderboardRows.map((row) => [row.teamName, row.currentStanding])).toEqual([
+      [participants[0].teamName, 1], [participants[1].teamName, 2]
+    ]);
+    expect(original.leaderboardSnapshot.leaderboardRows.map((row) => [row.teamName, row.currentStanding])).toEqual([
+      [participants[1].teamName, 1], [participants[0].teamName, 2]
+    ]);
+    expect(original.leaderboardSnapshot.leaderboardRows.every((row) => row.totalPoints === 100)).toBe(true);
+    expect(corrected.leaderboardSnapshot.leaderboardRows.every((row) => row.totalPoints === 100)).toBe(true);
   });
 });

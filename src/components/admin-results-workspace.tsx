@@ -1,13 +1,10 @@
-import { finalizeHallOfFameSeasonAction } from "@/app/admin/hall-of-fame-actions";
 import {
-  importIndy500QualifyingOrderAction,
   importIndycarResultsAction,
   publishSavedRaceResultsAction,
   upsertResultAction
 } from "@/app/admin/result-actions";
 import type {
   DriverRow,
-  LeagueSeasonRow,
   PickSummaryRow,
   RaceDriverGroupRow,
   RaceRow,
@@ -20,197 +17,37 @@ import {
   formatOptionalDecimal
 } from "@/app/admin/admin-data";
 import { AdminResultsImportForm } from "@/components/admin-results-import-form";
-import { ConfirmSubmitButton } from "@/components/confirm-submit-button";
 import { SubmitButton } from "@/components/submit-button";
-import {
-  AdminWorkspaceHeader,
-  Disclosure,
-  StatusChip
-} from "@/components/ui-primitives";
 import { normalizeRacePickFormat } from "@/lib/race-format";
 
-type SavedHallOfFameSeason = {
-  finalized_at: string;
-  id: number;
-  participant_count: number;
-  race_count: number;
-};
-
 type AdminResultsWorkspaceProps = {
-  activeIndy500Races: RaceRow[];
   activeParticipants: WinnerProfileRow[];
-  activeSeason: LeagueSeasonRow | null;
-  canFinalizeSeason: boolean;
-  currentSeasonRaces: RaceRow[];
   driverNameById: Map<number, string>;
   drivers: DriverRow[];
-  finalSeasonRace: RaceRow | undefined;
-  hallOfFameMigrationReady: boolean;
   pickRows: PickSummaryRow[];
   raceById: Map<number, RaceRow>;
   raceDriverGroups: RaceDriverGroupRow[];
-  results: ResultRow[];
-  savedHallOfFameSeason: SavedHallOfFameSeason | null;
   scoringAudits: ScoringAudit[];
   selectedResultRace: RaceRow | null;
   sortedResults: ResultRow[];
-  unpublishedSeasonRaces: RaceRow[];
 };
 
 export function AdminResultsWorkspace({
-  activeIndy500Races,
   activeParticipants,
-  activeSeason,
-  canFinalizeSeason,
-  currentSeasonRaces,
   driverNameById,
   drivers,
-  finalSeasonRace,
-  hallOfFameMigrationReady,
   pickRows,
   raceById,
   raceDriverGroups,
-  results,
-  savedHallOfFameSeason,
   scoringAudits,
   selectedResultRace,
   sortedResults,
-  unpublishedSeasonRaces
 }: AdminResultsWorkspaceProps) {
   return (
         <section
-          className="mt-6 rounded-lg ui-panel border border-slate-200 bg-white p-4 sm:p-6"
+          className="min-w-0"
           key={`results-workspace-${selectedResultRace?.id ?? "empty"}`}
         >
-        <AdminWorkspaceHeader
-          description="Select one race, validate its official results, then publish or correct that race."
-          title="Race Results"
-        />
-
-        <div className="mt-4 rounded-md ui-panel-muted border border-slate-200 bg-slate-50 p-3">
-          <form
-            action="/admin"
-            className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto]"
-            method="get"
-          >
-            <input name="tab" type="hidden" value="results" />
-            <label className="block">
-              <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-600">
-                Results workspace
-              </span>
-              <select
-                className="w-full rounded-md ui-control-border border border-slate-300 bg-white px-3 py-2 text-sm"
-                defaultValue={selectedResultRace ? String(selectedResultRace.id) : ""}
-                name="result_race_id"
-              >
-                <option value="">
-                  {currentSeasonRaces.length > 0 ? "Select race" : "No active-season races"}
-                </option>
-                {currentSeasonRaces.map((race) => (
-                  <option key={`workspace-race-${race.id}`} value={race.id}>
-                    R{race.round_number} · {race.race_name} ·{" "}
-                    {race.results_status === "published" ? "Published" : "Draft"}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <button
-              className="self-end rounded-md ui-action-primary bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-700"
-              type="submit"
-            >
-              Open race
-            </button>
-          </form>
-
-          {selectedResultRace ? (
-            <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-slate-200 pt-3 text-xs">
-              <p className="min-w-0 font-semibold text-slate-900">
-                R{selectedResultRace.round_number} · {selectedResultRace.race_name}
-              </p>
-              <div className="flex flex-wrap gap-1.5">
-                <span
-                  className={`rounded-full border px-2 py-0.5 font-semibold ${
-                    selectedResultRace.results_status === "published"
-                      ? "ui-status-success border-emerald-200 bg-emerald-50 text-emerald-800"
-                      : "ui-status-warning border-amber-200 bg-amber-50 text-amber-800"
-                  }`}
-                >
-                  {selectedResultRace.results_status === "published" ? "Published" : "Draft"}
-                </span>
-                <span className="rounded-full ui-panel border border-slate-200 bg-white px-2 py-0.5 font-semibold text-slate-700">
-                  {pickRows.length} picks
-                </span>
-                <span className="rounded-full ui-panel border border-slate-200 bg-white px-2 py-0.5 font-semibold text-slate-700">
-                  {results.length} result rows
-                </span>
-              </div>
-            </div>
-          ) : null}
-        </div>
-
-        {activeIndy500Races.length > 0 ? (
-        <details className="mt-5 rounded-md border border-cyan-200 bg-cyan-50">
-          <summary className="cursor-pointer px-4 py-3 text-sm font-semibold text-slate-900">
-            Indianapolis 500 qualifying order
-          </summary>
-          <form
-            action={importIndy500QualifyingOrderAction}
-            className="border-t border-cyan-200 p-4"
-            data-testid="admin-indy-qualifying-import-form"
-          >
-            <input name="tab" type="hidden" value="results" />
-            <input
-              name="result_race_id"
-              type="hidden"
-              value={String(selectedResultRace?.id ?? "")}
-            />
-            <input
-              name="race_id"
-              type="hidden"
-              value={String(activeIndy500Races[0]?.id ?? "")}
-            />
-            <p className="text-xs text-slate-600">
-              For Indy 500 races only: paste the 33-car qualifying order to create 8 pick groups.
-            </p>
-            <div className="mt-3 grid gap-3 md:grid-cols-4">
-              <div
-                className="rounded-md border border-cyan-200 bg-white px-3 py-2 md:col-span-1"
-                data-testid="admin-indy-qualifying-race"
-              >
-                <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                  Indy 500 race
-                </p>
-                <p className="mt-1 text-sm font-semibold text-slate-900">
-                  {activeIndy500Races[0]
-                    ? `R${activeIndy500Races[0].round_number} · ${activeIndy500Races[0].race_name}`
-                    : "Select an Indy 500 race above"}
-                </p>
-              </div>
-              <label className="block md:col-span-3">
-                <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-600">
-                  Qualifying order paste
-                </span>
-                <textarea
-                  required
-                  className="h-32 w-full rounded-md ui-control-border border border-slate-300 px-3 py-2 font-mono text-xs"
-                  data-testid="admin-indy-qualifying-paste"
-                  name="qualifying_order_paste"
-                  placeholder={"1\t10\tAlex Palou\n2\t5\tPato O'Ward\n3\t2\tJosef Newgarden"}
-                />
-              </label>
-            </div>
-            <SubmitButton
-              className="mt-3 rounded-md ui-action-primary bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-700"
-              data-testid="admin-indy-qualifying-submit"
-              disabled={activeIndy500Races.length === 0}
-              pendingLabel="Importing..."
-            >
-              Import qualifying order
-            </SubmitButton>
-          </form>
-        </details>
-        ) : null}
-
         <AdminResultsImportForm
           action={importIndycarResultsAction}
           selectedRace={
@@ -512,63 +349,6 @@ export function AdminResultsWorkspace({
           </form>
         </details>
 
-        <Disclosure
-          className="mt-5 border-cyan-200 bg-cyan-50"
-          description="Finalize the permanent Hall of Fame snapshot after every race is published."
-          meta={
-            <StatusChip tone={canFinalizeSeason ? "success" : "neutral"}>
-              {canFinalizeSeason ? "Ready" : "Not ready"}
-            </StatusChip>
-          }
-          summary="Season closeout"
-        >
-          <div className="flex flex-wrap items-start justify-between gap-4">
-            <div className="min-w-0 flex-1">
-              <p className="text-xs font-semibold uppercase tracking-wide text-cyan-800">
-                Season Archive
-              </p>
-              <h3 className="mt-1 text-base font-semibold text-slate-900">
-                {activeSeason ? `${activeSeason.season_year} Hall of Fame` : "Hall of Fame"}
-              </h3>
-              <p className="mt-1 text-sm text-slate-700">
-                Save the final standings before retiring this season&apos;s drivers. The archived
-                leaderboard does not depend on future driver or profile changes.
-              </p>
-              <p className="mt-2 text-xs font-medium text-slate-600">
-                {savedHallOfFameSeason
-                  ? `Saved ${formatDateTime(savedHallOfFameSeason.finalized_at)} · ${savedHallOfFameSeason.participant_count} teams · ${savedHallOfFameSeason.race_count} races`
-                  : canFinalizeSeason
-                    ? `${currentSeasonRaces.length} races published. Ready to finalize.`
-                    : unpublishedSeasonRaces.length > 0
-                      ? `${unpublishedSeasonRaces.length} race result set(s) still need publication.`
-                      : finalSeasonRace
-                        ? `Available after ${finalSeasonRace.race_name}.`
-                        : "Add this season's race schedule before finalizing."}
-              </p>
-              {!hallOfFameMigrationReady ? (
-                <p className="mt-2 text-xs font-semibold text-amber-800">
-                  Hall of Fame database setup is incomplete. Review Race Week before using this control.
-                </p>
-              ) : null}
-            </div>
-            <form action={finalizeHallOfFameSeasonAction}>
-              <input name="tab" type="hidden" value="results" />
-              <input name="season_id" type="hidden" value={String(activeSeason?.id ?? "")} />
-              <ConfirmSubmitButton
-                className="rounded-md ui-action-primary bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
-                confirmMessage={
-                  savedHallOfFameSeason
-                    ? `Replace the saved ${activeSeason?.season_year} Hall of Fame standings with the current final calculation?`
-                    : `Finalize and save the ${activeSeason?.season_year} standings to the Hall of Fame?`
-                }
-                disabled={!canFinalizeSeason || !hallOfFameMigrationReady}
-                type="submit"
-              >
-                {savedHallOfFameSeason ? "Refresh Final Standings" : "Finalize Season"}
-              </ConfirmSubmitButton>
-            </form>
-          </div>
-        </Disclosure>
 
         <details className="mt-5 rounded-md ui-panel border border-slate-200 bg-white">
           <summary className="cursor-pointer px-3 py-3 text-sm font-semibold text-slate-900">

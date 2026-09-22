@@ -46,6 +46,7 @@ type RaceRow = {
   qualifying_start_at: string;
   race_date: string;
   race_name: string;
+  results_status: "draft" | "published";
   round_number: number;
   season_id: number;
   title_image_url: string | null;
@@ -78,7 +79,7 @@ type PageProps = {
 };
 
 const PICKEM_RACE_SELECT_FIELDS =
-  "id,race_name,pick_format,pick_window_key,title_image_url,qualifying_start_at,race_date,payout,season_id,round_number,field_frozen_at";
+  "id,race_name,pick_format,pick_window_key,title_image_url,qualifying_start_at,race_date,payout,season_id,round_number,field_frozen_at,results_status";
 
 const formatRaceDate = (value: string): string =>
   formatLeagueDateTime(value, { dateStyle: "full", timeStyle: "short" });
@@ -218,7 +219,10 @@ export default async function PicksPage({ searchParams }: PageProps) {
 
   const [previousResultsGate, driversResponse, raceDriverGroupsResponse] =
     await Promise.all([
-      getPreviousRaceResultsGate(supabase, selectedRace),
+      getPreviousRaceResultsGate(supabase, selectedRace, {
+        includeDiagnostics: profile.role === "admin",
+        seasonRaces: raceRows ?? []
+      }),
       supabase
         .from("drivers")
         .select("id,driver_name,image_url,championship_points,current_standing,group_number,is_active")

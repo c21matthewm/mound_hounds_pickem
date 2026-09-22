@@ -121,6 +121,14 @@ export async function finalizeHallOfFameSeasonAction(formData: FormData) {
     );
   }
 
+  const champions = finalSnapshot.leaderboardRows.filter((row) => row.currentStanding === 1);
+  if (champions.length !== 1) {
+    redirectWithTab(
+      "error",
+      "A single season champion has not been determined after comparing total points, final-race points, and second-to-last-race points. Finalization is paused until the league resolves the tie."
+    );
+  }
+
   const entries = finalSnapshot.leaderboardRows.map((row) => ({
     final_rank: row.currentStanding,
     race_breakdown: finalSnapshot.raceColumns.map((race) => ({

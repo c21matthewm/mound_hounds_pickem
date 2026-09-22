@@ -1,8 +1,11 @@
 "use server";
 
+import type { AdminWorkspaceTab } from "@/lib/admin-tabs";
+import type { RaceWeekPhase } from "@/lib/admin-race-week";
 import { revalidatePath } from "next/cache";
 import { getFormFile } from "@/lib/driver-images";
-import { errorReference, reportAppError } from "@/lib/app-error-reporter";
+import { handleMediaSaveFailure } from "@/app/admin/media-save-failure";
+import { captureMediaWriteError, captureMediaWriteResult } from "@/lib/media-write-outcome";
 import { finalizeRaceWinnerNow } from "@/lib/fantasy-winner";
 import { deleteManagedRaceTitleImage, uploadRaceTitleImage } from "@/lib/race-images";
 import { requireAdmin } from "@/lib/admin";
@@ -38,7 +41,9 @@ const reportRaceFailure = ({
   fallback,
   operation,
   raceId,
-  userId
+  userId,
+  tab = "races",
+  raceWeekPhase
 }: {
   code: string;
   error: unknown;
@@ -46,6 +51,8 @@ const reportRaceFailure = ({
   operation: string;
   raceId?: number | null;
   userId: string;
+  tab?: AdminWorkspaceTab;
+  raceWeekPhase?: RaceWeekPhase;
 }) =>
   reportAdminActionFailure({
     actorProfileId: userId,
@@ -53,11 +60,14 @@ const reportRaceFailure = ({
     context: { entityId: raceId, entityType: "race", operation, raceId },
     error,
     fallback,
-    tab: "races"
+    tab,
+    resultRaceId: raceId,
+    raceWeekPhase
   });
 
 export async function correctPickWindowQualifyingStartAction(formData: FormData) {
   const { supabase, user } = await requireAdmin();
+  const tab = parseAdminTab(asText(formData.get("tab"))) ?? "races";
   const raceId = parsePositiveInteger(asText(formData.get("race_id")));
   const qualifyingStartInput = asText(formData.get("qualifying_start_at"));
   const correctionConfirmed =
@@ -67,14 +77,14 @@ export async function correctPickWindowQualifyingStartAction(formData: FormData)
     return adminMutationRedirect(
       "error",
       "Select a race and corrected qualifying start.",
-      "races"
+      tab, raceId, "preparation"
     );
   }
   if (!correctionConfirmed) {
     adminMutationRedirect(
       "error",
       "Confirm the schedule correction before changing the pick deadline.",
-      "races"
+      tab, raceId, "preparation"
     );
   }
 
@@ -83,7 +93,7 @@ export async function correctPickWindowQualifyingStartAction(formData: FormData)
     return adminMutationRedirect(
       "error",
       "The corrected qualifying start must be a valid future Indianapolis time.",
-      "races"
+      tab, raceId, "preparation"
     );
   }
 
@@ -102,7 +112,8 @@ export async function correctPickWindowQualifyingStartAction(formData: FormData)
       fallback: "The qualifying correction could not be saved.",
       operation: "correct_pick_window_deadline",
       raceId,
-      userId: user.id
+      userId: user.id,
+      tab, raceWeekPhase: "preparation"
     });
   }
 
@@ -119,7 +130,7 @@ export async function correctPickWindowQualifyingStartAction(formData: FormData)
   adminMutationRedirect(
     "message",
     `Qualifying deadline corrected for ${raceCount} race${raceCount === 1 ? "" : "s"}. Sent emails were preserved; unsent reminders will follow the new time.`,
-    "races"
+    tab, raceId, "preparation"
   );
 }
 
@@ -326,38 +337,41 @@ export async function createRaceAction(formData: FormData) {
   }
 
   if (titleImageFile) {
+    let uploadedUrl: string;
     try {
-      const uploadedUrl = await uploadRaceTitleImage({
+      uploadedUrl = await uploadRaceTitleImage({
         raceId: insertedRaceId,
         raceName,
         file: titleImageFile
       });
-
-      const { error: updateImageError } = await supabase
-        .from("races")
-        .update({ title_image_url: uploadedUrl })
-        .eq("id", insertedRaceId);
-
-      if (updateImageError) {
-        await deleteManagedRaceTitleImage(uploadedUrl).catch((cleanupError) => {
-          console.error("[storage] Failed rolling back race image upload:", cleanupError);
-        });
-        await reportRaceFailure({
-          code: "save-race-image-failed",
-          error: updateImageError,
-          fallback: "The race was created, but its title image could not be saved.",
-          operation: "save_image",
-          raceId: insertedRaceId,
-          userId: user.id
-        });
-      }
     } catch (uploadError) {
-      await reportRaceFailure({
+      return reportRaceFailure({
         code: "upload-race-image-failed",
+        raceId: insertedRaceId,
         error: uploadError,
         fallback: "The race was created, but its title image upload failed.",
         operation: "upload_image",
+        tab,
+        userId: user.id
+      });
+    }
+    const updateImageError = await captureMediaWriteError(supabase
+      .from("races")
+      .update({ title_image_url: uploadedUrl })
+      .eq("id", insertedRaceId));
+    if (updateImageError) {
+      await handleMediaSaveFailure({
+        error: updateImageError, uploadedUrl, deleteUpload: deleteManagedRaceTitleImage,
+        actorProfileId: user.id, entityType: "race", entityId: insertedRaceId,
+        operation: "save_image", description: "Race image update", tab
+      });
+      return reportRaceFailure({
+        code: "save-race-image-failed",
         raceId: insertedRaceId,
+        error: updateImageError,
+        fallback: "The race was created, but its title image could not be saved.",
+        operation: "save_image",
+        tab,
         userId: user.id
       });
     }
@@ -456,7 +470,6 @@ export async function updateRaceAction(formData: FormData) {
     season_id: number;
     title_image_url: string | null;
   };
-  const existingRaceImageUrl = selectedExistingRace.title_image_url;
   const { count: pickWindowRaceCount, error: pickWindowCountError } = await supabase
     .from("races")
     .select("id", { count: "exact", head: true })
@@ -586,6 +599,7 @@ export async function updateRaceAction(formData: FormData) {
   }
 
   let titleImageUrl = titleImageUrlInput || null;
+  let uploadedImageUrl: string | null = null;
 
   if (titleImageFile) {
     try {
@@ -594,6 +608,7 @@ export async function updateRaceAction(formData: FormData) {
         raceName,
         file: titleImageFile
       });
+      uploadedImageUrl = titleImageUrl;
     } catch (uploadError) {
       await reportRaceFailure({
         code: "upload-race-image-failed",
@@ -606,7 +621,7 @@ export async function updateRaceAction(formData: FormData) {
     }
   }
 
-  const { error } = await supabase
+  const error = await captureMediaWriteError(supabase
     .from("races")
     .update({
       pick_format: pickFormat,
@@ -618,14 +633,14 @@ export async function updateRaceAction(formData: FormData) {
       season_id: seasonId,
       title_image_url: titleImageUrl
     })
-    .eq("id", raceIdValue);
+    .eq("id", raceIdValue));
 
   if (error) {
-    if (titleImageFile && titleImageUrl !== existingRaceImageUrl) {
-      await deleteManagedRaceTitleImage(titleImageUrl).catch((cleanupError) => {
-        console.error("[storage] Failed rolling back race image upload:", cleanupError);
-      });
-    }
+    await handleMediaSaveFailure({
+      error, uploadedUrl: uploadedImageUrl, deleteUpload: deleteManagedRaceTitleImage,
+      actorProfileId: user.id, entityType: "race", entityId: raceIdValue,
+      operation: "update", description: "Race update", tab
+    });
     await reportRaceFailure({
       code: "update-race-failed",
       error: withMigrationHint(error.message, SHARED_PICK_WINDOWS_MIGRATION_FILE),
@@ -636,23 +651,7 @@ export async function updateRaceAction(formData: FormData) {
     });
   }
 
-  let imageCleanupWarning = "";
-  if (existingRaceImageUrl && existingRaceImageUrl !== titleImageUrl) {
-    try {
-      await deleteManagedRaceTitleImage(existingRaceImageUrl);
-    } catch (cleanupError) {
-      const reported = await reportAppError({
-        actorProfileId: user.id,
-        code: "cleanup-race-image-failed",
-        context: { entityId: raceIdValue, entityType: "race", operation: "replace_image" },
-        error: cleanupError,
-        route: "/admin?tab=races",
-        severity: "warning",
-        subsystem: "storage"
-      });
-      imageCleanupWarning = ` Replaced image cleanup needs attention.${errorReference(reported)}`;
-    }
-  }
+  // Retain the prior image: other records and recovery snapshots may reference it.
 
   await recordAdminAudit(supabase, {
     action: scheduleChanged ? "schedule_correction" : "update",
@@ -682,7 +681,7 @@ export async function updateRaceAction(formData: FormData) {
   revalidatePath("/admin");
   revalidatePath("/picks");
   revalidatePath("/leaderboard");
-  redirectWithTab("message", `Race updated.${imageCleanupWarning}`);
+  redirectWithTab("message", `Race updated.`);
 }
 
 export async function setRacePickWindowAction(formData: FormData) {
@@ -958,13 +957,18 @@ export async function deleteRaceAction(formData: FormData) {
     );
   }
 
-  const { data: deletedRace, error } = await supabase
+  const { data: deletedRace, error } = await captureMediaWriteResult(supabase
     .from("races")
     .delete()
     .eq("id", raceIdValue)
     .select("race_name,title_image_url")
-    .maybeSingle<{ race_name: string; title_image_url: string | null }>();
+    .maybeSingle<{ race_name: string; title_image_url: string | null }>());
   if (error) {
+    await handleMediaSaveFailure({
+      error, uploadedUrl: null, deleteUpload: deleteManagedRaceTitleImage,
+      actorProfileId: user.id, entityType: "race", entityId: raceIdValue,
+      operation: "delete", description: "Race deletion", tab
+    });
     await reportRaceFailure({
       code: "delete-race-failed",
       error,
@@ -975,21 +979,7 @@ export async function deleteRaceAction(formData: FormData) {
     });
   }
 
-  let imageCleanupWarning = "";
-  try {
-    await deleteManagedRaceTitleImage(deletedRace?.title_image_url ?? null);
-  } catch (cleanupError) {
-    const reported = await reportAppError({
-      actorProfileId: user.id,
-      code: "cleanup-race-image-failed",
-      context: { entityId: raceIdValue, entityType: "race", operation: "delete" },
-      error: cleanupError,
-      route: "/admin?tab=races",
-      severity: "warning",
-      subsystem: "storage"
-    });
-    imageCleanupWarning = ` Stored image cleanup needs attention.${errorReference(reported)}`;
-  }
+  // Deleting this record does not remove media referenced by recovery snapshots.
 
   const { error: refreshError } = await supabase.rpc(
     "refresh_driver_standings_from_published_results"
@@ -1017,7 +1007,7 @@ export async function deleteRaceAction(formData: FormData) {
   revalidatePath("/admin");
   revalidatePath("/picks");
   revalidatePath("/leaderboard");
-  redirectWithTab("message", `Race deleted.${imageCleanupWarning}`);
+  redirectWithTab("message", `Race deleted.`);
 }
 
 export async function setRaceArchivedAction(formData: FormData) {
@@ -1119,8 +1109,9 @@ export async function setRaceArchivedAction(formData: FormData) {
 export async function setRaceWinnerAction(formData: FormData) {
   const { supabase, user } = await requireAdmin();
   const tab = parseAdminTab(asText(formData.get("tab"))) ?? "races";
+  const returnRaceId = parsePositiveInteger(asText(formData.get("race_id")));
   const redirectWithTab = (key: "error" | "message", value: string): never =>
-    adminMutationRedirect(key, value, tab);
+    adminMutationRedirect(key, value, tab, returnRaceId, "winner");
 
   const raceId = parsePositiveInteger(asText(formData.get("race_id")));
   const winnerProfileIdInput = asText(formData.get("winner_profile_id"));
@@ -1151,7 +1142,8 @@ export async function setRaceWinnerAction(formData: FormData) {
       fallback: "The race result status could not be checked.",
       operation: "set_winner",
       raceId: selectedRaceId,
-      userId: user.id
+      userId: user.id,
+      tab, raceWeekPhase: "winner"
     });
   }
   if (winnerRaceStatus?.results_status !== "published") {
@@ -1176,7 +1168,8 @@ export async function setRaceWinnerAction(formData: FormData) {
         fallback: "The selected fantasy winner could not be checked.",
         operation: "set_winner",
         raceId: selectedRaceId,
-        userId: user.id
+        userId: user.id,
+      tab, raceWeekPhase: "winner"
       });
     }
     if (!winnerProfile) {
@@ -1194,7 +1187,8 @@ export async function setRaceWinnerAction(formData: FormData) {
         fallback: "The fantasy winner could not be recalculated.",
         operation: "recalculate_winner",
         raceId: selectedRaceId,
-        userId: user.id
+        userId: user.id,
+      tab, raceWeekPhase: "winner"
       });
     }
   } else {
@@ -1216,7 +1210,8 @@ export async function setRaceWinnerAction(formData: FormData) {
         fallback: "The fantasy winner could not be updated.",
         operation: "set_winner",
         raceId: selectedRaceId,
-        userId: user.id
+        userId: user.id,
+      tab, raceWeekPhase: "winner"
       });
     }
   }

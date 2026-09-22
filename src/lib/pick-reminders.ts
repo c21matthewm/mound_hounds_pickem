@@ -362,6 +362,8 @@ export async function sendDuePickReminders(): Promise<PickReminderSummary> {
     return emptySummary("no_upcoming_race");
   }
 
+  // upcomingRaces contains future races only. Let the gate load the complete
+  // season so unpublished earlier windows continue to suppress reminders.
   const previousResultsGate = await getPreviousRaceResultsGate(supabase, upcomingRace);
   if (previousResultsGate.status === "blocked") {
     return emptySummary(

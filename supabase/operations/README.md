@@ -19,6 +19,10 @@ separate from `supabase/migrations`, which remains the canonical, ordered databa
 
 ## Existing Production Project
 
+The separately documented [one-time 2027 prelaunch reset](prelaunch-2027/README.md) is for removing
+the experimental 2026 app data while preserving the real historical archives and the designated
+admin. It is not a routine operator query or a migration; do not include it in migration batches.
+
 Do not rerun old migration bundles merely because they are saved in Supabase SQL Editor. A saved
 query is only an editor document; deleting it does not remove functions, tables, policies, or data
 that were already created in the database.

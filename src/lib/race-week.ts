@@ -115,12 +115,12 @@ const actionForState = ({
 }): RaceWeekAction => {
   if (!activeSeason) {
     return {
-      body: "No league season is currently active.",
-      href: "/leaderboard",
+      body: "The season has closed. Explore past champions and final standings while the next season is being prepared.",
+      href: "/leaderboard?tab=hall",
       label: "View league history",
       status: "no_season",
-      statusLabel: "Waiting",
-      title: "Season setup pending"
+      statusLabel: "Off-season",
+      title: "Between seasons"
     };
   }
 
@@ -308,7 +308,10 @@ export async function loadRaceWeekState({
   const pickLockAt = currentRace ? pickLockAtForRace(currentRace) : null;
   const picksLocked = pickLockAt ? Date.parse(pickLockAt) <= now.getTime() : false;
   const previousResultsGate = currentRace
-    ? await getPreviousRaceResultsGate(supabase, currentRace)
+    ? await getPreviousRaceResultsGate(supabase, currentRace, {
+        includeDiagnostics: isAdmin,
+        seasonRaces
+      })
     : null;
   const previousResultsMessage =
     previousResultsGate?.status === "blocked" ? previousResultsGate.shortMessage : null;

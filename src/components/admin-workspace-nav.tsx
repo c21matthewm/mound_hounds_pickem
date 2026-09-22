@@ -2,7 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { RouteTabs } from "@/components/ui-primitives";
-import type { AdminWorkspaceTab } from "@/lib/admin-tabs";
+import { visibleAdminWorkspaceTab, type AdminWorkspaceTab } from "@/lib/admin-tabs";
 
 export type { AdminWorkspaceTab } from "@/lib/admin-tabs";
 
@@ -11,21 +11,29 @@ const ADMIN_WORKSPACES: Array<{
   tab: AdminWorkspaceTab;
   testId?: string;
 }> = [
-  { label: "Race Week", tab: "health" },
+  { label: "Race Week", tab: "race-week", testId: "admin-tab-race-week" },
+  { label: "Seasons & League", tab: "seasons", testId: "admin-tab-seasons" },
   { label: "Participants", tab: "participants", testId: "admin-tab-participants" },
-  { label: "Races", tab: "races", testId: "admin-tab-races" },
-  { label: "Drivers", tab: "drivers", testId: "admin-tab-drivers" },
-  { label: "Race Results", tab: "results", testId: "admin-tab-results" },
+  { label: "Drivers & Groups", tab: "drivers", testId: "admin-tab-drivers" },
+  { label: "Race Calendar", tab: "races", testId: "admin-tab-races" },
+  { label: "System Health", tab: "health", testId: "admin-tab-health" },
   { label: "Recovery", tab: "recovery" },
   { label: "Feedback", tab: "feedback", testId: "admin-tab-feedback" }
 ];
 
 type AdminWorkspaceNavProps = {
   activeTab: AdminWorkspaceTab;
+  openErrorCount?: number | null;
+  unpublishedRaceCount?: number | null;
 };
 
-export function AdminWorkspaceNav({ activeTab }: AdminWorkspaceNavProps) {
+export function AdminWorkspaceNav({ activeTab, openErrorCount, unpublishedRaceCount }: AdminWorkspaceNavProps) {
   const router = useRouter();
+  const badgeFor = (tab: AdminWorkspaceTab) => {
+    const badge = tab === "health" ? {count:openErrorCount ?? 0,label:"open application errors"}
+      : tab === "race-week" ? {count:unpublishedRaceCount ?? 0,label:"completed races awaiting published results"} : undefined;
+    return badge && badge.count > 0 ? badge : undefined;
+  };
 
   return (
     <div className="mt-6">
@@ -36,11 +44,11 @@ export function AdminWorkspaceNav({ activeTab }: AdminWorkspaceNavProps) {
         <select
           className="w-full rounded-md ui-control-border border border-slate-300 bg-white px-3 py-2.5 text-base font-semibold text-slate-900"
           onChange={(event) => router.push(`/admin?tab=${event.target.value}`)}
-          value={activeTab}
+          value={visibleAdminWorkspaceTab(activeTab)}
         >
           {ADMIN_WORKSPACES.map((workspace) => (
             <option key={workspace.tab} value={workspace.tab}>
-              {workspace.label}
+              {workspace.label}{badgeFor(workspace.tab) ? ` · ${badgeFor(workspace.tab)!.count} need attention` : ""}
             </option>
           ))}
         </select>
@@ -50,7 +58,8 @@ export function AdminWorkspaceNav({ activeTab }: AdminWorkspaceNavProps) {
         <RouteTabs
           ariaLabel="Admin workspaces"
           items={ADMIN_WORKSPACES.map((workspace) => ({
-            active: workspace.tab === activeTab,
+            badge: badgeFor(workspace.tab),
+            active: workspace.tab === visibleAdminWorkspaceTab(activeTab),
             href: `/admin?tab=${workspace.tab}`,
             label: workspace.label,
             testId: workspace.testId
