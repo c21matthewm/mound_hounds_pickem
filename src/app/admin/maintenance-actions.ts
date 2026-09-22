@@ -67,10 +67,11 @@ export async function resolveAppErrorAction(formData: FormData) {
 export async function retryFailedPickRemindersAction(formData: FormData) {
   const { supabase, user } = await requireAdmin();
   const raceId = parsePositiveInteger(asText(formData.get("race_id")));
+  const returnRaceId = parsePositiveInteger(asText(formData.get("result_race_id"))) ?? raceId;
   const reminderType = asText(formData.get("reminder_type"));
 
   if (!raceId || !["2d", "4h"].includes(reminderType)) {
-    return adminRedirect("error", "Select a valid reminder queue before retrying.", "health");
+    return adminRedirect("error", "Select a valid reminder queue before retrying.", "race-week", returnRaceId, "picks");
   }
 
   const { data: race, error: raceError } = await supabase
@@ -102,13 +103,13 @@ export async function retryFailedPickRemindersAction(formData: FormData) {
       adminRedirect(
         "error",
         `The selected reminder race could not be loaded.${errorReference(reported)}`,
-        "health"
+        "race-week", returnRaceId, "picks"
       );
     }
     adminRedirect(
       "error",
       "The selected reminder race was not found.",
-      "health"
+      "race-week", returnRaceId, "picks"
     );
   }
 
@@ -120,7 +121,7 @@ export async function retryFailedPickRemindersAction(formData: FormData) {
     adminRedirect(
       "error",
       "Failed reminders can only be retried for an active-season race.",
-      "health"
+      "race-week", returnRaceId, "picks"
     );
   }
 
@@ -131,7 +132,7 @@ export async function retryFailedPickRemindersAction(formData: FormData) {
     adminRedirect(
       "error",
       "This reminder window is no longer active. Refresh Race Week before retrying.",
-      "health"
+      "race-week", returnRaceId, "picks"
     );
   }
 
@@ -162,7 +163,7 @@ export async function retryFailedPickRemindersAction(formData: FormData) {
     adminRedirect(
       "error",
       `The failed reminder queue could not be reset.${errorReference(reported)}`,
-      "health"
+      "race-week", returnRaceId, "picks"
     );
   }
 
@@ -188,7 +189,7 @@ export async function retryFailedPickRemindersAction(formData: FormData) {
           resetCount === 1 ? "y is" : "ies are"
         } queued for the next cron run.`
       : "No permanently failed deliveries were waiting for this race and reminder window.",
-    "health"
+    "race-week", returnRaceId, "picks"
   );
 }
 

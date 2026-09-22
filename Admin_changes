@@ -1,0 +1,238 @@
+Comprehensive Admin Expansion & UI/UX Modernization Plan
+Overview & Goal
+The Mound Hounds Pick'em Admin section currently manages an entire fantasy racing season, but suffers from two main issues:
+
+Scattered, Disjointed UI/UX: Operational and maintenance features are fragmented across multiple tabs and buried inside deep disclosure accordions. For example, Season Management is hidden in an accordion inside the "Races" tab, Hall of Fame archival is an accordion in "Results", Preseason driver seeding is in "Drivers", and "Race Week" is mixed with raw database health, cron heartbeats, and error inboxes under a tab called health.
+Repo/SQL Reliance for Routine Operations: Routine league administration tasks still require direct repository scripts or Supabase SQL Editor queries. Key examples include: promoting/demoting co-admins, importing historical spreadsheet leaderboards (e.g. 2026/2025 Google Sheets) into the Hall of Fame, running orphaned image cleanup in Supabase Storage, and triggering background jobs or retrieving participant emails.
+This plan details the full blueprint for a subsequent coding agent to modernize the admin UI/UX into an intuitive, progressive workspace and empower the league administrator to manage the league end-to-end directly in the application.
+
+Proposed Information Architecture & Workspace Reorganization
+We will restructure the Admin workspace from 7 fragmented tabs into 8 clearly defined, single-responsibility operational hubs:
+
+Mermaid diagram
+Workspace Directory
+Tab Key	Label	Scope & Primary Workflows
+race-week (default)	Race Week	The weekly operational cockpit. Guides the admin through the 4 phases of race week: field freeze, pick monitoring & reminders, results import & scoring audit, and winner finalization.
+seasons	Seasons & League	Dedicated league lifecycle hub. Create seasons, manage/rotate invite codes, copy signup links, upload rules documents, run pre-flight activation checks, finalize seasons, and import historical spreadsheet archives.
+participants	Participants	Directory of all accounts. View participant emails, promote/demote co-admins (with safety guards), toggle season registration, manage account eligibility, and perform bulk updates.
+drivers	Drivers & Groups	Opening championship seed importer, active roster toggle, driver photo gallery with "missing headshot" filter, and in-app Supabase Storage orphan image audit & cleanup.
+races	Race Calendar	Focused race schedule. Create rounds, link doubleheaders (pick_window_key), correct qualifying deadlines, and upload race banners without distracting season or winner controls.
+health	System Health	Dedicated DevOps center. Schema contract check, cron job status & execution logs, on-demand trigger buttons, application error inbox with resolution, searchable audit log, and test data cleanup.
+recovery	Recovery	Preserves existing robust safety snapshots, backup downloads, and restore diff previews.
+feedback	Feedback	Preserves existing participant issue/suggestion triage inbox with status filters.
+NOTE
+
+For backwards compatibility, existing URL parameters (tab=results, tab=health, tab=races, etc.) will continue to work seamlessly. tab=results will redirect to the results phase of tab=race-week or render as a focused results view.
+
+Detailed New Administrative Capabilities (Eliminating Repo/SQL Reliance)
+1. Admin Role Delegation & Co-Admin Management
+Current state: Admin roles must be manually assigned via raw SQL in Supabase SQL Editor (UPDATE profiles SET role = 'admin' WHERE id = '...').
+New In-App Feature:
+In Participants, each row displays the participant's current role with a button: "Promote to Admin" or "Demote to Participant".
+Clicking opens a confirmation dialog detailing the permissions granted or revoked.
+Defensive Invariants:
+Self-demotion prevention: An admin cannot demote themselves.
+Last-admin guard: Demotion is refused if the user is the only active admin.
+Audit logging: Calls recordAdminAudit recording who changed the role, target profile ID, and before/after states.
+Cache & session revalidation: Revalidates paths so the change takes effect immediately.
+2. Historical Hall of Fame Spreadsheet Importer
+Current state: Past seasons from spreadsheets (e.g. 2025/2026 prelaunch) require manual database inserts or custom scripts (docs/OPERATIONS_GUIDE.md:137-143).
+New In-App Feature:
+In Seasons, an "Import Historical Season" tool.
+Inputs: Season Year (e.g. 2026), Race Count (e.g. 17), and a large paste area accepting TSV/CSV copied directly from Google Sheets or Excel.
+Required columns: Rank, Team Name, Total Points (with optional breakdown).
+Live Validation & Preview:
+Automatically identifies the champion (Rank 1).
+Detects ties and alerts if an unresolved tie for first place exists.
+Flags duplicate team names or invalid point totals.
+Shows a table preview of the parsed entries before saving.
+Submission: Calls the existing atomic stored procedure public.finalize_hall_of_fame_season(p_season_year, p_race_count, p_entries).
+3. In-App Storage Orphan Image Audit & Purge
+Current state: Admins have to run npm run cleanup:orphaned-images and npm run cleanup:orphaned-images -- --apply via terminal.
+New In-App Feature:
+In Drivers, a "Storage Media Maintenance" panel.
+"Audit Orphaned Images" button: Scans the driver-headshots and race-title-images buckets against drivers.image_url and races.title_image_url.
+Displays summary: Stored files count, Referenced count, Orphaned count, and Total reclaimable space (KB/MB).
+Lists the orphaned file paths in an expandable preview.
+"Delete Orphaned Images" button: Secure server action using the service role client that removes only unreferenced files and logs the action to admin_audit_events.
+4. Season Invite Code & Shareable Registration Links
+Current state: Setting an invite code exists in an accordion, but there is no way to copy a pre-filled invite link, check if a code is currently set, or test registration readiness.
+New In-App Feature:
+In Seasons, each season card displays:
+Invite code status ("Configured on [date]" vs "Required").
+"Copy Signup Link": Copies https://moundhoundspickem.app/signup?code=... or /season-registration?code=... with the private code embedded for easy distribution via email/text.
+"Rotate Code" modal with validation (8-64 characters, confirmation match).
+Rules Document: Upload PDF directly to Supabase storage or set an external HTTPS URL.
+5. Participant Email Visibility & Manual Enrollment Overrides
+Current state: Admin only sees team_name and full_name; user emails in auth.users are hidden unless the admin opens the Supabase dashboard.
+New In-App Feature:
+On the server, load user emails for admins using createServiceRoleSupabaseClient().auth.admin.listUsers().
+In Participants, search matches on email address in addition to name and team name.
+Displays user email clearly next to team name, making it easy to identify members who report login or reminder issues.
+Season Enrollment Switcher: Allows an admin to manually mark a participant as "Registered" or "Declined" for any specific season.
+Bulk Actions: Select multiple participants to toggle account eligibility (is_active) or register them for the upcoming season.
+6. Guided Race Week Cockpit
+Current state: AdminResultsWorkspace renders 7 competing disclosures (dropdown, Indy 500 qualifying order, results import, scoring audit, manual entry, publish form, season closeout, saved rows) in a single overwhelming stack.
+New In-App Feature:
+Replace the disclosure pile with a 4-Phase Progressive Race Flow:
+Phase 1: Preparation & Deadline: View/freeze driver field snapshot; import Indy 500 qualifying order (if Indy 500); correct qualifying deadline if rain delay occurs.
+Phase 2: Picks & Reminders: Visual submission counter (X/Y submitted); list of missing participants with one-click "Copy missing emails"; reminder queue health and retry failed deliveries; send test email to admin.
+Phase 3: Results & Audit: Official IndyCar results paste/file upload; live Scoring Audit preview (calculated team scores, tiebreak deltas, projected fantasy winner); single explicit "Publish Results" action requiring official winning speed.
+Phase 4: Winner Finalization: Shows official fantasy winner; provides "Calculate Winner Now" button (to immediately finalize without waiting 15 minutes) or manual override.
+7. On-Demand Background Job Triggers
+Current state: If an hourly fantasy-winner calculation fails or needs immediate execution, the admin must wait for pg_cron or run SQL.
+New In-App Feature:
+In System Health, provide an on-demand button: "Run Fantasy Winner Check Now" (invokes finalizeDueRaceWinners()).
+Provide "Send Test Reminder" and "Retry Failed Reminders" in the email queue card.
+File-by-File Implementation Plan
+Grouped by component layer and ordered logically.
+
+Phase 1: Shared Models & Navigation Layer
+[MODIFY] 
+admin-tabs.ts
+Update ADMIN_WORKSPACE_TABS to include "race-week", "seasons", "participants", "drivers", "races", "results", "health", "recovery", "feedback".
+Set default fallback tab to "race-week".
+Add aliasing helper so legacy bookmarks (tab=results -> "results", tab=health -> "health") resolve safely.
+[MODIFY] 
+admin-workspace-nav.tsx
+Update navigation items with clear labels and icons:
+Race Week (tab=race-week)
+Seasons & League (tab=seasons)
+Participants (tab=participants)
+Drivers & Groups (tab=drivers)
+Race Calendar (tab=races)
+System Health (tab=health)
+Recovery (tab=recovery)
+Feedback (tab=feedback)
+Include badge indicators on tabs where urgent action is needed (e.g., open app errors on health, unfinalized race on race-week).
+Phase 2: Server Actions & Backend Helpers
+[NEW] 
+storage-maintenance.ts
+Extract the core logic from scripts/cleanup-orphaned-images.mjs into a reusable, server-side module:
+auditOrphanedStorageImages(supabase): Lists all files in driver-headshots and race-title-images, matches them against database URLs, and returns { driverOrphans: string[], raceOrphans: string[], totalBytes: number }.
+purgeOrphanedStorageImages(supabase, filePaths): Deletes batches of up to 100 files from the respective buckets.
+[NEW] 
+role-actions.ts
+updateParticipantRoleAction(formData: FormData):
+Validates requireAdmin().
+Refuses self-demotion (targetProfileId === user.id).
+If demoting to participant, verifies SELECT count(*) FROM profiles WHERE role = 'admin' AND is_active = true AND id != targetProfileId > 0.
+Updates profiles.role via Supabase client (trigger trg_protect_profile_role permits admins).
+Writes to recordAdminAudit.
+Revalidates paths (/admin).
+[MODIFY] 
+hall-of-fame-actions.ts
+Add importHistoricalHallOfFameAction(formData: FormData):
+Accepts season_year, race_count, and spreadsheet_paste.
+Parses TSV/CSV format into { final_rank, team_name, total_points, race_breakdown: [] }.
+Validates that rank 1 exists, points are non-negative, and no duplicate team names exist.
+Calls supabase.rpc("finalize_hall_of_fame_season", { p_entries, p_race_count, p_season_year }).
+Logs audit event and redirects with success notification.
+[MODIFY] 
+driver-actions.ts
+Add auditStorageImagesAction() and purgeOrphanedImagesAction().
+Add bulkToggleDriversActiveAction(formData: FormData) for seasonal roster updates.
+[MODIFY] 
+maintenance-actions.ts
+Add triggerFantasyWinnerJobAction(): Calls finalizeDueRaceWinners() on demand and reports the number of races updated or checked.
+Add bulkUpdateParticipantsAction(formData: FormData) for bulk season enrollment or account eligibility toggling.
+Phase 3: Workspace Component Implementations
+[NEW] 
+admin-race-week-workspace.tsx
+Build the consolidated Race Week Cockpit:
+Race Switcher header showing active round, dates, and pick deadline countdown.
+Progress Stepper:
+Pre-Race Field: Shows if driver field snapshot is frozen; button to "Freeze Field Now"; Indy 500 qualifying importer if applicable; qualifying correction tool.
+Picks & Reminders: Progress bar for registered vs submitted picks; list of missing participants with "Copy Missing Emails" button; reminder schedule status (2d, 4h) with preview iframe and "Send Test to Me".
+Results & Scoring: Results paste importer; interactive Scoring Audit table with speed tiebreak deltas and projected winner; "Publish Results" form with winning speed input.
+Winner Finalization: Shows calculated winner; "Finalize Winner Now" button to execute immediately.
+[NEW] 
+admin-seasons-workspace.tsx
+Build the dedicated Season & League Hub:
+Active Season Card: Status banner, registration code indicator, rules document link, total enrolled teams, and "Finalize Season into Hall of Fame" action.
+Season Activation Card: Pre-flight readiness checklist (Invite code set? Opening driver seed imported? Prior season archived? Rules doc attached?) with automatic pre-rollover backup.
+Create Season & Code Management: Input year, set/rotate invite code, copy shareable invite URL.
+Rules Document: Set URL or upload PDF to storage.
+Historical Spreadsheet Importer: Form to paste past leaderboards (Google Sheet / CSV) with live client-side validation preview before commit.
+Season Archives List: Chronological table of past seasons with links to view full Hall of Fame results.
+[MODIFY] 
+admin-participants-workspace.tsx
+Display participant email address alongside full name and team name.
+Add "Role" column with "Promote to Admin" / "Demote to Participant" buttons and confirmation modal.
+Add bulk selection checkboxes with actions: "Mark Active", "Mark Disabled", "Register for Active Season".
+Add "Invite Link & Share" quick card at the top.
+[MODIFY] 
+admin-drivers-workspace.tsx
+Add "Filter: Missing Photos" pill to quickly find drivers lacking headshots.
+Add in-app Storage Media Maintenance card:
+Run audit button to inspect unreferenced headshots and title banners.
+Display list of orphans and reclaimable megabytes.
+Apply cleanup button to safely delete orphans directly from the UI.
+[MODIFY] 
+admin-races-workspace.tsx
+Remove Season Management disclosure (moved to admin-seasons-workspace.tsx).
+Remove Winner override disclosure (moved to admin-race-week-workspace.tsx).
+Focus purely on schedule management: Add race, Doubleheader linking, Qualifying corrections, Reordering rounds, and Race banner uploads.
+[MODIFY] 
+admin-system-health.tsx
+Remove Race Week checklist and reminder previews (moved to admin-race-week-workspace.tsx).
+Dedicate entirely to system diagnostics:
+Schema version contract checks (EXPECTED_SCHEMA_VERSION).
+Scheduled job heartbeats (job_status, job_runs) with "Run Now" trigger buttons.
+Application error inbox with "Resolve" action.
+Admin audit event log with searchable actions and JSON state diffs.
+Test data cleanup ([TEST FLOW ...]).
+[MODIFY] 
+page.tsx
+ & 
+admin-data.ts
+Update data loaders to be scoped to the new tab structure.
+In participants, fetch user emails via service role client on the server.
+In race-week, load current/upcoming race data, reminder queue, scoring audits, and winner status together.
+Defensive Architecture & Safety Invariants
+The implementing agent must enforce all established project rules:
+
+Defensive Admin Protection:
+Never allow an admin to demote themselves.
+Never allow reducing total active admins to zero.
+Safety Snapshots:
+Always trigger createSeasonSafetySnapshot before season activation, result publication corrections, or Hall of Fame finalization.
+Driver Reference Integrity:
+Never allow deleting drivers referenced in historical picks or results (drivers.is_active = false must be used instead).
+Audit Logging:
+Every mutation (role change, invite code update, rules doc update, historical HoF import, storage cleanup, error resolve) must record an entry via recordAdminAudit.
+Scoring Cache Invalidation:
+Any change affecting scoring, drivers, races, or participants must call invalidateScoringCache().
+Schema Contract:
+Do not alter EXPECTED_SCHEMA_VERSION unless a database migration is specifically applied and verified. All new features here leverage existing tables, RPCs, and storage APIs without requiring schema version changes.
+Verification Plan
+Automated Tests
+Tab Navigation Tests (tests/unit/admin-tabs.test.ts):
+Verify every new and aliased workspace tab resolves correctly.
+Admin Role Delegation Tests (tests/unit/admin-role-actions.test.ts):
+Test that an admin can promote a participant.
+Test that self-demotion is rejected with a clear error.
+Test that demoting the sole remaining admin is rejected.
+Test audit event recording.
+Historical HoF Importer Tests (tests/unit/hall-of-fame-import.test.ts):
+Test spreadsheet TSV/CSV parsing with valid Google Sheet data.
+Test rejection of duplicate team names, invalid ranks, or missing champion.
+Test RPC dispatch with expected JSON structure.
+Storage Cleanup Tests (tests/unit/storage-maintenance.test.ts):
+Test matching of bucket paths against database URLs.
+Test dry run calculation vs purge execution.
+Full Suite & Typecheck:
+bash
+
+npm test
+npm run typecheck
+npm run lint
+
+
+Manual Verification Scenarios (I will do these manually, this process should just make sure they will work)
+Role Delegation: Sign in as Matthew Mark, navigate to Participants, promote a participant to co-admin, verify badge update, verify demotion refusal for Matthew Mark's own account.
+Seasons Workspace: Navigate to Seasons, verify active season card, test "Copy Signup Link", and verify pre-flight activation checklist indicators.
+Historical HoF Import: In Seasons, paste sample spreadsheet standings, verify live preview table, and test import validation.
+Race Week Cockpit: Navigate to Race Week, select a race, walk through Phase 1 (Field) -> Phase 2 (Picks/Reminders) -> Phase 3 (Results/Audit) -> Phase 4 (Winner).
+Storage Cleanup in UI: Open Drivers, click "Audit Storage", verify orphaned file counts and size display.
+System Health: Open System Health, verify schema contract reports healthy, view cron heartbeats, test "Run Fantasy Winner Check Now".

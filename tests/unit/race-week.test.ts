@@ -98,10 +98,9 @@ const load = (
 beforeEach(() => {
   mocks.previousResultsGate.mockReset();
   mocks.previousResultsGate.mockResolvedValue({
-    expectedResultCount: null,
+    diagnostics: null,
     previousRace: null,
     previousRaces: [],
-    resultCount: 0,
     status: "ready"
   });
 });
@@ -213,6 +212,17 @@ describe("dashboard race-week lifecycle", () => {
     expect(state.action.status).toBe("waiting_results");
     expect(state.previousResultsBlocked).toBe(true);
     expect(state.currentRace?.id).toBe(17);
+    expect(mocks.previousResultsGate).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ id: 17 }),
+      {
+        includeDiagnostics: false,
+        seasonRaces: [
+          expect.objectContaining({ id: 16, results_status: "draft" }),
+          expect.objectContaining({ id: 17, results_status: "draft" })
+        ]
+      }
+    );
   });
 
   it("awaits both final doubleheader results after the second race starts", async () => {

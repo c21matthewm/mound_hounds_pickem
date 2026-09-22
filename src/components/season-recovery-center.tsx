@@ -13,6 +13,8 @@ type Props = {
     id: number;
     seasonYear: number;
   } | null;
+  seasons: { id: number; seasonYear: number; status: "upcoming" | "active" | "completed" }[];
+  selectedSeasonId: number | null;
   requestToken: string;
   restorePoints: SeasonRestorePointSummary[];
 };
@@ -91,7 +93,7 @@ const triggerDownload = (restorePointId: string): void => {
   anchor.remove();
 };
 
-export function SeasonRecoveryCenter({ activeSeason, requestToken, restorePoints }: Props) {
+export function SeasonRecoveryCenter({ activeSeason, seasons, selectedSeasonId, requestToken, restorePoints }: Props) {
   const router = useRouter();
   const uploadInputRef = useRef<HTMLInputElement>(null);
   const [busyAction, setBusyAction] = useState<string | null>(null);
@@ -106,6 +108,8 @@ export function SeasonRecoveryCenter({ activeSeason, requestToken, restorePoints
     () => restorePoints.find((point) => point.id === selectedId) ?? null,
     [restorePoints, selectedId]
   );
+  const canCreate = Boolean(activeSeason && activeSeason.id === selectedSeasonId);
+  const canRestore = Boolean(activeSeason && selectedPoint?.season_id === activeSeason.id);
   const storedBytes = restorePoints.reduce(
     (sum, point) => sum + Number(point.snapshot_bytes ?? 0),
     0
@@ -131,8 +135,8 @@ export function SeasonRecoveryCenter({ activeSeason, requestToken, restorePoints
 
   const createAndDownload = () =>
     runAction("create", async () => {
-      if (!activeSeason) {
-        throw new Error("Activate a season before creating a backup.");
+      if (!activeSeason || !canCreate) {
+        throw new Error("Select the active season before creating a fresh backup.");
       }
 
       const { data: created } = await postRecoveryAction<{ id: string }>(
@@ -173,7 +177,12 @@ export function SeasonRecoveryCenter({ activeSeason, requestToken, restorePoints
       if (uploadInputRef.current) {
         uploadInputRef.current.value = "";
       }
-      router.refresh();
+      const importedSeason = seasons.find(season => season.seasonYear === imported.seasonYear);
+      if (importedSeason && importedSeason.id !== selectedSeasonId) {
+        router.push(`/admin?tab=recovery&recovery_season_id=${importedSeason.id}`);
+      } else {
+        router.refresh();
+      }
     });
 
   const previewRestore = () =>
@@ -192,8 +201,8 @@ export function SeasonRecoveryCenter({ activeSeason, requestToken, restorePoints
 
   const restore = () =>
     runAction("restore", async () => {
-      if (!selectedPoint || !preview) {
-        throw new Error("Preview the selected restore point before restoring.");
+      if (!selectedPoint || !preview || !canRestore) {
+        throw new Error("Only a previewed backup for the active season can be restored.");
       }
       if (confirmationYear !== String(selectedPoint.season_year)) {
         throw new Error(`Type ${selectedPoint.season_year} exactly to confirm this restore.`);
@@ -237,6 +246,23 @@ export function SeasonRecoveryCenter({ activeSeason, requestToken, restorePoints
         title="Season Recovery"
       />
 
+      <form action="/admin" method="get" className="mt-4 flex flex-wrap items-end gap-2">
+        <input name="tab" type="hidden" value="recovery" />
+        <div className="block min-w-0 flex-1 sm:max-w-sm">
+          <label htmlFor="recovery-season" className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-600">Backup season</label>
+          <select id="recovery-season" name="recovery_season_id" defaultValue={selectedSeasonId ?? ""} required disabled={busyAction !== null || !seasons.length}
+            className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm">
+            {!seasons.length ? <option value="">No seasons available</option> : null}
+            {seasons.map(season => <option key={season.id} value={season.id}>{season.seasonYear} ({season.status})</option>)}
+          </select>
+        </div>
+        <button type="submit" disabled={busyAction !== null || !seasons.length}
+          className="min-h-10 rounded-md border border-slate-300 px-3 py-2 text-sm font-semibold disabled:opacity-50">View backups</button>
+      </form>
+      {!canCreate ? <CompactNotice className="mt-3">
+        Saved backups remain available for download and comparison between seasons. Fresh backups and restores are available for the active season only.
+      </CompactNotice> : null}
+
       <MetricStrip
         className="mt-4 grid-cols-2"
         items={[
@@ -259,7 +285,7 @@ export function SeasonRecoveryCenter({ activeSeason, requestToken, restorePoints
           </div>
           <button
             className="min-h-10 rounded-md ui-action-primary bg-slate-900 px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
-            disabled={!activeSeason || busyAction !== null}
+            disabled={!canCreate || busyAction !== null}
             onClick={createAndDownload}
             type="button"
           >
@@ -431,6 +457,7 @@ export function SeasonRecoveryCenter({ activeSeason, requestToken, restorePoints
                 validated but are not overwritten.
               </CompactNotice>
 
+              {canRestore ? <>
               <label className="mt-4 block">
                 <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-600">
                   Type {preview.seasonYear} to confirm
@@ -454,6 +481,7 @@ export function SeasonRecoveryCenter({ activeSeason, requestToken, restorePoints
               >
                 {busyAction === "restore" ? "Restoring..." : "Restore This Season"}
               </button>
+              </> : <CompactNotice className="mt-4">This season is not active. You can download and compare this backup; restoring it into another season is not allowed.</CompactNotice>}
             </>
           )}
         </section>

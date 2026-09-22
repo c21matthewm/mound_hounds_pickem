@@ -8,6 +8,8 @@ import type {
   DriverRow,
   LeagueSeasonRow
 } from "@/app/admin/admin-types";
+import { AdminDriverPhotoFilter } from "@/components/admin-driver-photo-filter";
+import { AdminStorageMaintenance } from "@/components/admin-storage-maintenance";
 import { ConfirmSubmitButton } from "@/components/confirm-submit-button";
 import { SubmitButton } from "@/components/submit-button";
 import {
@@ -35,7 +37,7 @@ export function AdminDriversWorkspace({
         <section className="mt-6 rounded-lg ui-panel border border-slate-200 bg-white p-4 sm:p-6">
         <AdminWorkspaceHeader
           description="Opening order comes from the prior final standings. Published results update current points and groups."
-          title="Drivers"
+          title="Drivers & Groups"
         />
 
         <Disclosure
@@ -162,7 +164,12 @@ export function AdminDriversWorkspace({
               title="No drivers yet"
             />
           ) : (
-            drivers.map((driver) => (
+            <AdminDriverPhotoFilter entries={drivers.map((driver) => ({
+              id: driver.id,
+              driverName: driver.driver_name,
+              isActive: driver.is_active,
+              missingPhoto: !driver.image_url?.trim(),
+              content: (
               <details key={driver.id} className="rounded-md ui-panel border border-slate-200 bg-white">
                 <summary className="cursor-pointer px-3 py-3">
                   <div className="inline-flex w-full flex-wrap items-center justify-between gap-3 align-middle">
@@ -259,9 +266,11 @@ export function AdminDriversWorkspace({
                   </form>
                 </div>
               </details>
-            ))
+              )
+            }))} />
           )}
         </div>
+        <AdminStorageMaintenance />
         </section>
   );
 }

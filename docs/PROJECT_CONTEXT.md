@@ -1,12 +1,20 @@
 # Mound Hounds Pick'em Project Context
 
-Last reviewed: 2026-09-06
+Last reviewed: 2026-09-20
 
 This is the working-memory companion to `README.md`. Keep the README focused on setup and user-facing operation; keep this file updated whenever routes, schema, scoring, admin workflows, auth behavior, or testing strategy changes.
 
 ## What This App Is
 
 Mound Hounds Pick'em is a private INDYCAR fantasy league app. Participants submit drivers from race-specific groups for the next race, plus an average-speed tiebreaker. Standard races use six championship-standing groups; the Indianapolis 500 uses eight qualifying-order groups. Admins manage drivers, races, qualifying order, official race results, feedback, and fantasy race winners. The app produces season standings, locked picks by race, and participant analytics.
+
+## Local workspace handoff
+
+The project currently resides at `/Users/c21matthewm/Personal Projects/python/mound_hounds_pickem`.
+The old `Coding_Projects/python/mound_hounds_pickem` location in the task's saved cwd is stale.
+Run commands against the actual project path; do not recreate the old folder or assume a terminal
+opened at the old path points to this checkout. Use `nvm use` with `.nvmrc` (Node 22). Local/mobile
+development uses port 3007 with hostname `0.0.0.0`; a phone needs the computer's current LAN IP.
 
 ## Stack And Runtime
 
@@ -31,15 +39,23 @@ Mound Hounds Pick'em is a private INDYCAR fantasy league app. Participants submi
 - Authenticated pages share Dashboard, Pick'em Form, and Standings navigation: a compact header nav on desktop/tablet and a bottom dock on mobile.
 - `/more` keeps secondary mobile navigation for rules, feedback, contact, and admin out of the primary race-week view.
 - `/picks` shows the active race, pick lock state, saved submission snapshot, driver groups, average-speed input, local draft recovery, and an unsaved-change guard. Standard races show six groups; Indy 500 races show eight groups after qualifying order import.
-- `/leaderboard` has tabs for current season standings, picks by race, personal analytics, and finalized Hall of Fame seasons.
+- `/leaderboard` has tabs for current season standings, picks by race, personal analytics, and finalized Hall of Fame seasons. With no active season it defaults to Hall of Fame; Dashboard shows Between seasons, and Picks renders an off-season state without a registration loop.
+- `/leaderboard?tab=hall` opens the champions overview. Cards link to each complete season archive with `&year=YYYY`; detail pages retain the year selector and an All champions link. Champion averages and winning margins are derived from archived standings, with a comparison table once multiple seasons exist. Each season displays its recorded single champion. A winner with the same total as the runner-up is labeled "Won on tiebreak"; missing comparisons are omitted, and participant views do not display archive timestamps. Final standings wrap long team names in a fixed-width table so mobile scores stay visible.
 - `/feedback` records participant bug/improvement submissions.
-- `/rules` serves the active season's configured rules PDF, with the bundled 2026 PDF as the 2026 fallback.
-- `/admin` is admin-only and has tabs for participants, drivers, races, race results, feedback, system health, and guided season recovery.
+- `/rules` serves a validated active-season rules URL/PDF, with the bundled 2026 PDF as the 2026 fallback. Seasons & League can publish a PDF or set its URL through one atomic rules/audit RPC; invalid legacy URLs are not embedded.
+- `/admin` defaults to Race Week and exposes Seasons & League, Participants, Drivers & Groups, Race Calendar, System Health, Recovery and Feedback. Legacy `tab=results` opens Race Week’s Results stage. See `docs/ADMIN_EXPANSION_PROGRESS.md` for implemented features, required optional migrations and remaining plan items.
 - `/api/admin/season-backups` is an app-admin-authenticated JSON backup, preview, import, and restore endpoint.
 - `/api/cron/fantasy-winner` finalizes due race winners.
 - `/api/cron/pick-reminders` sends due pick reminders.
 
 ## Auth And Access Control
+
+- The 2026 app season was experimental; the actual league ran in Google Sheets. The one-time
+  prelaunch reset is documented in `supabase/operations/prelaunch-2027/README.md`, separate from
+  migrations and normal rollover. It preserves the real 2025 archive, the designated permanent
+  admin, and drivers; removes test accounts/race data/recovery copies; and closes old registration
+  and scheduled jobs until 2027 is prepared. The user confirmed the real 2026 archive import on 2026-09-13. The retained admin
+  has a fresh declined 2026 decision to keep archive access available and will join 2027 separately.
 
 - `middleware.ts` protects `/dashboard`, `/onboarding`, `/season-registration`, `/picks`, `/leaderboard`, `/admin`, and `/feedback`.
 - Authenticated users visiting `/login` or `/signup` are redirected to `/dashboard`, whose
@@ -89,16 +105,36 @@ a fresh export from the original stored point rather than silently bypassing val
 - `app_metadata`: small deployment contract table; the admin health page checks its schema version.
 - `admin_audit_events` and `job_runs`: admin mutation history and scheduled-job heartbeat/failure records.
 - `hall_of_fame_seasons` and `hall_of_fame_entries`: immutable final standings snapshots independent of live profiles, races, and picks.
-- Legacy spreadsheet seasons can use standalone Hall of Fame headers and final rank/team/points entries with an empty `race_breakdown`; historical accounts and race records are not required. Hall of Fame finalization archives the current standings but leaves the season active until the next season is activated.
+- Legacy spreadsheet seasons can use standalone Hall of Fame headers and final rank/team/points entries with an empty `race_breakdown`; historical accounts and race records are not required. Saving final standings leaves the season active for review/correction. A separate, confirmed **Complete [year] season** action verifies the archive and current source data, saves a backup and audit, and leaves no active season. Activation requires the outgoing season to be completed first; it never completes a predecessor implicitly.
 - `season_restore_points`: immutable, checksummed active-season snapshots used by guided backup and recovery.
 
 Key database triggers:
 
 - `enforce_pick_deadline()` requires active-season registration, keeps the opening pick window closed until six days before qualifying, and blocks insert/update after the race-specific deadline, for archived races, and while every race in the previous pick window is not yet published.
+- `src/lib/pickem-results-gate.ts` applies that publication rule using the complete season schedule already loaded by dashboard, picks, and admin Race Week. Shared doubleheader windows are evaluated together. Reminder jobs load one bounded complete schedule because their upcoming-race list excludes past races. Saved-row diagnostics are requested only by admins for blocked windows; participant messages describe publication status.
 - `protect_profile_role()` prevents a participant from assigning or changing profile roles.
 - `validate_pick_groups()` freezes and validates against the race-specific driver field so later driver changes cannot invalidate saved picks.
 - `handle_new_user()` auto-creates a profile when a Supabase auth user is created.
 - `ensure_race_driver_groups_snapshot_from_results()` snapshots active standard driver groups before result rows are inserted or moved to a race. Indy 500 results require qualifying order to already exist.
+
+## Optional Admin capabilities added for 2027
+
+The full implementation and exact manual migration sequence are recorded in
+`docs/ADMIN_EXPANSION_PROGRESS.md`. The first six optional migrations add role delegation,
+create-only historical imports, explicit field freeze, driver/participant batches, and rules
+PDFs. The administrator applied those six, and read-only type generation verified their RPCs.
+A seventh, `20260921_season_completion.sql`, adds explicit closeout, guarded activation,
+off-season profile edits and nine capability checks in System Health. This seventh migration
+was confirmed installed by the administrator; it changes no season status on installation.
+Its four new RPC declarations were regenerated from the installed schema and verified with
+`db:types:check` on 2026-09-22. The administrator will complete 2026 later and prepare 2027
+when official season information is available. All 14 affected function/trigger
+definitions match `supabase/schema.sql`. The expected base version remains
+`20260904_portable_season_backups_v2`; optional capabilities have separate diagnostics.
+
+The real 2025/2026 spreadsheet archives are already present. The experimental-season reset is
+complete and must not be repeated. Future archives come from normal app finalization; historical
+import is create-only and never needs accounts or per-race records from the old Google Sheets.
 
 ## Core League Rules And Scoring
 
@@ -111,7 +147,7 @@ Key database triggers:
 - Participants without picks for a completed race receive the lowest possible score for that race, calculated as the lowest scoring driver from each race-specific group.
 - Highest and lowest possible race benchmarks are shown for the latest completed race.
 - Weekly ordering is handled by `src/lib/weekly-ranking.ts`: highest points first; average-speed tiebreak applies only among first-place weekly ties; other ties fall back to team name and competition ranks where appropriate.
-- Season standings are cumulative across non-archived races with published results. Draft rows never affect participant scoring or driver groups.
+- Season standings are cumulative across non-archived races with published results. Equal totals are ranked by points in the latest completed race, then the second-to-last completed race. The tiebreak stops there; average speed and earlier races do not decide season ranks. Exact remaining ties share a rank during the season, and names only stabilize their display order. Finalization requires exactly one first-place team and pauses for league resolution if these rules leave the championship tied. The same ranks drive movement, analytics, and season finalization. Draft rows never affect participant scoring or driver groups.
 - `src/lib/scoring-engine.ts` owns shared pure score/pick/group calculations used by leaderboard scoring, winner calculation, and admin audits.
 - `src/lib/season-scoring-model.ts` computes standings and every participant's analytics in one pass; `src/lib/scoring.ts` loads and caches that shared model for leaderboard consumers.
 - Current scoring, analytics, fantasy winners, and reminders load only registered profiles and active-season race data.
@@ -122,7 +158,7 @@ Key database triggers:
 - Drivers can be manually created/updated/deleted, marked inactive, given image uploads, or seeded from pasted INDYCAR championship standings.
 - Importing standings uses `src/lib/championship-standings.ts`, updates/creates drivers by normalized name, then refreshes standings/groups.
 - Races can be created/updated/deleted/archived with standard or Indy 500 pick rules, qualifying start, race start, payout, and optional title image upload. Consecutive standard races can be linked to one shared deadline from the race editor.
-- The Race Results tab has an Indianapolis 500 qualifying-order importer that expects positions 1-33, maps drivers by normalized name, and writes `race_driver_groups.qualifying_position` plus derived groups.
+- Race Week’s Preparation stage has an Indianapolis 500 qualifying-order importer that expects positions 1-33, maps drivers by normalized name, and writes `race_driver_groups.qualifying_position` plus derived groups.
 - Manual entries save draft rows and temporarily remove a corrected race from published scoring. Draft publication requires every snapshotted driver plus official winning average speed.
 - Bulk import uses `publish_race_results()` to publish a unique, contiguous official finishing order atomically. Standard-race drivers in the pickable snapshot but absent from that order are stored as zero-point nonstarters; Indianapolis still requires all 33 drivers. The server validates field membership even if client preview is bypassed.
 - Imported winning average speed must come from exactly one first-place row and be greater than 0 and no more than 300 MPH. Missing, malformed, or ambiguous winning speeds block preview and publication; another driver's speed is never substituted.
@@ -130,11 +166,13 @@ Key database triggers:
 - Race winner can be manually overridden or auto-calculated with `src/lib/fantasy-winner.ts`.
 - Auto-calculation ranks the full participant/admin field using the same weekly scoring model shown on the leaderboard, including lowest-possible-score fallback rows for teams without submitted picks.
 - Admin feedback is status-filtered and paginated; test cleanup remains under advanced maintenance.
-- Participant management edits profile labels, account eligibility, and current-season registration atomically; routine registration is self-service through the season invite code.
+- Participant selection supports active/upcoming season enrollment and atomic batches of up to 100 accounts. Eligibility is account-wide; register/decline applies to the selected season. Stale state or forbidden removal with submitted picks rolls the entire batch back. Individual profile edits carry the expected active-season ID (explicit null between seasons). Off-season edits preserve registrations; stale forms cannot affect a newly activated season. Routine registration stays self-service.
+- Drivers supports atomic activation/deactivation batches of up to 100 selected records, recalculating current groups while retaining points, opening seeds and saved race fields. Filtering missing photos preserves unsaved row forms and reports hidden selected records.
 - Admin data loading is tab-scoped. The Results workspace defaults to the next unpublished race and loads picks, result rows, race-driver groups, imports, and scoring audit data for only that selected race.
-- Race management loads one selected season at a time. Recovery creates portable downloads,
-  automatic post-publication snapshots, previews, checksum validation, and transactional restore.
-- Race Week reports the schema contract, active season, registration count, next-race gate, delivery toggles, reminder queue totals, degraded cron runs, targeted failed-delivery retries, application incidents, and admin audit history.
+- Race management loads one selected season at a time. Recovery lists backups by selected season, including completed seasons after closeout. Download/comparison remains available between seasons; creating a fresh backup and restoring remain active-season operations. Existing checksums, safety snapshots and transactional restore safeguards are retained.
+- Race Week owns selected-race preparation, snapshot/current-group preview, explicit guarded field freezing, submission monitoring, reminders, results and winner controls. Countdown rendering is local and does not poll. Navigation attention counts use bounded head queries and preserve unknown state on failures.
+- System Health owns schema/cron/errors and on-demand due-winner checks. Audit history uses 25-event cursor pagination, literal summary search, exact action/entity filters, and separate bounded/redacted before/after detail loading; it does not fetch every audit payload for each page.
+- Seasons owns lifecycle, historical imports, fragment-based registration links and rules PDFs. Both typed URL edits and uploads use expected previous URL checks and one rules/audit transaction. Participants owns role delegation and bounded admin-only email lookup.
 - Recovery route handlers expire scoring data with `revalidateTag` and immediate expiration;
   Server Actions retain `updateTag`. A cache-refresh failure after a committed restore returns
   success with a separate warning and the safety-point identifier, preventing an accidental retry.
@@ -143,7 +181,7 @@ Key database triggers:
 ## Cron And Notifications
 
 - Cron auth is checked in `src/lib/cron-auth.ts`. In production, `CRON_SECRET` is required and accepted via `Authorization: Bearer <secret>` or `x-cron-secret`.
-- Fantasy winner cron calls `finalizeDueRaceWinners()` and finalizes races whose `winner_auto_eligible_at` has passed and are not manual overrides.
+- Fantasy winner cron calls `finalizeDueRaceWinners()` and selects only active-season, published, non-archived races whose `winner_auto_eligible_at` has passed and are not manual overrides. Completion clears queued eligibility for its races. This does not cancel a calculation already in progress. System Health does not require race-job heartbeats between seasons, but still reports recorded failures.
 - Pick reminder cron calls `sendDuePickReminders()` in `src/lib/pick-reminders.ts`.
 - Automated reminder windows are 2 days and 4 hours before the race-specific pick deadline; the league administrator sends the earlier form-open announcement manually. The deadline is qualifying start for standard races and race start for the Indy 500. A shared doubleheader sends one deduplicated weekend email listing only missing race forms. Only registered profiles without all required picks receive it. Delivery rows are prepared persistently and processed in batches of 25 with five concurrent sends; failed attempts retry with a lease and deterministic Resend idempotency key.
 - Reminder delivery is email-only and depends on `PICK_EMAILS_ENABLED=true`, plus Resend env vars `RESEND_API_KEY`, `RESEND_FROM_EMAIL`, and optional `RESEND_REPLY_TO`.
@@ -154,6 +192,9 @@ Key database triggers:
 - Driver images upload to a public Supabase Storage bucket named `driver-headshots`.
 - Race title images upload to a public Supabase Storage bucket named `race-title-images`.
 - Server Action upload size is raised to `12mb` in `next.config.ts`; helper limits are 5MB for driver images and 8MB for race title images.
+- Rules PDFs use the public `season-rules` bucket, a 5MB PDF limit and unique `seasons/<id>/<UUID>.pdf` paths. Admin authorization and current season/document checks precede file reads and privileged Storage access. Header/EOF checks are bounded format validation, not a general PDF scanner. Previous PDFs are retained; uncertain saves do not delete newly uploaded files.
+- Driver and race image changes use unique upload identities with overwrite disabled. Replacements/deletions retain earlier images for recovery; only a new request-owned object can be cleaned up after a confirmed failed save. Uncertain writes retain media and request a refresh.
+- Storage media maintenance only audits current/recovery references and reports missing or unreferenced objects. It does not purge. The legacy cleanup CLI ignores recovery references and cannot safely replace a coordinated deletion workflow.
 
 ## Time Handling
 
@@ -165,7 +206,8 @@ Key database triggers:
 
 ## Testing
 
-- Vitest unit tests cover the shared 90-participant season scoring model, weekly ranking, bounded reminder queues, reminder-window boundaries, race lifecycle rules, and both admin text import parsers.
+- Vitest unit tests cover scoring, ranking, reminder queues/boundaries, race lifecycle and imports, plus the expanded Admin action validation, tab/workspace composition, selected-season batches, rules upload failures, field snapshots/countdowns, attention badges and audit pagination/redaction.
+- Optional Admin SQL runners use disposable network-disabled PostgreSQL with cached images and no application credentials: `test-admin-role-delegation.mjs`, `test-admin-field-freeze.mjs`, `test-historical-hall-of-fame.mjs`, `test-admin-driver-roster.mjs`, `test-admin-bulk-participants.mjs`, and `test-season-rules-documents.mjs` under `scripts/`. Their fixtures never use live league rows. Current integrated QA evidence and limitations belong in `docs/ADMIN_EXPANSION_PROGRESS.md`.
 - Recovery endpoint tests cover immediate cache invalidation, truthful post-commit responses,
   authorization, and preservation of portable snapshot bytes through download/upload.
 - `npm run test:recovery:db` tests the actual PostgreSQL recovery functions in a disposable local
@@ -186,7 +228,7 @@ Key database triggers:
 - Auth and yearly registration: `src/app/actions/auth.ts`, `src/app/login/page.tsx`, `src/app/signup/page.tsx`, `src/app/onboarding/page.tsx`, `src/app/season-registration/page.tsx`, `src/lib/authenticated-user.ts`, `middleware.ts`.
 - Picks: `src/app/picks/page.tsx`, `src/app/picks/actions.ts`, `src/components/pickem-form.tsx`, `src/components/pick-submission-snapshot.tsx`.
 - Leaderboard/scoring: `src/app/leaderboard/page.tsx`, `src/lib/scoring.ts`, `src/lib/season-scoring-model.ts`, `src/lib/scoring-engine.ts`, `src/lib/weekly-ranking.ts`, `src/components/standings-table.tsx`, `src/components/picks-by-race-table.tsx`.
-- Admin: `src/app/admin/page.tsx`, `src/app/admin/actions.ts`, `src/components/admin-results-import-form.tsx`.
+- Admin: `src/app/admin/page.tsx`, `src/app/admin/*-actions.ts`, `src/components/admin-results-import-form.tsx`.
 - Race format helpers: `src/lib/race-format.ts`, `src/lib/qualifying-order.ts`.
 - Data and security: `supabase/schema.sql`, `supabase/migrations/`, `supabase/operations/`, `src/lib/supabase/`, `src/lib/admin.ts`.
 - Cron: `src/app/api/cron/fantasy-winner/route.ts`, `src/app/api/cron/pick-reminders/route.ts`, `src/lib/fantasy-winner.ts`, `src/lib/pick-reminders.ts`.

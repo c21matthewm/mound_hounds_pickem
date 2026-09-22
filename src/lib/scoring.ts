@@ -252,7 +252,7 @@ const loadSeasonScoringModelUncached = async (
 
 const buildCachedSeasonScoringModel = unstable_cache(
   loadSeasonScoringModelUncached,
-  ["season-scoring-model-v2"],
+  ["season-scoring-model-v4"],
   { revalidate: 3600, tags: [SCORING_CACHE_TAG] }
 );
 

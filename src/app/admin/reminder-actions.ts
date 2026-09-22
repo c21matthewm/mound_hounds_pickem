@@ -24,20 +24,21 @@ const isReminderType = (value: string): value is ReminderType =>
 export async function sendPickReminderTestAction(formData: FormData) {
   const { profile, supabase, user } = await requireAdmin();
   const raceId = parsePositiveInteger(asText(formData.get("race_id")));
+  const returnRaceId = parsePositiveInteger(asText(formData.get("result_race_id"))) ?? raceId;
   const reminderTypeInput = asText(formData.get("reminder_type"));
 
   if (!raceId || !isReminderType(reminderTypeInput)) {
     return adminMutationRedirect(
       "error",
       "Select a valid race and reminder type for the test email.",
-      "health"
+      "race-week", returnRaceId, "picks"
     );
   }
   if (!user.email) {
     adminMutationRedirect(
       "error",
       "Your administrator account does not have an email address.",
-      "health"
+      "race-week", returnRaceId, "picks"
     );
   }
 
@@ -55,7 +56,7 @@ export async function sendPickReminderTestAction(formData: FormData) {
       raceError
         ? "The reminder test race could not be loaded."
         : "Select an active race for the reminder test.",
-      "health"
+      "race-week", returnRaceId, "picks"
     );
   }
   const reminderRace = race as PickReminderRace & { is_archived: boolean };
@@ -77,13 +78,13 @@ export async function sendPickReminderTestAction(formData: FormData) {
     adminMutationRedirect(
       "error",
       "The reminder test pick window could not be loaded.",
-      "health"
+      "race-week", returnRaceId, "picks"
     );
   }
 
   const races = racesInPickWindow(raceRows ?? [], reminderRace);
   if (races.length === 0) {
-    adminMutationRedirect("error", "No race is available for the test email.", "health");
+    adminMutationRedirect("error", "No race is available for the test email.", "race-week", returnRaceId, "picks");
   }
 
   try {
@@ -130,7 +131,7 @@ export async function sendPickReminderTestAction(formData: FormData) {
     adminMutationRedirect(
       "error",
       `The test email could not be sent.${errorReference(reported)}`,
-      "health"
+      "race-week", returnRaceId, "picks"
     );
   }
 
@@ -138,6 +139,6 @@ export async function sendPickReminderTestAction(formData: FormData) {
   adminMutationRedirect(
     "message",
     `Test email sent to ${recipientEmail}. Participant reminder history was not changed.`,
-    "health"
+    "race-week", returnRaceId, "picks"
   );
 }

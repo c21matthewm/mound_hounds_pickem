@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { requireAdmin } from "@/lib/admin";
-import { recordAdminAudit } from "@/lib/admin-audit";
+import { isSafeRulesDocumentUrl, RULES_DOCUMENT_MIGRATION } from "@/lib/season-rules";
 import { withMigrationHint } from "@/lib/supabase/migration-errors";
 import { invalidateScoringCache } from "@/lib/scoring-cache";
 import {
@@ -11,7 +11,6 @@ import {
   OPERATIONS_HARDENING_MIGRATION_FILE,
   adminRedirect,
   asText,
-  createSeasonSafetySnapshot,
   isUuid,
   parsePositiveInteger,
   reportAdminActionFailure
@@ -24,17 +23,17 @@ export async function createLeagueSeasonAction(formData: FormData) {
   const inviteCodeConfirmation = asText(formData.get("invite_code_confirmation"));
 
   if (!seasonYear || seasonYear < 2000 || seasonYear > 2100) {
-    return adminRedirect("error", "Enter a valid four-digit season year.", "races");
+    return adminRedirect("error", "Enter a valid four-digit season year.", "seasons");
   }
   if (inviteCode.length < 8 || inviteCode.length > 64) {
     adminRedirect(
       "error",
       "Season invite code must be between 8 and 64 characters.",
-      "races"
+      "seasons"
     );
   }
   if (inviteCode !== inviteCodeConfirmation) {
-    adminRedirect("error", "Season invite code confirmation does not match.", "races");
+    adminRedirect("error", "Season invite code confirmation does not match.", "seasons");
   }
 
   const { error } = await supabase.rpc("create_league_season", {
@@ -44,7 +43,7 @@ export async function createLeagueSeasonAction(formData: FormData) {
 
   if (error) {
     if (error.code === "23505") {
-      adminRedirect("error", `${seasonYear} already exists.`, "races");
+      adminRedirect("error", `${seasonYear} already exists.`, "seasons");
     }
     await reportAdminActionFailure({
       actorProfileId: user.id,
@@ -52,7 +51,7 @@ export async function createLeagueSeasonAction(formData: FormData) {
       context: { entityId: seasonYear, entityType: "league_season", operation: "create" },
       error: withMigrationHint(error.message, OPERATIONS_HARDENING_MIGRATION_FILE),
       fallback: "The season could not be created.",
-      tab: "races"
+      tab: "seasons"
     });
   }
 
@@ -60,7 +59,7 @@ export async function createLeagueSeasonAction(formData: FormData) {
   adminRedirect(
     "message",
     `${seasonYear} season created. Configure its opening driver roster when you are ready to activate it.`,
-    "races"
+    "seasons"
   );
 }
 
@@ -71,17 +70,17 @@ export async function setLeagueSeasonInviteCodeAction(formData: FormData) {
   const inviteCodeConfirmation = asText(formData.get("invite_code_confirmation"));
 
   if (!seasonId) {
-    return adminRedirect("error", "Select a season before setting its invite code.", "races");
+    return adminRedirect("error", "Select a season before setting its invite code.", "seasons");
   }
   if (inviteCode.length < 8 || inviteCode.length > 64) {
     adminRedirect(
       "error",
       "Season invite code must be between 8 and 64 characters.",
-      "races"
+      "seasons"
     );
   }
   if (inviteCode !== inviteCodeConfirmation) {
-    adminRedirect("error", "Season invite code confirmation does not match.", "races");
+    adminRedirect("error", "Season invite code confirmation does not match.", "seasons");
   }
 
   const { error } = await supabase.rpc("set_league_season_invite_code", {
@@ -96,7 +95,7 @@ export async function setLeagueSeasonInviteCodeAction(formData: FormData) {
       context: { entityId: seasonId, entityType: "league_season", operation: "set_invite" },
       error: withMigrationHint(error.message, OPERATIONS_HARDENING_MIGRATION_FILE),
       fallback: "The season invite code could not be saved.",
-      tab: "races"
+      tab: "seasons"
     });
   }
 
@@ -105,64 +104,44 @@ export async function setLeagueSeasonInviteCodeAction(formData: FormData) {
   adminRedirect(
     "message",
     "Season invite code saved. Existing registered participants are unaffected.",
-    "races"
+    "seasons"
   );
 }
 
 export async function setLeagueSeasonRulesDocumentAction(formData: FormData) {
   const { supabase, user } = await requireAdmin();
   const seasonId = parsePositiveInteger(asText(formData.get("season_id")));
-  const rulesDocumentUrl = asText(formData.get("rules_document_url"));
+  const rulesDocumentUrl = formData.get("rules_document_url");
+  const expectedUrl = formData.get("expected_rules_document_url");
 
-  if (!seasonId) {
-    return adminRedirect("error", "Select a season before saving its rules document.", "races");
+  if (!seasonId || typeof expectedUrl !== "string" || expectedUrl.length > 2048) {
+    return adminRedirect("error", "Refresh Seasons & League before saving its rules document.", "seasons");
   }
-  if (
-    rulesDocumentUrl &&
-    !rulesDocumentUrl.startsWith("/") &&
-    !/^https:\/\//i.test(rulesDocumentUrl)
-  ) {
-    adminRedirect(
-      "error",
-      "Rules document must use a site path beginning with / or a secure https URL.",
-      "races"
-    );
+  if (typeof rulesDocumentUrl !== "string" || (rulesDocumentUrl !== "" && !isSafeRulesDocumentUrl(rulesDocumentUrl))) {
+    return adminRedirect("error", "Use a site path beginning with a single / or a secure HTTPS URL without spaces or credentials.", "seasons");
   }
-
-  const { data: season, error } = await supabase
-    .from("league_seasons")
-    .update({ rules_document_url: rulesDocumentUrl || null })
-    .eq("id", seasonId)
-    .neq("status", "completed")
-    .select("season_year")
-    .maybeSingle<{ season_year: number }>();
-
-  if (error) {
-    await reportAdminActionFailure({
-      actorProfileId: user.id,
-      code: "set-season-rules-failed",
-      context: { entityId: seasonId, entityType: "league_season", operation: "set_rules" },
-      error,
-      fallback: "The season rules document could not be saved.",
-      tab: "races"
+  let result;
+  try {
+    result = await supabase.rpc("set_league_season_rules_document", {
+      p_season_id: seasonId, p_rules_document_url: rulesDocumentUrl || null,
+      p_expected_rules_document_url: expectedUrl || null
     });
+  } catch {
+    revalidatePath("/admin"); revalidatePath("/rules");
+    return adminRedirect("error", "The rules save could not be confirmed. Refresh and check the current document before trying again.", "seasons");
   }
-  if (!season) {
-    adminRedirect("error", "Rules can only be changed for an active or upcoming season.", "races");
+  if (result.error) {
+    return reportAdminActionFailure({ actorProfileId: user.id, code: "set-season-rules-failed",
+      context: { entityId: seasonId, entityType: "league_season", operation: "set_rules" },
+      error: result.error.code === "PGRST202" || result.error.code === "42883"
+        ? withMigrationHint(result.error.message, RULES_DOCUMENT_MIGRATION) : result.error,
+      fallback: "The season rules document could not be saved.", tab: "seasons" });
   }
-  const selectedSeason = season!;
-
-  await recordAdminAudit(supabase, {
-    action: "update_rules_document",
-    afterState: { rules_document_url: rulesDocumentUrl || null },
-    entityId: String(seasonId),
-    entityType: "league_season",
-    summary: `Updated the ${selectedSeason.season_year} rules document.`
-  });
-
-  revalidatePath("/admin");
-  revalidatePath("/rules");
-  adminRedirect("message", "Season rules document updated.", "races");
+  revalidatePath("/admin"); revalidatePath("/rules");
+  if (result.data === null) {
+    return adminRedirect("error", "The rules save could not be confirmed. Refresh and check the current document before trying again.", "seasons");
+  }
+  return adminRedirect("message", "Season rules document updated.", "seasons");
 }
 
 export async function activateLeagueSeasonAction(formData: FormData) {
@@ -170,48 +149,7 @@ export async function activateLeagueSeasonAction(formData: FormData) {
   const seasonId = parsePositiveInteger(asText(formData.get("season_id")));
 
   if (!seasonId) {
-    return adminRedirect("error", "Select a season to activate.", "races");
-  }
-
-  const { data: currentSeason, error: currentSeasonError } = await supabase
-    .from("league_seasons")
-    .select("id,season_year")
-    .eq("status", "active")
-    .maybeSingle<{ id: number; season_year: number }>();
-  if (currentSeasonError) {
-    await reportAdminActionFailure({
-      actorProfileId: user.id,
-      code: "load-active-season-failed",
-      context: { entityId: seasonId, entityType: "league_season", operation: "activate" },
-      error: currentSeasonError,
-      fallback: "The active season could not be checked.",
-      tab: "races"
-    });
-  }
-
-  if (currentSeason && currentSeason.id !== seasonId) {
-    try {
-      await createSeasonSafetySnapshot(
-        supabase,
-        currentSeason.id,
-        `Before activating a new season from ${currentSeason.season_year}`,
-        "pre_rollover",
-        `season:${currentSeason.id}:activation`
-      );
-    } catch (snapshotError) {
-      await reportAdminActionFailure({
-        actorProfileId: user.id,
-        code: "season-rollover-backup-failed",
-        context: {
-          entityId: currentSeason.id,
-          entityType: "league_season",
-          operation: "pre_rollover_backup"
-        },
-        error: snapshotError,
-        fallback: "Could not create the required pre-activation backup.",
-        tab: "races"
-      });
-    }
+    return adminRedirect("error", "Select a season to activate.", "seasons");
   }
 
   const { error } = await supabase.rpc("activate_league_season", {
@@ -225,7 +163,7 @@ export async function activateLeagueSeasonAction(formData: FormData) {
       context: { entityId: seasonId, entityType: "league_season", operation: "activate" },
       error: withMigrationHint(error.message, LEAGUE_SEASONS_MIGRATION_FILE),
       fallback: "The season could not be activated.",
-      tab: "races"
+      tab: "seasons"
     });
   }
 
@@ -236,8 +174,8 @@ export async function activateLeagueSeasonAction(formData: FormData) {
   revalidatePath("/leaderboard");
   adminRedirect(
     "message",
-    "Season activated. Driver points were reset and the prior final standings were retained as the opening seed order.",
-    "races"
+    "Season activated and registration opened. The configured driver order is the opening seed, and championship points start at zero.",
+    "seasons"
   );
 }
 
@@ -249,6 +187,11 @@ export async function updateParticipantAction(formData: FormData) {
   const accountEligible = asText(formData.get("account_eligible")) === "on";
   const seasonRegistered = asText(formData.get("season_registered")) === "on";
   const forceRemoval = asText(formData.get("force_removal")) === "on";
+  const expectedSeasonText = formData.get("expected_season_id");
+  const expectedSeasonId = typeof expectedSeasonText === "string" && expectedSeasonText ? parsePositiveInteger(expectedSeasonText) : null;
+  if (typeof expectedSeasonText !== "string" || (expectedSeasonText !== "" && !expectedSeasonId)) {
+    return adminRedirect("error", "Refresh Participants before saving account changes.", "participants");
+  }
 
   if (!isUuid(profileId) || !fullName || !teamName) {
     adminRedirect(
@@ -261,7 +204,8 @@ export async function updateParticipantAction(formData: FormData) {
     adminRedirect("error", "Participant and team names must be 100 characters or fewer.", "participants");
   }
 
-  const { error } = await supabase.rpc("admin_update_participant", {
+  const { error } = await supabase.rpc("admin_update_participant_v2", {
+    p_expected_season_id: expectedSeasonId,
     p_account_eligible: accountEligible,
     p_force_removal: forceRemoval,
     p_full_name: fullName,
@@ -271,6 +215,7 @@ export async function updateParticipantAction(formData: FormData) {
   });
 
   if (error) {
+    if (["PGRST202","42883"].includes(error.code)) return adminRedirect("error", "Participant editing needs database setup. Apply 20260921_season_completion.sql, then refresh.", "participants");
     if (error.code === "23505") {
       adminRedirect("error", "That team name is already in use.", "participants");
     }
@@ -291,7 +236,7 @@ export async function updateParticipantAction(formData: FormData) {
   revalidatePath("/leaderboard");
   adminRedirect(
     "message",
-    `Participant updated. League participation ${accountEligible ? "enabled" : "disabled"} and current-season registration ${seasonRegistered ? "confirmed" : "removed"}.`,
+    expectedSeasonId ? `Participant updated. League participation ${accountEligible ? "enabled" : "disabled"} and current-season registration ${seasonRegistered ? "confirmed" : "removed"}.` : "Participant profile and participation eligibility updated. There is no active season; historical registrations were preserved.",
     "participants"
   );
 }

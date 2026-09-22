@@ -1,11 +1,13 @@
-import { ConfirmSubmitButton } from "@/components/confirm-submit-button";
+import type { AdminCapabilities } from "@/lib/admin-capabilities";
+import { AdminAuditLog } from "@/components/admin-audit-log";
+import type { AdminAuditLogData } from "@/lib/admin-audit-log";
 import { SubmitButton } from "@/components/submit-button";
+import { triggerFantasyWinnerJobAction } from "@/app/admin/race-week-actions";
+import { ConfirmSubmitButton } from "@/components/confirm-submit-button";
 import {
-  ActionLink,
   AdminWorkspaceHeader,
   CompactNotice,
   Disclosure,
-  MetricStrip,
   StatusChip,
   actionControlClassName
 } from "@/components/ui-primitives";
@@ -58,13 +60,6 @@ export type AdminReminderPreview = {
   text: string;
 };
 
-export type AdminAuditHealthRow = {
-  action: string;
-  created_at: string;
-  entity_type: string;
-  summary: string;
-};
-
 export type AdminAppErrorRow = {
   correlation_id: string;
   error_code: string;
@@ -79,11 +74,12 @@ export type AdminAppErrorRow = {
 };
 
 type AdminSystemHealthProps = {
-  activeSeasonName: string | null;
+  activeSeasonYear?: number | null;
+  capabilities?: AdminCapabilities;
   appErrorInboxReady: boolean;
   appErrorInboxIssue: string | null;
   appErrors: AdminAppErrorRow[];
-  auditRows: AdminAuditHealthRow[];
+  auditLog: AdminAuditLogData;
   cleanupTestFlowDataAction: (formData: FormData) => void | Promise<void>;
   currentTime: number;
   emailEnabled: boolean;
@@ -94,24 +90,9 @@ type AdminSystemHealthProps = {
   } | null;
   jobEvents: AdminJobRunHealthRow[];
   jobRuns: AdminJobRunHealthRow[];
-  nextRace: {
-    expectedPickCount: number;
-    fieldFrozen: boolean;
-    pickLockAt: string;
-    pickCount: number;
-    previousResultsStatus: string;
-    raceName: string;
-    roundLabel: string;
-    roundNumber: number;
-  } | null;
   openAppErrorCount: number;
-  registeredTeamCount: number;
-  reminderQueue: AdminReminderQueueHealth | null;
-  reminderPreview: AdminReminderPreview | null;
   reminderRows: AdminReminderHealthRow[];
   resolveAppErrorAction: (formData: FormData) => void | Promise<void>;
-  retryFailedRemindersAction: (formData: FormData) => void | Promise<void>;
-  sendReminderTestAction: (formData: FormData) => void | Promise<void>;
   schemaVersion: string | null;
 };
 
@@ -119,26 +100,21 @@ const formatHealthTime = (value: string): string =>
   formatLeagueDateTime(value, { dateStyle: "medium", timeStyle: "short" });
 
 export function AdminSystemHealth({
-  activeSeasonName,
+  activeSeasonYear = null,
+  capabilities = {items:[],issue:"Admin capability checks are unavailable."},
   appErrorInboxReady,
   appErrorInboxIssue,
   appErrors,
-  auditRows,
+  auditLog,
   cleanupTestFlowDataAction,
   currentTime,
   emailEnabled,
   healthContract,
   jobEvents,
   jobRuns,
-  nextRace,
   openAppErrorCount,
-  registeredTeamCount,
-  reminderQueue,
-  reminderPreview,
   reminderRows,
   resolveAppErrorAction,
-  retryFailedRemindersAction,
-  sendReminderTestAction,
   schemaVersion
 }: AdminSystemHealthProps) {
   const schemaReady = Boolean(
@@ -169,7 +145,7 @@ export function AdminSystemHealth({
     "fantasy-winner": 3 * 60 * 60 * 1000,
     "pick-reminders": 20 * 60 * 1000
   };
-  const expectedJobNames: AdminJobRunHealthRow["job_name"][] = emailEnabled
+  const expectedJobNames: AdminJobRunHealthRow["job_name"][] = !activeSeasonYear ? [] : emailEnabled
     ? ["fantasy-winner", "pick-reminders"]
     : ["fantasy-winner"];
   const staleJobNames = expectedJobNames.filter((jobName) => {
@@ -180,123 +156,31 @@ export function AdminSystemHealth({
       currentTime - Date.parse(run.started_at) > heartbeatAgeLimitMs[jobName]
     );
   });
-  const permanentReminderFailures = reminderQueue?.permanentFailed ?? 0;
-  const previousResultsReady = nextRace?.previousResultsStatus.startsWith("Ready:") ?? false;
-  const submissionsComplete = Boolean(
-    nextRace && nextRace.expectedPickCount > 0 && nextRace.pickCount >= nextRace.expectedPickCount
-  );
-  const actionNeeded =
-    !schemaReady ||
-    !activeSeasonName ||
-    failedJobCount > 0 ||
-    degradedJobCount > 0 ||
-    staleJobNames.length > 0 ||
-    !appErrorInboxReady ||
-    openAppErrorCount > 0 ||
-    Boolean(nextRace && !previousResultsReady) ||
-    permanentReminderFailures > 0;
-  const raceWeekSteps = [
-    {
-      detail: activeSeasonName ?? "Activate or create a season.",
-      href: "/admin?tab=races",
-      label: "Active season",
-      ready: Boolean(activeSeasonName)
-    },
-    {
-      detail: nextRace?.fieldFrozen
-        ? "The driver field is frozen for this pick window."
-        : "Open the form or reminder workflow to freeze the field.",
-      href: "/admin?tab=races",
-      label: "Race field",
-      ready: Boolean(nextRace?.fieldFrozen)
-    },
-    {
-      detail: nextRace?.previousResultsStatus ?? "No upcoming race is scheduled.",
-      href: "/admin?tab=results",
-      label: "Previous results",
-      ready: previousResultsReady || !nextRace
-    },
-    {
-      detail: nextRace
-        ? `${nextRace.pickCount}/${nextRace.expectedPickCount} race submissions saved.`
-        : "No active pick window.",
-      href: "/admin?tab=participants",
-      label: "Participant picks",
-      ready: submissionsComplete || !nextRace
-    },
-    {
-      detail: emailEnabled
-        ? permanentReminderFailures > 0
-          ? `${permanentReminderFailures} delivery failure(s) need attention.`
-          : "Email delivery is enabled with no permanent failure."
-        : "Email delivery is currently disabled.",
-      href: "/admin?tab=health#technical-details",
-      label: "Reminders",
-      ready: emailEnabled && permanentReminderFailures === 0
-    }
-  ];
+  const actionNeeded = Boolean(capabilities.issue) || capabilities.items.some(item=>!item.installed) || !schemaReady || failedJobCount > 0 || degradedJobCount > 0 || staleJobNames.length > 0 || !appErrorInboxReady || openAppErrorCount > 0;
 
   return (
     <section className="mt-6">
       <AdminWorkspaceHeader
-        description="A single checklist for picks, reminders, results, and system readiness."
+        description="Monitor scheduled jobs, investigate application errors, and review administrative changes."
         meta={
           <StatusChip tone={actionNeeded ? "danger" : "success"}>
             {actionNeeded ? "Action needed" : "System ready"}
           </StatusChip>
         }
-        title="Race Week Operations"
+        title="System Health"
       />
 
-      <div className="mt-5 grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
-        {raceWeekSteps.map((step, index) => (
-          <ActionLink
-            className="min-h-0 items-start justify-start gap-3 px-3 py-3 text-left"
-            href={step.href}
-            key={step.label}
-            variant="secondary"
-          >
-            <span
-              className={`inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-xs font-bold ${
-                step.ready
-                  ? "bg-emerald-100 text-emerald-800"
-                  : "bg-amber-100 text-amber-800"
-              }`}
-            >
-              {step.ready ? "OK" : index + 1}
-            </span>
-            <span className="min-w-0">
-              <span className="block font-semibold text-slate-950">{step.label}</span>
-              <span className="mt-0.5 block text-xs font-normal leading-5 text-slate-600">
-                {step.detail}
-              </span>
-            </span>
-          </ActionLink>
-        ))}
-      </div>
-
-      <div className="mt-3 flex flex-wrap gap-2">
-        <ActionLink href="/admin?tab=results" variant="primary">
-          Open race results
-        </ActionLink>
-        <ActionLink href="/admin?tab=recovery" variant="secondary">
-          Create safety backup
-        </ActionLink>
-      </div>
-
-      <MetricStrip
-        className="mt-4 sm:grid-cols-2 lg:grid-cols-4"
-        items={[
-          { label: "Active season", value: activeSeasonName ?? "None" },
-          { label: "Registered teams", value: registeredTeamCount },
-          { label: "Pick emails", value: emailEnabled ? "Enabled" : "Disabled" },
-          {
-            label: "Next submissions",
-            value: nextRace ? `${nextRace.pickCount}/${nextRace.expectedPickCount}` : "No race"
-          }
-        ]}
-      />
-
+      <section className="mt-4 rounded-lg border border-slate-200 bg-white p-4">
+        <h3 className="font-semibold">Admin capabilities</h3>
+        <p className="mt-1 text-sm text-slate-600">These checks confirm the installed controls separately from the base database schema.</p>
+        {capabilities.issue ? <CompactNotice tone="warning" className="mt-3">{capabilities.issue}</CompactNotice> : <ul className="mt-3 grid gap-2 text-sm sm:grid-cols-2 lg:grid-cols-3">
+          {capabilities.items.map(item=><li className="flex min-w-0 flex-wrap justify-between gap-2" key={item.name}><span>{item.name}</span><StatusChip tone={item.installed ? "success" : "warning"}>{item.installed ? "Installed" : "Missing"}</StatusChip></li>)}
+        </ul>}
+      </section>
+      {!activeSeasonYear ? <CompactNotice className="mt-3">The league is between seasons. Scheduled race jobs have no active season to process; past job history remains available below.</CompactNotice> : null}
+      <form action={triggerFantasyWinnerJobAction} className="mt-4">
+        <ConfirmSubmitButton className={actionControlClassName("secondary")} confirmMessage="Run the fantasy-winner recovery check for races awaiting calculation? Existing manual overrides are preserved." pendingLabel="Checking winners...">Run fantasy winner check now</ConfirmSubmitButton>
+      </form>
       {!schemaReady ? (
         <CompactNotice className="mt-4" tone="danger">
           <span className="font-semibold">Database contract needs attention.</span>{" "}
@@ -399,188 +283,9 @@ export function AdminSystemHealth({
         </CompactNotice>
       ) : null}
 
-      <div className="mt-5 grid gap-5 border-y border-slate-200 py-5 lg:grid-cols-2 lg:divide-x lg:divide-slate-200">
-        <section className="lg:pr-5">
-          <h3 className="font-semibold text-slate-900">Next race</h3>
-          <p className="mt-2 text-sm text-slate-700">
-            {nextRace
-              ? `${nextRace.roundLabel || `R${nextRace.roundNumber}`} · ${nextRace.raceName}`
-              : "No upcoming race is scheduled."}
-          </p>
-          {nextRace ? (
-            <>
-              <p className="mt-1 text-xs text-slate-500">
-                {nextRace.pickCount}/{nextRace.expectedPickCount} submitted
-              </p>
-              <p className="mt-1 text-xs text-slate-500">
-                Locks {formatHealthTime(nextRace.pickLockAt)}
-              </p>
-              <p className="mt-2 text-sm font-medium text-slate-700">
-                {nextRace.previousResultsStatus}
-              </p>
-            </>
-          ) : null}
-        </section>
-
-        <section className="lg:pl-5">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <h3 className="font-semibold text-slate-900">Reminder queue</h3>
-            {reminderQueue ? (
-              <span className="text-xs font-medium text-slate-500">
-                {reminderQueue.reminderType}
-              </span>
-            ) : null}
-          </div>
-          {reminderQueue ? (
-            <>
-              <p className="mt-1 truncate text-xs text-slate-500">{reminderQueue.raceName}</p>
-              <dl className="mt-3 grid grid-cols-4 gap-2 text-sm">
-                <div><dt className="text-xs text-slate-500">Sent</dt><dd className="font-semibold text-emerald-700">{reminderQueue.sent}</dd></div>
-                <div><dt className="text-xs text-slate-500">Pending</dt><dd className="font-semibold">{reminderQueue.pending}</dd></div>
-                <div><dt className="text-xs text-slate-500">Retrying</dt><dd className="font-semibold text-amber-700">{reminderQueue.retrying}</dd></div>
-                <div><dt className="text-xs text-slate-500">Failed</dt><dd className="font-semibold text-red-700">{permanentReminderFailures}</dd></div>
-              </dl>
-              {permanentReminderFailures > 0 ? (
-                <form action={retryFailedRemindersAction} className="mt-3">
-                  <input name="race_id" type="hidden" value={reminderQueue.raceId} />
-                  <input name="reminder_type" type="hidden" value={reminderQueue.reminderType} />
-                  <SubmitButton
-                    className={actionControlClassName("secondary", "text-red-700")}
-                    pendingLabel="Queueing..."
-                  >
-                    Retry failed emails
-                  </SubmitButton>
-                </form>
-              ) : null}
-            </>
-          ) : (
-            <p className="mt-2 text-sm text-slate-600">No reminder window is currently due.</p>
-          )}
-        </section>
-      </div>
-
-      {reminderPreview ? (
-        <section className="mt-5 border-b border-slate-200 pb-5">
-          <div className="flex flex-wrap items-start justify-between gap-3">
-            <div>
-              <h3 className="font-semibold text-slate-900">Reminder readiness</h3>
-              <p className="mt-1 text-sm text-slate-600">
-                {reminderPreview.missingParticipantCount} registered participant
-                {reminderPreview.missingParticipantCount === 1 ? " is" : "s are"} currently
-                missing at least one form for {reminderPreview.raceName}.
-              </p>
-            </div>
-            <StatusChip tone={emailEnabled ? "success" : "warning"}>
-              {emailEnabled ? "Delivery enabled" : "Delivery disabled"}
-            </StatusChip>
-          </div>
-
-          <div className="mt-4 grid gap-2 sm:grid-cols-2">
-            {reminderPreview.schedule.map((item) => (
-              <div
-                className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2"
-                key={item.key}
-              >
-                <div className="flex items-center justify-between gap-2">
-                  <p className="text-xs font-semibold uppercase tracking-wide text-slate-600">
-                    {item.label}
-                  </p>
-                  <StatusChip
-                    tone={
-                      item.status === "sent"
-                        ? "success"
-                        : item.status === "due"
-                          ? "warning"
-                          : "neutral"
-                    }
-                  >
-                    {item.status === "sent"
-                      ? `${item.sentCount} sent`
-                      : item.status === "due"
-                        ? "Due now"
-                        : item.status === "passed"
-                          ? "Passed"
-                          : "Scheduled"}
-                  </StatusChip>
-                </div>
-                <p className="mt-1 text-sm font-medium text-slate-900">
-                  {formatHealthTime(item.sendAt)}
-                </p>
-              </div>
-            ))}
-          </div>
-          <p className="mt-2 text-xs text-slate-500">
-            The early-week form-open announcement is manual. The app sends only the two-day and
-            four-hour stages. Schedule changes move unsent stages to the corrected qualifying
-            time; a stage already sent remains recorded and is not sent again.
-          </p>
-          {reminderPreview.missingParticipantCount >= 90 ? (
-            <CompactNotice className="mt-3" tone="warning">
-              {reminderPreview.missingParticipantCount} participants are still missing picks.
-              Resend&apos;s free daily allowance is shared with authentication email, so check its
-              remaining quota before this stage becomes due.
-            </CompactNotice>
-          ) : null}
-
-          <div className="mt-4 flex flex-wrap items-end justify-between gap-3">
-            <div className="text-xs leading-5 text-slate-600">
-              <p>From: {reminderPreview.from ?? "Not configured"}</p>
-              <p>
-                Test recipient: {reminderPreview.recipientEmail ?? "Administrator email unavailable"}
-              </p>
-            </div>
-            <form action={sendReminderTestAction} className="flex flex-wrap items-end gap-2">
-              <input name="race_id" type="hidden" value={reminderPreview.raceId} />
-              <label className="block">
-                <span className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-slate-500">
-                  Test template
-                </span>
-                <select
-                  className="rounded-md ui-control-border border border-slate-300 bg-white px-3 py-2 text-sm"
-                  defaultValue={reminderPreview.reminderType}
-                  name="reminder_type"
-                >
-                  <option value="2d">Two-day reminder</option>
-                  <option value="4h">Final reminder</option>
-                </select>
-              </label>
-              <SubmitButton
-                className={actionControlClassName("secondary")}
-                disabled={!reminderPreview.recipientEmail}
-                pendingLabel="Sending test..."
-              >
-                Send test to me
-              </SubmitButton>
-            </form>
-          </div>
-
-          <Disclosure
-            className="mt-4"
-            description={reminderPreview.subject}
-            summary="Preview participant email"
-          >
-            <iframe
-              className="h-[560px] w-full rounded-md border border-slate-200 bg-slate-100"
-              loading="lazy"
-              sandbox=""
-              srcDoc={reminderPreview.html}
-              title="Pick reminder email preview"
-            />
-            <details className="mt-3">
-              <summary className="cursor-pointer text-xs font-semibold text-slate-700">
-                Plain-text fallback
-              </summary>
-              <pre className="mt-2 whitespace-pre-wrap rounded-md bg-slate-950 p-3 text-xs leading-5 text-slate-100">
-                {reminderPreview.text}
-              </pre>
-            </details>
-          </Disclosure>
-        </section>
-      ) : null}
-
       <Disclosure
         className="mt-5"
-        description="Schema versions, delivery attempts, scheduled jobs, and recent admin events."
+        description="Schema versions, delivery attempts, scheduled jobs, and the admin audit log."
         meta={
           failedJobCount > 0 || degradedJobCount > 0 || staleJobNames.length > 0 ? (
             <StatusChip tone="warning">
@@ -590,7 +295,8 @@ export function AdminSystemHealth({
           ) : null
         }
         id="technical-details"
-        summary="Technical details"
+        summary="System diagnostics"
+        open
       >
         <dl className="grid gap-3 text-sm sm:grid-cols-3">
           <div>
@@ -607,7 +313,7 @@ export function AdminSystemHealth({
           <section>
             <h3 className="font-semibold text-slate-900">Scheduled job heartbeat</h3>
             {latestJobRuns.length === 0 ? (
-              <p className="mt-2 text-sm text-amber-700">No cron heartbeat is recorded.</p>
+              <p className="mt-2 text-sm text-amber-700">{activeSeasonYear ? "No cron heartbeat is recorded." : "No job heartbeat is recorded. A fresh race-job heartbeat is not required between seasons."}</p>
             ) : (
               <div className="mt-2 grid gap-2">
                 {latestJobRuns.map((run) => (
@@ -684,23 +390,7 @@ export function AdminSystemHealth({
           </section>
         </div>
 
-        <section className="mt-5 border-t border-slate-200 pt-5">
-          <h3 className="font-semibold text-slate-900">Recent admin changes</h3>
-          {auditRows.length === 0 ? (
-            <p className="mt-2 text-sm text-slate-600">No hardened admin events recorded yet.</p>
-          ) : (
-            <div className="mt-2 grid gap-2 sm:grid-cols-2">
-              {auditRows.slice(0, 6).map((event, index) => (
-                <div className="text-sm" key={`${event.created_at}-${index}`}>
-                  <p className="font-medium text-slate-800">{event.summary}</p>
-                  <p className="text-xs text-slate-500">
-                    {event.entity_type} · {event.action} · {formatHealthTime(event.created_at)}
-                  </p>
-                </div>
-              ))}
-            </div>
-          )}
-        </section>
+        <AdminAuditLog auditLog={auditLog} />
 
         <section className="mt-5 border-t border-amber-200 pt-5">
           <h3 className="text-sm font-semibold text-amber-900">Test-data maintenance</h3>

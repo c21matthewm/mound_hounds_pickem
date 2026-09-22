@@ -5,7 +5,7 @@ try to rebuild live season rows manually during an incident.
 
 ## Create and store a backup
 
-1. Open **Admin > Recovery**.
+1. Open **Admin > Recovery** and choose the active year under **Backup season**.
 2. Select **Create & Download Backup**.
 3. Confirm a JSON file downloads.
 4. Move the file to a private cloud folder outside Supabase and Vercel.
@@ -18,10 +18,16 @@ five newest correction/legacy automatic points per season are retained. Manual d
 imported files, pre-restore safety points, and season-rollover milestones are not removed by
 automatic retention.
 
+Season completion also saves a milestone before closing the season. Use **Backup season** to
+select that completed year and download or compare its saved points, even when no season is
+active or a later season has started. Fresh backups and restores remain limited to the active
+season in the UI. A completed-season backup cannot restore into a different season, and the
+recovery controls do not reopen completed seasons.
+
 ## Restore after a problem
 
 1. Stop entering race results or editing the affected season.
-2. Open **Admin > Recovery**.
+2. Open **Admin > Recovery** and select the affected active season under **Backup season**.
 3. If the desired point is already listed, select it. Otherwise import the downloaded JSON file.
 4. Select **Preview Restore**.
 5. Review the backup, current, and changed row counts. Confirm the season and restore-point time.

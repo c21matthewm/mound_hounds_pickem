@@ -1,13 +1,12 @@
 import { AuthenticatedPageShell } from "@/components/authenticated-page-shell";
 import { AnalyticsRaceHistory } from "@/components/analytics-race-history";
-import { HallOfFameYearSelect } from "@/components/hall-of-fame-year-select";
+import { HallOfFame } from "@/components/hall-of-fame";
 import { PicksRaceSelect } from "@/components/picks-race-select";
 import {
   CompactNotice,
   ContentPanel,
   Disclosure,
   EmptyState,
-  RankBadge,
   RouteTabs,
   SectionHeader
 } from "@/components/ui-primitives";
@@ -32,7 +31,6 @@ import {
   buildPicksByRaceSnapshot
 } from "@/lib/scoring";
 import { isRegisteredForSeason } from "@/lib/season-participation";
-import { formatLeagueDateTime } from "@/lib/timezone";
 
 export const dynamic = "force-dynamic";
 
@@ -41,9 +39,6 @@ type LeaderboardTab = "standings" | "picks" | "analytics" | "hall";
 type PageProps = {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 };
-
-const formatRaceDate = (value: string): string =>
-  formatLeagueDateTime(value, { dateStyle: "medium", timeStyle: "short" });
 
 const parseLeaderboardTab = (value: string | undefined): LeaderboardTab =>
   value === "picks" || value === "analytics" || value === "hall" ? value : "standings";
@@ -87,13 +82,14 @@ const formatFinish = (finish: number | null, fieldSize: number): string =>
 
 export default async function LeaderboardPage({ searchParams }: PageProps) {
   const params = await searchParams;
-  const activeTab = parseLeaderboardTab(queryStringParam(params.tab));
+  let activeTab = parseLeaderboardTab(queryStringParam(params.tab));
   const selectedRaceId = parseRaceId(queryStringParam(params.race_id));
   const selectedHallYear = parseSeasonYear(queryStringParam(params.year));
 
   const { activeSeason, participation, supabase, user } = await requireAppUser({
     requireSeasonDecision: true
   });
+  if (!activeSeason && !queryStringParam(params.tab)) activeTab = "hall";
   const registeredForActiveSeason = isRegisteredForSeason(participation);
 
   let standingsSnapshot: Awaited<ReturnType<typeof buildLeagueScoringSnapshot>> | null = null;
@@ -121,10 +117,12 @@ export default async function LeaderboardPage({ searchParams }: PageProps) {
 
     return (
       <AuthenticatedPageShell
-        description="Standings, locked picks by race, season analytics, and league history."
+        description={activeTab === "hall"
+          ? "Past champions, season records, and complete final standings."
+          : "Standings, locked picks by race, season analytics, and league history."}
         eyebrow="League Data"
         maxWidth="max-w-4xl"
-        title="Season Leaderboard"
+        title={activeTab === "hall" ? "Hall of Fame" : "Season Leaderboard"}
       >
         <CompactNotice className="mt-6" tone="danger">
           Failed to load leaderboard: {message}
@@ -174,10 +172,6 @@ export default async function LeaderboardPage({ searchParams }: PageProps) {
     : [];
 
   const analyticsRaceRows = analyticsSnapshot?.raceRows ?? [];
-  const selectedHallSeason = hallOfFameSnapshot?.seasons.length
-    ? hallOfFameSnapshot.seasons.find((season) => season.seasonYear === selectedHallYear) ??
-      hallOfFameSnapshot.seasons[0]
-    : null;
   const totalVsLeagueAverage = analyticsRaceRows.reduce(
     (sum, row) => sum + row.pointsVsRaceAverage,
     0
@@ -215,10 +209,12 @@ export default async function LeaderboardPage({ searchParams }: PageProps) {
 
   return (
     <AuthenticatedPageShell
-      description="Standings, locked picks by race, season analytics, and league history."
+      description={activeTab === "hall"
+          ? "Past champions, season records, and complete final standings."
+          : "Standings, locked picks by race, season analytics, and league history."}
       eyebrow="League Data"
       maxWidth="max-w-[1200px]"
-      title="Season Leaderboard"
+      title={activeTab === "hall" ? "Hall of Fame" : "Season Leaderboard"}
     >
 
       <RouteTabs
@@ -504,7 +500,7 @@ export default async function LeaderboardPage({ searchParams }: PageProps) {
         )
       ) : null}
 
-      {activeTab === "analytics" && !registeredForActiveSeason ? (
+      {activeTab === "analytics" && activeSeason && !registeredForActiveSeason ? (
         <EmptyState
           className="mt-6"
           description="Analytics are available to teams registered for the current season."
@@ -512,7 +508,7 @@ export default async function LeaderboardPage({ searchParams }: PageProps) {
         />
       ) : null}
 
-      {activeTab === "analytics" && registeredForActiveSeason && !activeSeason ? (
+      {activeTab === "analytics" && !activeSeason ? (
         <EmptyState
           className="mt-6"
           description="Analytics will return when the next league season becomes active."
@@ -535,113 +531,10 @@ export default async function LeaderboardPage({ searchParams }: PageProps) {
             title="No archived seasons yet"
           />
         ) : (
-          <div className="mt-6">
-            {selectedHallSeason ? (
-              <div className="flex justify-end">
-                <HallOfFameYearSelect
-                  selectedYear={selectedHallSeason.seasonYear}
-                  years={hallOfFameSnapshot.seasons.map((season) => season.seasonYear)}
-                />
-              </div>
-            ) : null}
-            {selectedHallSeason ? [selectedHallSeason].map((season) => (
-              <ContentPanel
-                className="mt-3"
-                key={season.seasonId}
-              >
-                <SectionHeader
-                  action={
-                    <div className="flex items-center gap-5 text-right">
-                      <div>
-                        <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
-                          Points
-                        </p>
-                        <p className="text-xl font-semibold tabular-nums text-slate-900">
-                          {season.championTotalPoints}
-                        </p>
-                      </div>
-                      <div>
-                        <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
-                          Field
-                        </p>
-                        <p className="text-xl font-semibold tabular-nums text-slate-900">
-                          {season.participantCount}
-                        </p>
-                      </div>
-                    </div>
-                  }
-                  description={`${season.raceCount} races · Finalized ${formatRaceDate(season.finalizedAt)}`}
-                  eyebrow={`${season.seasonYear} Champion`}
-                  title={season.championTeamName}
-                />
-
-                <div className="mt-5 border-t border-slate-200 pt-4">
-                  <div className="grid gap-2 md:hidden">
-                    {season.entries.map((entry) => (
-                      <div
-                        className="flex items-center justify-between gap-3 rounded-md ui-panel-muted border border-slate-200 bg-slate-50 px-3 py-2"
-                        key={`${season.seasonId}-${entry.teamName}`}
-                      >
-                        <div className="flex min-w-0 items-center gap-3">
-                          <span className="w-8 shrink-0">
-                            <RankBadge
-                              aria-label={`Final rank ${entry.finalRank}`}
-                              className="h-7 min-w-8"
-                              rank={entry.finalRank}
-                              showNumberSign
-                              title={`Final rank ${entry.finalRank}`}
-                            />
-                          </span>
-                          <span className="truncate text-sm font-semibold text-slate-900">
-                            {entry.teamName}
-                          </span>
-                        </div>
-                        <span className="shrink-0 text-sm font-semibold tabular-nums text-slate-900">
-                          {entry.totalPoints} pts
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-
-                  <div className="hidden overflow-x-auto rounded-md border border-slate-200 md:block">
-                    <table className="min-w-full text-left text-sm">
-                      <thead className="ui-table-head bg-slate-50 text-slate-700">
-                        <tr>
-                          <th className="w-24 px-3 py-2 font-semibold">Final Rank</th>
-                          <th className="px-3 py-2 font-semibold">Team</th>
-                          <th className="px-3 py-2 text-right font-semibold">Total Points</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {season.entries.map((entry) => (
-                          <tr
-                            className="border-t border-slate-200"
-                            key={`${season.seasonId}-${entry.teamName}`}
-                          >
-                            <td className="px-3 py-2 font-semibold">
-                              <RankBadge
-                                aria-label={`Final rank ${entry.finalRank}`}
-                                className="h-7 min-w-8"
-                                rank={entry.finalRank}
-                                showNumberSign
-                                title={`Final rank ${entry.finalRank}`}
-                              />
-                            </td>
-                            <td className="px-3 py-2 font-medium text-slate-900">
-                              {entry.teamName}
-                            </td>
-                            <td className="px-3 py-2 text-right font-semibold tabular-nums">
-                              {entry.totalPoints}
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-              </ContentPanel>
-            )) : null}
-          </div>
+          <HallOfFame
+            seasons={hallOfFameSnapshot.seasons}
+            selectedYear={selectedHallYear}
+          />
         )
       ) : null}
     </AuthenticatedPageShell>

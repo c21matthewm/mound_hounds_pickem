@@ -127,7 +127,8 @@ type BuildSeasonScoringModelInput = {
 };
 
 type CumulativeRankingRow = {
-  racePoints: number;
+  latestRacePoints: number;
+  previousRacePoints: number;
   teamName: string;
   totalPoints: number;
   userId: string;
@@ -135,38 +136,31 @@ type CumulativeRankingRow = {
 
 const keyForRaceUser = (raceId: number, userId: string): string => `${raceId}:${userId}`;
 
-const compareLeaderboardRows = (
+// Season ties use only the latest two completed races, in that order.
+// Team names stabilize unresolved ties for display; they never decide a rank.
+const compareSeasonScores = (
   left: CumulativeRankingRow,
   right: CumulativeRankingRow
-): number => {
-  if (right.totalPoints !== left.totalPoints) {
-    return right.totalPoints - left.totalPoints;
-  }
-  if (right.racePoints !== left.racePoints) {
-    return right.racePoints - left.racePoints;
-  }
-  return left.teamName.localeCompare(right.teamName);
-};
+): number =>
+  right.totalPoints - left.totalPoints ||
+  right.latestRacePoints - left.latestRacePoints ||
+  right.previousRacePoints - left.previousRacePoints;
 
 const assignCompetitionRanks = (
   rows: CumulativeRankingRow[]
 ): Array<CumulativeRankingRow & { rank: number }> => {
-  const sorted = [...rows].sort(compareLeaderboardRows);
-  let previous: Pick<CumulativeRankingRow, "racePoints" | "totalPoints"> | null = null;
+  const sorted = [...rows].sort(
+    (left, right) => compareSeasonScores(left, right) || left.teamName.localeCompare(right.teamName)
+  );
+  let previous: CumulativeRankingRow | null = null;
   let previousRank = 0;
 
   return sorted.map((row, index) => {
-    const rank =
-      previous !== null &&
-      previous.totalPoints === row.totalPoints &&
-      previous.racePoints === row.racePoints
-        ? previousRank
-        : index + 1;
+    const rank = previous !== null && compareSeasonScores(previous, row) === 0
+      ? previousRank
+      : index + 1;
 
-    previous = {
-      racePoints: row.racePoints,
-      totalPoints: row.totalPoints
-    };
+    previous = row;
     previousRank = rank;
     return { ...row, rank };
   });
@@ -306,7 +300,8 @@ export const buildSeasonScoringModel = ({
     ])
   );
 
-  completedRaces.forEach((race) => {
+  completedRaces.forEach((race, raceIndex) => {
+    const previousRace = completedRaces[raceIndex - 1];
     const projection = buildRaceScoringProjection({
       currentDrivers: drivers,
       officialWinningAverageSpeed: race.official_winning_average_speed,
@@ -334,7 +329,10 @@ export const buildSeasonScoringModel = ({
       cumulativeByUser.set(participant.id, totalPoints);
       raceBreakdownByUser.get(participant.id)?.set(race.id, weeklyPoints);
       return {
-        racePoints: weeklyPoints,
+        latestRacePoints: weeklyPoints,
+        previousRacePoints: previousRace
+          ? (raceBreakdownByUser.get(participant.id)?.get(previousRace.id) ?? 0)
+          : 0,
         teamName: participant.teamName,
         totalPoints,
         userId: participant.id

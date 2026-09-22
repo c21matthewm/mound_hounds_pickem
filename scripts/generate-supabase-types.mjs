@@ -67,7 +67,32 @@ const hasDefault = (schema) => Object.prototype.hasOwnProperty.call(schema, "def
 const isGeneratedIntegerPrimaryKey = (schema) =>
   schema?.type === "integer" && /Primary Key/.test(schema?.description ?? "");
 
-const propertyLines = (definition, mode) => {
+// PostgREST describes required RPC keys but omits whether SQL accepts an explicit
+// null value. Keep these narrow refinements aligned with the corresponding SQL:
+// - 20260919_admin_bulk_participants.sql requires null for account-wide eligibility.
+// - 20260919_add_season_rules_documents.sql accepts null to clear/compare absent URLs.
+// Do not make these keys optional or weaken unrelated RPC/table contracts.
+const NULLABLE_RPC_ARGUMENTS = {
+  admin_bulk_update_participants: { p_season_id: "number" },
+  // 20260921_season_completion.sql: explicit null means no active season.
+  admin_update_participant_v2: { p_expected_season_id: "number" },
+  set_league_season_rules_document: {
+    p_expected_rules_document_url: "string",
+    p_rules_document_url: "string"
+  }
+};
+
+const rpcNullableArguments = (name, args) => {
+  const overrides = NULLABLE_RPC_ARGUMENTS[name] ?? {};
+  for (const [argument, expectedType] of Object.entries(overrides)) {
+    if (!args.properties?.[argument] || schemaType(args.properties[argument]) !== expectedType) {
+      throw new Error(`Review RPC nullability refinement: ${name}.${argument} no longer matches its expected schema type.`);
+    }
+  }
+  return new Set(Object.keys(overrides));
+};
+
+const propertyLines = (definition, mode, nullableArguments = new Set()) => {
   const required = new Set(definition.required ?? []);
   return Object.entries(definition.properties ?? {})
     .sort(([left], [right]) => left.localeCompare(right))
@@ -76,7 +101,7 @@ const propertyLines = (definition, mode) => {
       const optional =
         mode === "Update" ||
         (mode === "Insert" && (nullable || hasDefault(schema) || isGeneratedIntegerPrimaryKey(schema)));
-      const type = `${schemaType(schema)}${nullable ? " | null" : ""}`;
+      const type = `${schemaType(schema)}${nullable || nullableArguments.has(name) ? " | null" : ""}`;
       return `          ${JSON.stringify(name)}${optional ? "?" : ""}: ${type}`;
     });
 };
@@ -187,7 +212,7 @@ const renderDatabaseTypes = (document) => {
   functionEntries.forEach(({ args, name, returns }) => {
     lines.push(`      ${JSON.stringify(name)}: {`);
     lines.push("        Args: {");
-    const argsLines = propertyLines(args, "Insert");
+    const argsLines = propertyLines(args, "Insert", rpcNullableArguments(name, args));
     lines.push(...(argsLines.length > 0 ? argsLines : ["          [_ in never]: never"]));
     lines.push("        }");
     lines.push(`        Returns: ${schemaType(returns)}`);

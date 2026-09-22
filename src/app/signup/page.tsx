@@ -1,3 +1,4 @@
+import { SeasonInviteCodeInput } from "@/components/season-invite-code-input";
 import Link from "next/link";
 import { queryStringParam } from "@/lib/query";
 import { signUpAction } from "@/app/actions/auth";
@@ -85,7 +86,7 @@ export default async function SignupPage({ searchParams }: PageProps) {
           description="Get this private league code from the league administrator."
           label="Season invite code"
         >
-          <input
+          <SeasonInviteCodeInput
             required
             autoCapitalize="none"
             autoComplete="off"

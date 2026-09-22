@@ -1,3 +1,4 @@
+import { isSafeRulesDocumentUrl } from "@/lib/season-rules";
 import { AuthenticatedPageShell } from "@/components/authenticated-page-shell";
 import {
   ActionAnchor,
@@ -8,8 +9,9 @@ import { requireAppUser } from "@/lib/authenticated-user";
 
 export default async function RulesPage() {
   const { activeSeason } = await requireAppUser({ requireSeasonDecision: true });
+  const configuredPath = activeSeason?.rulesDocumentUrl;
   const rulesPdfPath =
-    activeSeason?.rulesDocumentUrl ??
+    (configuredPath && isSafeRulesDocumentUrl(configuredPath) ? configuredPath : null) ??
     (activeSeason?.seasonYear === 2026
       ? "/docs/2026-mound-hounds-rules-and-regulations.pdf"
       : null);
@@ -38,14 +40,14 @@ export default async function RulesPage() {
           <div className="mt-4 h-[70vh] overflow-hidden rounded-md ui-panel-muted border border-slate-200 bg-slate-50">
             <iframe
               className="h-full w-full"
-              src={`${rulesPdfPath}#view=FitH`}
+              src={`${rulesPdfPath.split("#")[0]}#view=FitH`}
               title="Mound Hounds Pick'em Rules and Regulations"
             />
           </div>
         </ContentPanel>
       ) : (
         <CompactNotice className="mt-6">
-          The rules document for this season has not been posted yet.
+          {activeSeason ? "The rules document for this season has not been posted yet." : "The league is between seasons. Rules for the next season will be available when it opens."}
         </CompactNotice>
       )}
     </AuthenticatedPageShell>

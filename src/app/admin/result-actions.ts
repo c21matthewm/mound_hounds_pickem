@@ -1,5 +1,7 @@
 "use server";
 
+import type { AdminWorkspaceTab } from "@/lib/admin-tabs";
+import type { RaceWeekPhase } from "@/lib/admin-race-week";
 import { revalidatePath } from "next/cache";
 import { requireAdmin } from "@/lib/admin";
 import { recordAdminAudit } from "@/lib/admin-audit";
@@ -36,7 +38,9 @@ const reportResultFailure = ({
   operation,
   raceId,
   resultRaceId,
-  userId
+  userId,
+  tab = "results",
+  raceWeekPhase
 }: {
   code: string;
   error: unknown;
@@ -45,6 +49,8 @@ const reportResultFailure = ({
   raceId?: number | null;
   resultRaceId?: number | null;
   userId: string;
+  tab?: AdminWorkspaceTab;
+  raceWeekPhase?: RaceWeekPhase;
 }) =>
   reportAdminActionFailure({
     actorProfileId: userId,
@@ -53,7 +59,8 @@ const reportResultFailure = ({
     error,
     fallback,
     resultRaceId,
-    tab: "results"
+    tab,
+    raceWeekPhase
   });
 
 export async function importIndy500QualifyingOrderAction(formData: FormData) {
@@ -61,7 +68,7 @@ export async function importIndy500QualifyingOrderAction(formData: FormData) {
   const tab = parseAdminTab(asText(formData.get("tab"))) ?? "results";
   const resultRaceId = parsePositiveInteger(asText(formData.get("result_race_id")));
   const redirectWithTab = (key: "error" | "message", value: string): never =>
-    adminMutationRedirect(key, value, tab, resultRaceId);
+    adminMutationRedirect(key, value, tab, resultRaceId, "preparation");
 
   const raceIdInput = parsePositiveInteger(asText(formData.get("race_id")));
   const rawPaste = asText(formData.get("qualifying_order_paste"));
@@ -85,7 +92,8 @@ export async function importIndy500QualifyingOrderAction(formData: FormData) {
       operation: "import_qualifying",
       raceId,
       resultRaceId,
-      userId: user.id
+      userId: user.id,
+      tab, raceWeekPhase: "preparation"
     });
   }
   if (!race) {
@@ -152,7 +160,8 @@ export async function importIndy500QualifyingOrderAction(formData: FormData) {
       operation: "import_qualifying",
       raceId,
       resultRaceId,
-      userId: user.id
+      userId: user.id,
+      tab, raceWeekPhase: "preparation"
     });
   }
 
@@ -242,7 +251,8 @@ export async function importIndy500QualifyingOrderAction(formData: FormData) {
       operation: "import_qualifying",
       raceId,
       resultRaceId,
-      userId: user.id
+      userId: user.id,
+      tab, raceWeekPhase: "preparation"
     });
   }
 

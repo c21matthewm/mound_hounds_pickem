@@ -2,7 +2,8 @@
 
 import { revalidatePath } from "next/cache";
 import { parseChampionshipStandingsPaste } from "@/lib/championship-standings";
-import { errorReference, reportAppError } from "@/lib/app-error-reporter";
+import { handleMediaSaveFailure } from "@/app/admin/media-save-failure";
+import { captureMediaWriteError, captureMediaWriteResult } from "@/lib/media-write-outcome";
 import {
   deleteManagedDriverHeadshot,
   getFormFile,
@@ -103,39 +104,40 @@ export async function createDriverAction(formData: FormData) {
   }
 
   if (imageFile) {
+    let uploadedUrl: string;
     try {
-      const uploadedUrl = await uploadDriverHeadshot({
+      uploadedUrl = await uploadDriverHeadshot({
         driverId: insertedDriverId,
         driverName,
         file: imageFile
       });
-
-      const { error: updateImageError } = await supabase
-        .from("drivers")
-        .update({ image_url: uploadedUrl })
-        .eq("id", insertedDriverId);
-
-      if (updateImageError) {
-        await deleteManagedDriverHeadshot(uploadedUrl).catch((cleanupError) => {
-          console.error("[storage] Failed rolling back driver image upload:", cleanupError);
-        });
-        await reportDriverFailure({
-          code: "save-driver-image-failed",
-          driverId: insertedDriverId,
-          error: updateImageError,
-          fallback: "The driver was created, but its image could not be saved.",
-          operation: "save_image",
-          tab,
-          userId: user.id
-        });
-      }
     } catch (uploadError) {
-      await reportDriverFailure({
+      return reportDriverFailure({
         code: "upload-driver-image-failed",
         driverId: insertedDriverId,
         error: uploadError,
         fallback: "The driver was created, but its image upload failed.",
         operation: "upload_image",
+        tab,
+        userId: user.id
+      });
+    }
+    const updateImageError = await captureMediaWriteError(supabase
+      .from("drivers")
+      .update({ image_url: uploadedUrl })
+      .eq("id", insertedDriverId));
+    if (updateImageError) {
+      await handleMediaSaveFailure({
+        error: updateImageError, uploadedUrl, deleteUpload: deleteManagedDriverHeadshot,
+        actorProfileId: user.id, entityType: "driver", entityId: insertedDriverId,
+        operation: "save_image", description: "Driver image update", tab
+      });
+      return reportDriverFailure({
+        code: "save-driver-image-failed",
+        driverId: insertedDriverId,
+        error: updateImageError,
+        fallback: "The driver was created, but its image could not be saved.",
+        operation: "save_image",
         tab,
         userId: user.id
       });
@@ -209,9 +211,9 @@ export async function updateDriverAction(formData: FormData) {
     redirectWithTab("error", "Driver not found.");
   }
   const selectedExistingDriver = existingDriver!;
-  const existingDriverImageUrl = selectedExistingDriver.image_url ?? null;
 
   let imageUrl = imageUrlInput || null;
+  let uploadedImageUrl: string | null = null;
   if (imageFile) {
     try {
       imageUrl = await uploadDriverHeadshot({
@@ -219,6 +221,7 @@ export async function updateDriverAction(formData: FormData) {
         driverName,
         file: imageFile
       });
+      uploadedImageUrl = imageUrl;
     } catch (uploadError) {
       await reportDriverFailure({
         code: "upload-driver-image-failed",
@@ -232,21 +235,21 @@ export async function updateDriverAction(formData: FormData) {
     }
   }
 
-  const { error } = await supabase
+  const error = await captureMediaWriteError(supabase
     .from("drivers")
     .update({
       driver_name: driverName,
       image_url: imageUrl || null,
       is_active: isActive
     })
-    .eq("id", driverIdValue);
+    .eq("id", driverIdValue));
 
   if (error) {
-    if (imageFile && imageUrl !== existingDriverImageUrl) {
-      await deleteManagedDriverHeadshot(imageUrl).catch((cleanupError) => {
-        console.error("[storage] Failed rolling back driver image upload:", cleanupError);
-      });
-    }
+    await handleMediaSaveFailure({
+      error, uploadedUrl: uploadedImageUrl, deleteUpload: deleteManagedDriverHeadshot,
+      actorProfileId: user.id, entityType: "driver", entityId: driverIdValue,
+      operation: "update", description: "Driver update", tab
+    });
     if (error.code === "23505") {
       redirectWithTab("error", "Driver name already exists.");
     }
@@ -262,23 +265,7 @@ export async function updateDriverAction(formData: FormData) {
     });
   }
 
-  let imageCleanupWarning = "";
-  if (existingDriverImageUrl && existingDriverImageUrl !== imageUrl) {
-    try {
-      await deleteManagedDriverHeadshot(existingDriverImageUrl);
-    } catch (cleanupError) {
-      const reported = await reportAppError({
-        actorProfileId: user.id,
-        code: "cleanup-driver-image-failed",
-        context: { entityId: driverIdValue, entityType: "driver", operation: "replace_image" },
-        error: cleanupError,
-        route: "/admin?tab=drivers",
-        severity: "warning",
-        subsystem: "storage"
-      });
-      imageCleanupWarning = ` Replaced image cleanup needs attention.${errorReference(reported)}`;
-    }
-  }
+  // Retain the prior image: other records and recovery snapshots may reference it.
 
   try {
     await refreshDriverStandingsAndGroups(supabase);
@@ -310,7 +297,7 @@ export async function updateDriverAction(formData: FormData) {
   revalidatePath("/picks");
   redirectWithTab(
     "message",
-    `Driver updated. Standings and groups were refreshed.${imageCleanupWarning}`
+    `Driver updated. Standings and groups were refreshed.`
   );
 }
 
@@ -385,13 +372,18 @@ export async function deleteDriverAction(formData: FormData) {
     );
   }
 
-  const { data: deletedDriver, error } = await supabase
+  const { data: deletedDriver, error } = await captureMediaWriteResult(supabase
     .from("drivers")
     .delete()
     .eq("id", driverIdValue)
     .select("driver_name,image_url")
-    .maybeSingle<{ driver_name: string; image_url: string | null }>();
+    .maybeSingle<{ driver_name: string; image_url: string | null }>());
   if (error) {
+    await handleMediaSaveFailure({
+      error, uploadedUrl: null, deleteUpload: deleteManagedDriverHeadshot,
+      actorProfileId: user.id, entityType: "driver", entityId: driverIdValue,
+      operation: "delete", description: "Driver deletion", tab
+    });
     await reportDriverFailure({
       code: "delete-driver-failed",
       driverId: driverIdValue,
@@ -403,21 +395,7 @@ export async function deleteDriverAction(formData: FormData) {
     });
   }
 
-  let imageCleanupWarning = "";
-  try {
-    await deleteManagedDriverHeadshot(deletedDriver?.image_url ?? null);
-  } catch (cleanupError) {
-    const reported = await reportAppError({
-      actorProfileId: user.id,
-      code: "cleanup-driver-image-failed",
-      context: { entityId: driverIdValue, entityType: "driver", operation: "delete" },
-      error: cleanupError,
-      route: "/admin?tab=drivers",
-      severity: "warning",
-      subsystem: "storage"
-    });
-    imageCleanupWarning = ` Stored image cleanup needs attention.${errorReference(reported)}`;
-  }
+  // Deleting this record does not remove media referenced by recovery snapshots.
 
   try {
     await refreshDriverStandingsAndGroups(supabase);
@@ -444,7 +422,7 @@ export async function deleteDriverAction(formData: FormData) {
   revalidatePath("/admin");
   revalidatePath("/picks");
   revalidatePath("/leaderboard");
-  redirectWithTab("message", `Driver deleted.${imageCleanupWarning}`);
+  redirectWithTab("message", `Driver deleted.`);
 }
 
 export async function importChampionshipStandingsAction(formData: FormData) {

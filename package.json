@@ -22,7 +22,8 @@
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
     "verify": "npm run lint && npm run typecheck && npm run test && npm run build",
-    "verify:release": "npm run db:types:check && npm run verify"
+    "verify:release": "npm run db:types:check && npm run verify",
+    "test:admin:ui": "node scripts/test-admin-ui.mjs"
   },
   "dependencies": {
     "@supabase/ssr": "0.12.0",

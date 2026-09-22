@@ -1,4 +1,5 @@
 import "server-only";
+import type { RaceWeekPhase } from "@/lib/admin-race-week";
 
 import { redirect } from "next/navigation";
 import { finalizeRaceWinnerNow } from "@/lib/fantasy-winner";
@@ -74,7 +75,8 @@ export const adminRedirect = (
   key: "error" | "message",
   value: string,
   tab?: AdminTab,
-  resultRaceId?: number | null
+  resultRaceId?: number | null,
+  raceWeekPhase?: RaceWeekPhase
 ): never => {
   const redirectValue = key === "error"
     ? adminSafeErrorMessage(value, "The admin operation could not be completed.")
@@ -83,9 +85,10 @@ export const adminRedirect = (
   if (tab) {
     params.set("tab", tab);
   }
-  if (tab === "results" && resultRaceId) {
+  if ((tab === "results" || tab === "race-week") && resultRaceId) {
     params.set("result_race_id", String(resultRaceId));
   }
+  if (tab === "race-week" && raceWeekPhase) params.set("phase", raceWeekPhase);
   redirect(`/admin?${params.toString()}`);
 };
 
@@ -93,12 +96,13 @@ export const adminMutationRedirect = (
   key: "error" | "message",
   value: string,
   tab: AdminTab,
-  resultRaceId?: number | null
+  resultRaceId?: number | null,
+  raceWeekPhase?: RaceWeekPhase
 ): never => {
   // Some mutations can succeed before a later audit/refresh step reports an error.
   // Invalidating on every admin mutation exit prevents a partial success from serving stale scores.
   invalidateScoringCache();
-  return adminRedirect(key, value, tab, resultRaceId);
+  return adminRedirect(key, value, tab, resultRaceId, raceWeekPhase);
 };
 
 type ReportAdminActionFailureInput = {
@@ -108,6 +112,7 @@ type ReportAdminActionFailureInput = {
   error: unknown;
   fallback: string;
   resultRaceId?: number | null;
+  raceWeekPhase?: RaceWeekPhase;
   route?: string;
   subsystem?: string;
   tab: AdminTab;
@@ -120,6 +125,7 @@ export const reportAdminActionFailure = async ({
   error,
   fallback,
   resultRaceId = null,
+  raceWeekPhase,
   route,
   subsystem = "admin",
   tab
@@ -134,7 +140,7 @@ export const reportAdminActionFailure = async ({
   });
   const message = `${adminSafeErrorMessage(error, fallback)}${errorReference(reported)}`;
 
-  return adminMutationRedirect("error", message, tab, resultRaceId);
+  return adminMutationRedirect("error", message, tab, resultRaceId, raceWeekPhase);
 };
 
 export const createSeasonSafetySnapshot = async (
@@ -281,9 +287,10 @@ const driverGroupForIndex = (index: number): number => {
 export async function refreshDriverStandingsAndGroups(supabase: AppSupabaseClient) {
   const { data: activeDrivers, error: activeDriversError } = await supabase
     .from("drivers")
-    .select("id,championship_points,current_standing,driver_name")
+    .select("id,championship_points,opening_seed_standing,current_standing,driver_name")
     .eq("is_active", true)
     .order("championship_points", { ascending: false })
+    .order("opening_seed_standing", { ascending: true, nullsFirst: false })
     .order("current_standing", { ascending: true })
     .order("driver_name", { ascending: true });
 

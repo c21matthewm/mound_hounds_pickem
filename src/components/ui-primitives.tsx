@@ -233,6 +233,7 @@ export function FormField({
 }
 
 export type RouteTabItem = {
+  badge?: { count: number; label: string };
   active: boolean;
   href: string;
   label: string;
@@ -274,6 +275,7 @@ export function RouteTabs({
               href={item.href}
             >
               {item.label}
+              {item.badge && item.badge.count > 0 ? <span className="ml-2 rounded-full bg-amber-100 px-2 py-0.5 text-xs text-amber-950" aria-label={`${item.badge.count} ${item.badge.label}`} title={item.badge.label}>{item.badge.count > 99 ? "99+" : item.badge.count}</span> : null}
             </Link>
           </li>
         ))}

@@ -1,23 +1,14 @@
-import Link from "next/link";
 import {
   correctPickWindowQualifyingStartAction,
   createRaceAction,
   deleteRaceAction,
   setRaceArchivedAction,
   setRacePickWindowAction,
-  setRaceWinnerAction,
   updateRaceAction
 } from "@/app/admin/race-actions";
-import {
-  activateLeagueSeasonAction,
-  createLeagueSeasonAction,
-  setLeagueSeasonInviteCodeAction,
-  setLeagueSeasonRulesDocumentAction
-} from "@/app/admin/season-actions";
 import type {
   LeagueSeasonRow,
-  RaceRow,
-  WinnerProfileRow
+  RaceRow
 } from "@/app/admin/admin-types";
 import { ConfirmSubmitButton } from "@/components/confirm-submit-button";
 import { SubmitButton } from "@/components/submit-button";
@@ -58,34 +49,30 @@ const usesDedicatedQualifyingCorrection = (
   isPickWindowAnchor(race, racesByPickWindow);
 
 type AdminRacesWorkspaceProps = {
-  activeParticipants: WinnerProfileRow[];
+  teamNameByProfileId: Map<string, string>;
   activeSeason: LeagueSeasonRow | null;
-  currentSeasonRaces: RaceRow[];
   pickWindowPartnerByRaceId: Map<number, RaceRow>;
   races: RaceRow[];
   racesByPickWindow: Map<string, RaceRow[]>;
   seasonById: Map<number, LeagueSeasonRow>;
   seasons: LeagueSeasonRow[];
   selectedRaceSeason: LeagueSeasonRow | null;
-  teamNameByProfileId: Map<string, string>;
 };
 
 export function AdminRacesWorkspace({
-  activeParticipants,
+  teamNameByProfileId,
   activeSeason,
-  currentSeasonRaces,
   pickWindowPartnerByRaceId,
   races,
   racesByPickWindow,
   seasonById,
   seasons,
   selectedRaceSeason,
-  teamNameByProfileId
 }: AdminRacesWorkspaceProps) {
   return (
         <section className="mt-6 rounded-lg ui-panel border border-slate-200 bg-white p-4 sm:p-6">
         <AdminWorkspaceHeader
-          description={`Create and manage race weeks. Times use ${LEAGUE_TIME_ZONE}.`}
+          description={`Manage the schedule, shared deadlines, and race images. Times use ${LEAGUE_TIME_ZONE}.`}
           meta={
             <form action="/admin" className="flex items-end gap-2" method="get">
               <input name="tab" type="hidden" value="races" />
@@ -113,191 +100,9 @@ export function AdminRacesWorkspace({
               </button>
             </form>
           }
-          title="Races"
+          title="Race Calendar"
         />
 
-        <Disclosure
-          className="mt-5 bg-slate-50"
-          description="Create seasons, configure the invite code and opening roster, then activate registration. Rules and races can be added afterward."
-          summary={`Season management · ${activeSeason ? `${activeSeason.season_year} active` : "No active season"}`}
-        >
-            <div className="grid gap-2">
-              {seasons.map((season) => (
-                <div
-                  className="flex flex-wrap items-center justify-between gap-3 rounded-md ui-panel border border-slate-200 bg-white px-3 py-2"
-                  key={season.id}
-                >
-                  <div>
-                    <p className="text-sm font-semibold text-slate-900">{season.display_name}</p>
-                    <p className="text-xs capitalize text-slate-500">
-                      {season.status} ·{" "}
-                      {season.registration_code_configured_at
-                        ? "Invite code configured"
-                        : "Invite code required"}{" "}
-                      · {season.roster_configured_at ? "Roster configured" : "Roster required"}
-                    </p>
-                  </div>
-                  <div className="flex flex-wrap items-end justify-end gap-2">
-                    {season.status !== "completed" ? (
-                      <form
-                        action={setLeagueSeasonRulesDocumentAction}
-                        className="flex flex-wrap items-end gap-2"
-                      >
-                        <input name="season_id" type="hidden" value={season.id} />
-                        <label className="block">
-                          <span className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-slate-500">
-                            Rules PDF path / URL (optional)
-                          </span>
-                          <input
-                            className="w-52 rounded-md ui-control-border border border-slate-300 px-2.5 py-2 text-xs"
-                            defaultValue={season.rules_document_url ?? ""}
-                            name="rules_document_url"
-                            placeholder="/docs/2027-rules.pdf"
-                            type="text"
-                          />
-                        </label>
-                        <SubmitButton
-                          className="rounded-md ui-control-border border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-800 hover:bg-slate-100"
-                          pendingLabel="Saving..."
-                        >
-                          Save rules
-                        </SubmitButton>
-                      </form>
-                    ) : null}
-                    {season.status !== "completed" ? (
-                      <form
-                        action={setLeagueSeasonInviteCodeAction}
-                        className="flex flex-wrap items-end gap-2"
-                      >
-                        <input name="season_id" type="hidden" value={season.id} />
-                        <label className="block">
-                          <span className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-slate-500">
-                            {season.registration_code_configured_at
-                              ? "Replace invite code"
-                              : "Set invite code"}
-                          </span>
-                          <input
-                            required
-                            autoCapitalize="none"
-                            autoComplete="off"
-                            className="w-44 rounded-md ui-control-border border border-slate-300 px-2.5 py-2 text-xs"
-                            maxLength={64}
-                            minLength={8}
-                            name="invite_code"
-                            type="text"
-                          />
-                        </label>
-                        <label className="block">
-                          <span className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-slate-500">
-                            Confirm code
-                          </span>
-                          <input
-                            required
-                            autoCapitalize="none"
-                            autoComplete="off"
-                            className="w-44 rounded-md ui-control-border border border-slate-300 px-2.5 py-2 text-xs"
-                            maxLength={64}
-                            minLength={8}
-                            name="invite_code_confirmation"
-                            type="text"
-                          />
-                        </label>
-                        <SubmitButton
-                          className="rounded-md ui-control-border border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-800 hover:bg-slate-100"
-                          pendingLabel="Saving..."
-                        >
-                          Save code
-                        </SubmitButton>
-                      </form>
-                    ) : null}
-                    {season.status === "upcoming" ? (
-                      <form action={activateLeagueSeasonAction}>
-                        <input name="season_id" type="hidden" value={season.id} />
-                        <ConfirmSubmitButton
-                          className="rounded-md ui-action-primary bg-slate-900 px-3 py-2 text-xs font-semibold text-white hover:bg-slate-700 disabled:bg-slate-400"
-                          confirmMessage={`Activate ${season.season_year}? The current season must already be saved to the Hall of Fame. Driver points will reset to zero while final ranking order is retained for opening groups.`}
-                          disabled={
-                            !season.registration_code_configured_at ||
-                            !season.roster_configured_at
-                          }
-                          pendingLabel="Activating..."
-                          type="submit"
-                        >
-                          Activate season
-                        </ConfirmSubmitButton>
-                      </form>
-                    ) : null}
-                    {!season.roster_configured_at && season.status !== "completed" ? (
-                      <Link
-                        className="rounded-md ui-control-border border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-800 hover:bg-slate-100"
-                        href="/admin?tab=drivers"
-                      >
-                        Configure roster
-                      </Link>
-                    ) : null}
-                  </div>
-                </div>
-              ))}
-            </div>
-            <form action={createLeagueSeasonAction} className="mt-3 flex flex-wrap items-end gap-2">
-              <label className="block">
-                <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-600">
-                  New season year
-                </span>
-                <input
-                  className="w-36 rounded-md ui-control-border border border-slate-300 px-3 py-2 text-sm"
-                  max={2100}
-                  min={2000}
-                  name="season_year"
-                  placeholder="2027"
-                  required
-                  type="number"
-                />
-              </label>
-              <label className="block">
-                <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-600">
-                  Private invite code
-                </span>
-                <input
-                  required
-                  autoCapitalize="none"
-                  autoComplete="off"
-                  className="w-48 rounded-md ui-control-border border border-slate-300 px-3 py-2 text-sm"
-                  maxLength={64}
-                  minLength={8}
-                  name="invite_code"
-                  placeholder="8-64 characters"
-                  type="text"
-                />
-              </label>
-              <label className="block">
-                <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-600">
-                  Confirm invite code
-                </span>
-                <input
-                  required
-                  autoCapitalize="none"
-                  autoComplete="off"
-                  className="w-48 rounded-md ui-control-border border border-slate-300 px-3 py-2 text-sm"
-                  maxLength={64}
-                  minLength={8}
-                  name="invite_code_confirmation"
-                  placeholder="Enter code again"
-                  type="text"
-                />
-              </label>
-              <SubmitButton
-                className="rounded-md ui-control-border border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-800 hover:bg-slate-100"
-                pendingLabel="Creating..."
-              >
-                Create season
-              </SubmitButton>
-            </form>
-            <p className="mt-2 text-xs text-slate-500">
-              The code is stored securely and never displayed again. Existing registered
-              participants remain registered if the code changes.
-            </p>
-        </Disclosure>
 
         <form
           action={createRaceAction}
@@ -333,13 +138,7 @@ export function AdminRacesWorkspace({
             <input
               required
               className="w-full rounded-md ui-control-border border border-slate-300 px-3 py-2 text-sm"
-              defaultValue={
-                selectedRaceSeason?.id === activeSeason?.id && currentSeasonRaces.length > 0
-                  ? Math.max(...currentSeasonRaces.map((race) => race.round_number)) + 1
-                  : selectedRaceSeason?.id === activeSeason?.id
-                    ? 1
-                    : undefined
-              }
+              defaultValue={races.length ? Math.max(...races.map(race => race.round_number)) + 1 : 1}
               max={99}
               min={1}
               name="round_number"
@@ -481,67 +280,6 @@ export function AdminRacesWorkspace({
           </div>
         </form>
 
-        <details className="mt-6 rounded-md ui-panel-muted border border-slate-200 bg-slate-50">
-          <summary className="cursor-pointer px-4 py-3 text-sm font-semibold text-slate-900">
-            Advanced winner tools
-          </summary>
-          <form
-            action={setRaceWinnerAction}
-            className="grid gap-3 border-t border-slate-200 p-4 md:grid-cols-3"
-            data-testid="admin-race-winner-form"
-          >
-            <input name="tab" type="hidden" value="races" />
-            <label className="block">
-              <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-600">
-                Race
-              </span>
-              <select
-                required
-                className="w-full rounded-md ui-control-border border border-slate-300 px-3 py-2 text-sm"
-                data-testid="admin-race-winner-race-select"
-                name="race_id"
-              >
-                <option value="">{currentSeasonRaces.length > 0 ? "Select race" : "No current-season races"}</option>
-                {currentSeasonRaces.map((race) => (
-                  <option key={race.id} value={String(race.id)}>
-                    R{race.round_number} · {race.race_name}
-                  </option>
-                ))}
-              </select>
-            </label>
-
-            <label className="block">
-              <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-600">
-                Fantasy winner
-              </span>
-              <select
-                className="w-full rounded-md ui-control-border border border-slate-300 px-3 py-2 text-sm"
-                data-testid="admin-race-winner-profile-select"
-                name="winner_profile_id"
-              >
-                <option value="">Auto-calculate now (clear manual override)</option>
-                {activeParticipants.map((winnerProfile) => (
-                  <option key={winnerProfile.id} value={winnerProfile.id}>
-                    {winnerProfile.team_name}
-                  </option>
-                ))}
-              </select>
-            </label>
-
-            <div className="flex items-end">
-              <SubmitButton
-                className="w-full rounded-md ui-action-primary bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-700"
-                data-testid="admin-race-winner-submit"
-                pendingLabel="Saving..."
-              >
-                Save fantasy winner
-              </SubmitButton>
-            </div>
-            <p className="text-xs text-slate-500 md:col-span-3">
-              Auto winner uses highest weekly points, then closest official average speed tiebreak, then team name.
-            </p>
-          </form>
-        </details>
 
         <div className="mt-5 grid gap-3">
           {races.length === 0 ? (

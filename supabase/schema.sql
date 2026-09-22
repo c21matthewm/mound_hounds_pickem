@@ -1172,80 +1172,43 @@ revoke all on function public.is_admin(uuid) from public, anon;
 grant execute on function public.is_admin(uuid) to authenticated, service_role;
 
 create or replace function public.activate_league_season(p_season_id bigint)
-returns void
-language plpgsql
-security definer
-set search_path = public
+returns void language plpgsql security definer set search_path = public
+set lock_timeout = '3s' set statement_timeout = '15s'
 as $$
-declare
-  current_season public.league_seasons%rowtype;
-  target_season public.league_seasons%rowtype;
+declare target public.league_seasons%rowtype;
 begin
-  if not public.is_admin(auth.uid()) then
-    raise exception 'Only an admin can activate a league season.';
+  if auth.role() is distinct from 'authenticated' or not public.is_admin(auth.uid()) then
+    raise exception 'Only an admin can activate a league season.' using errcode = '42501';
   end if;
-
-  select * into target_season
-  from public.league_seasons
-  where id = p_season_id
-  for update;
-
-  if target_season.id is null then
-    raise exception 'Selected season was not found.';
+  if current_setting('transaction_isolation') <> 'read committed' then
+    raise exception 'Refresh Seasons & League before activation.' using errcode = '40001';
   end if;
-
-  if target_season.status = 'completed' then
-    raise exception 'A completed season cannot be reactivated.';
+  lock table public.league_seasons, public.profiles, public.drivers, public.races,
+    public.season_participants, public.picks, public.pick_submission_versions,
+    public.results, public.race_driver_groups, public.hall_of_fame_seasons,
+    public.hall_of_fame_entries in share row exclusive mode nowait;
+  if not public.is_admin(auth.uid()) then raise exception 'Administrator access changed.' using errcode = '42501'; end if;
+  select * into target from public.league_seasons where id = p_season_id;
+  if not found then raise exception 'Selected season was not found.'; end if;
+  if target.status = 'active' then return; end if;
+  if target.status <> 'upcoming' then raise exception 'A completed season cannot be reactivated.'; end if;
+  if exists (select 1 from public.league_seasons where status = 'active') then
+    raise exception 'Complete the current season in Seasons & League before activating another.';
   end if;
-
-  if not exists (
-    select 1
-    from public.races race
-    where race.season_id = target_season.id
-      and race.is_archived = false
-  ) then
-    raise exception 'Add at least one race to the target season before activating it.';
+  if target.registration_code_configured_at is null or target.roster_configured_at is null then
+    raise exception 'Configure the invite code and opening roster before activation.';
   end if;
-
-  select * into current_season
-  from public.league_seasons
-  where status = 'active'
-  for update;
-
-  if current_season.id = target_season.id then
-    return;
-  end if;
-
-  if current_season.id is not null and not exists (
-    select 1
-    from public.hall_of_fame_seasons hall
-    where hall.season_year = current_season.season_year
-  ) then
-    raise exception 'Finalize the % Hall of Fame standings before activating a new season.', current_season.season_year;
-  end if;
-
-  if current_season.id is not null then
-    update public.league_seasons
-    set status = 'completed', completed_at = timezone('utc', now())
-    where id = current_season.id;
-  end if;
-
-  update public.drivers
-  set
-    opening_seed_standing = current_standing,
-    championship_points = 0
-  where is_active = true;
-
-  update public.league_seasons
-  set
-    status = 'active',
-    activated_at = timezone('utc', now()),
-    completed_at = null
-  where id = target_season.id;
+  perform public.create_season_restore_point_v2(target.id,
+    format('Before activating %s season',target.season_year),'pre_rollover',format('season:%s:activation',target.id));
+  update public.drivers set opening_seed_standing = current_standing, championship_points = 0 where is_active;
+  update public.league_seasons set status = 'active', activated_at = now(), completed_at = null where id = target.id;
+  perform public.write_admin_audit_event('activate_season','league_season',target.id::text,
+    format('Activated %s season and opened registration.',target.season_year),
+    jsonb_build_object('status',target.status),jsonb_build_object('status','active'));
 end;
 $$;
 
-revoke all on function public.activate_league_season(bigint) from public, anon;
+revoke all on function public.activate_league_season(bigint) from public, anon, service_role;
 grant execute on function public.activate_league_season(bigint) to authenticated;
 
 create or replace function public.set_active_season_participation(p_register boolean)
@@ -1727,6 +1690,13 @@ begin
     raise exception 'Final standings contain duplicate team names.';
   end if;
 
+  if (
+    select count(*) from jsonb_to_recordset(p_entries) as entry(final_rank integer)
+    where entry.final_rank = 1
+  ) <> 1 then
+    raise exception 'A single rank-1 season champion is required before finalization.' using errcode = '22023';
+  end if;
+
   select entry.team_name, entry.total_points
     into champion_team, champion_points
   from jsonb_to_recordset(p_entries) as entry(
@@ -1762,7 +1732,16 @@ begin
       race_count = excluded.race_count,
       finalized_by = excluded.finalized_by,
       finalized_at = excluded.finalized_at
+  where exists (
+    select 1 from public.hall_of_fame_entries as prior_entry
+    where prior_entry.season_id = public.hall_of_fame_seasons.id
+      and prior_entry.race_breakdown <> '[]'::jsonb
+  )
   returning id into archived_season_id;
+
+  if archived_season_id is null then
+    raise exception 'Historical Hall of Fame archives cannot be replaced by season finalization. Review the saved archive instead.' using errcode = '22023';
+  end if;
 
   delete from public.hall_of_fame_entries where season_id = archived_season_id;
 
@@ -1819,3 +1798,883 @@ to authenticated;
 -- supabase/migrations/20260904_fix_portable_season_backups.sql
 -- Apply these migrations after this consolidated baseline in filename order. Keeping deployment
 -- migrations canonical prevents security, pick-window, and operations logic from diverging.
+
+
+-- Shared atomic admin audit helper.
+create or replace function public.write_admin_audit_event(
+  p_action text,
+  p_entity_type text,
+  p_entity_id text,
+  p_summary text,
+  p_before_state jsonb default null,
+  p_after_state jsonb default null
+)
+returns bigint
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  inserted_id bigint;
+begin
+  if coalesce(auth.role(), '') <> 'service_role' and not public.is_admin(auth.uid()) then
+    raise exception 'Admin access required.';
+  end if;
+
+  insert into public.admin_audit_events (
+    actor_profile_id,
+    action,
+    entity_type,
+    entity_id,
+    summary,
+    before_state,
+    after_state
+  )
+  values (
+    auth.uid(),
+    trim(p_action),
+    trim(p_entity_type),
+    nullif(trim(coalesce(p_entity_id, '')), ''),
+    trim(p_summary),
+    p_before_state,
+    p_after_state
+  )
+  returning id into inserted_id;
+
+  return inserted_id;
+end;
+$$;
+revoke all on function public.write_admin_audit_event(text,text,text,text,jsonb,jsonb) from public, anon;
+grant execute on function public.write_admin_audit_event(text,text,text,text,jsonb,jsonb) to authenticated;
+
+
+-- Optional Admin workspace capabilities (20260913).
+create or replace function public.import_historical_hall_of_fame_season(
+  p_season_year integer,
+  p_race_count integer,
+  p_entries jsonb
+)
+returns bigint
+language plpgsql
+security definer
+set search_path = public
+set statement_timeout = '15s'
+set lock_timeout = '5s'
+as $$
+declare
+  archived_season_id bigint;
+  entry_count integer;
+  champion_team text;
+  champion_points integer;
+begin
+  if coalesce(auth.role(), '') <> 'authenticated' then
+    raise exception 'An authenticated administrator account is required.' using errcode = '42501';
+  end if;
+  -- is_active controls league participation, not administrative access.
+  -- Keep the actor's role stable until the transaction completes.
+  perform 1 from public.profiles
+  where id = auth.uid() and role = 'admin'
+  for share;
+  if not found then
+    raise exception 'An administrator account is required.' using errcode = '42501';
+  end if;
+  if p_season_year is null or p_season_year not between 2000 and 2100 then
+    raise exception 'Season year must be between 2000 and 2100.' using errcode = '22023';
+  end if;
+  if p_race_count is null or p_race_count not between 1 and 100 then
+    raise exception 'Race count must be between 1 and 100.' using errcode = '22023';
+  end if;
+  if p_entries is null or jsonb_typeof(p_entries) <> 'array' then
+    raise exception 'Final standings must be an array.' using errcode = '22023';
+  end if;
+  entry_count := jsonb_array_length(p_entries);
+  if entry_count not between 1 and 500 or octet_length(p_entries::text) > 300000 then
+    raise exception 'Import requires 1 to 500 entries within the import size limit.' using errcode = '22023';
+  end if;
+  if exists (
+    select 1 from jsonb_array_elements(p_entries) as item(value)
+    where jsonb_typeof(value) <> 'object'
+      or jsonb_typeof(value -> 'final_rank') is distinct from 'number'
+      or coalesce(value ->> 'final_rank', '') !~ '^[0-9]+$'
+      or jsonb_typeof(value -> 'total_points') is distinct from 'number'
+      or coalesce(value ->> 'total_points', '') !~ '^[0-9]+$'
+      or jsonb_typeof(value -> 'team_name') is distinct from 'string'
+      or length(btrim(value ->> 'team_name')) not between 1 and 160
+      or (value ->> 'team_name') ~ '[[:cntrl:]]'
+      or coalesce(value -> 'race_breakdown', '[]'::jsonb) <> '[]'::jsonb
+  ) then
+    raise exception 'One or more final standings entries are invalid.' using errcode = '22023';
+  end if;
+  -- Numeric bounds are checked before casting into the integer table columns.
+  if exists (
+    select 1 from jsonb_array_elements(p_entries) as item(value)
+    where (value ->> 'final_rank')::numeric not between 1 and 500
+      or (value ->> 'total_points')::numeric not between 0 and 2147483647
+  ) then
+    raise exception 'A rank or point total is outside the supported range.' using errcode = '22023';
+  end if;
+  if (select count(distinct lower(regexp_replace(normalize(btrim(team_name), NFKC), '[[:space:]]+', ' ', 'g')))
+      from jsonb_to_recordset(p_entries) as entry(team_name text)) <> entry_count then
+    raise exception 'Final standings contain duplicate team names.' using errcode = '22023';
+  end if;
+  if (select count(*) from jsonb_to_recordset(p_entries) as entry(final_rank integer)
+      where final_rank = 1) <> 1 then
+    raise exception 'Exactly one rank-1 champion is required.' using errcode = '22023';
+  end if;
+  if exists (
+    with groups as (
+      select final_rank, min(total_points) as minimum_points, max(total_points) as maximum_points, count(*) as group_size
+      from jsonb_to_recordset(p_entries) as entry(final_rank integer, total_points integer)
+      group by final_rank
+    ), ordered as (
+      select *, 1 + coalesce(sum(group_size) over (order by final_rank rows between unbounded preceding and 1 preceding), 0) as expected_rank,
+        lag(minimum_points) over (order by final_rank) as preceding_points
+      from groups
+    )
+    select 1 from ordered
+    where final_rank <> expected_rank or minimum_points <> maximum_points or maximum_points > preceding_points
+  ) then
+    raise exception 'Final ranks must be consecutive or valid competition ranks, ordered by total points.' using errcode = '22023';
+  end if;
+
+  select team_name, total_points into champion_team, champion_points
+  from jsonb_to_recordset(p_entries) as entry(final_rank integer, team_name text, total_points integer)
+  where final_rank = 1;
+
+  -- No upsert or delete: the unique season_year constraint also serializes two
+  -- simultaneous imports. The losing transaction cannot replace the winner.
+  insert into public.hall_of_fame_seasons (
+    season_year, champion_team_name, champion_total_points, participant_count, race_count, finalized_by
+  ) values (
+    p_season_year, btrim(champion_team), champion_points, entry_count, p_race_count, auth.uid()
+  ) returning id into archived_season_id;
+
+  insert into public.hall_of_fame_entries (season_id, final_rank, team_name, total_points, race_breakdown)
+  select archived_season_id, final_rank, btrim(team_name), total_points, '[]'::jsonb
+  from jsonb_to_recordset(p_entries) as entry(final_rank integer, team_name text, total_points integer);
+
+  -- The archive and audit are one transaction: an audit failure rolls back both
+  -- archive tables. Do not also log this mutation from the server action.
+  perform public.write_admin_audit_event(
+    'import_historical_hall_of_fame', 'hall_of_fame_season', archived_season_id::text,
+    format('Imported %s historical Hall of Fame standings.', p_season_year),
+    null,
+    jsonb_build_object('season_year', p_season_year, 'race_count', p_race_count,
+      'participant_count', entry_count, 'champion_team_name', btrim(champion_team),
+      'champion_total_points', champion_points)
+  );
+  return archived_season_id;
+end;
+$$;
+
+revoke all on function public.import_historical_hall_of_fame_season(integer, integer, jsonb)
+from public, anon;
+grant execute on function public.import_historical_hall_of_fame_season(integer, integer, jsonb)
+to authenticated;
+-- Optional Admin workspace capability. Apply before using role delegation.
+-- No data backfill and no application schema-version change.
+-- is_active remains league participation eligibility; it does not revoke Admin access.
+
+-- Statement-level serialization also covers existing eligibility edits and direct
+-- authenticated profile updates. A nonblocking lock avoids deadlocks with older
+-- RPCs that acquire a profile row lock before issuing their UPDATE statement.
+create or replace function public.lock_profile_admin_changes()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if not pg_try_advisory_xact_lock(1296584784, 20260913) then
+    raise exception using errcode = '55P03',
+      message = 'Another account change is in progress. Refresh Participants and try again.';
+  end if;
+  -- Row locks also force stale REPEATABLE READ/SERIALIZABLE callers to abort
+  -- instead of checking an out-of-date administrator set after another commit.
+  perform id from public.profiles where role = 'admin' order by id for update;
+  return null;
+end;
+$$;
+
+revoke all on function public.lock_profile_admin_changes() from public, anon, authenticated, service_role;
+drop trigger if exists trg_lock_profile_admin_changes on public.profiles;
+create trigger trg_lock_profile_admin_changes
+before update of role, is_active or delete on public.profiles
+for each statement execute function public.lock_profile_admin_changes();
+
+create or replace function public.guard_profile_admin_removal()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if old.role = 'admin' and (tg_op = 'DELETE' or new.role is distinct from old.role) then
+    if auth.uid() = old.id then
+      raise exception 'You cannot remove your own admin access.';
+    end if;
+    if not exists (
+      select 1 from public.profiles profile
+      where profile.id <> old.id and profile.role = 'admin' and profile.is_active = true
+    ) then
+      raise exception 'Another admin with participation enabled is required before removing this admin.';
+    end if;
+  end if;
+  if tg_op = 'DELETE' then return old; end if;
+  return new;
+end;
+$$;
+
+revoke all on function public.guard_profile_admin_removal() from public, anon, authenticated, service_role;
+drop trigger if exists trg_guard_profile_admin_removal on public.profiles;
+create trigger trg_guard_profile_admin_removal
+before update of role or delete on public.profiles
+for each row execute function public.guard_profile_admin_removal();
+
+create or replace function public.admin_update_participant_role(
+  p_profile_id uuid,
+  p_role text,
+  p_expected_role text
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  target_profile public.profiles%rowtype;
+begin
+  if auth.role() is distinct from 'authenticated' or not public.is_admin(auth.uid()) then
+    raise exception 'Only an admin can change participant roles.';
+  end if;
+  if p_profile_id is null or p_role is null or p_expected_role is null
+    or p_role not in ('admin', 'participant') or p_expected_role not in ('admin', 'participant')
+    or p_role = p_expected_role then
+    raise exception 'Select a valid participant and role change.';
+  end if;
+  if p_profile_id = auth.uid() and p_role = 'participant' then
+    raise exception 'You cannot remove your own admin access.';
+  end if;
+  if not pg_try_advisory_xact_lock(1296584784, 20260913) then
+    raise exception using errcode = '55P03',
+      message = 'Another account change is in progress. Refresh Participants and try again.';
+  end if;
+  perform id from public.profiles where role = 'admin' order by id for update;
+  -- Recheck after acquiring the same lock as direct role and eligibility writes.
+  -- Each PL/pgSQL statement gets a fresh READ COMMITTED snapshot.
+  if not public.is_admin(auth.uid()) then
+    raise exception 'Your admin access has changed. Refresh before trying again.';
+  end if;
+  select * into target_profile from public.profiles where id = p_profile_id;
+  if not found then raise exception 'Participant was not found.'; end if;
+  if target_profile.role <> p_expected_role then
+    raise exception 'This participant’s role has changed. Refresh Participants before trying again.';
+  end if;
+  if p_role = 'admin' and (
+    length(trim(coalesce(target_profile.full_name, ''))) = 0
+    or length(trim(coalesce(target_profile.team_name, ''))) = 0
+  ) then
+    raise exception 'Save this participant’s name and team before granting admin access.';
+  end if;
+
+  update public.profiles set role = p_role where id = p_profile_id;
+  -- The audit and role update either both commit or both roll back. Do not add
+  -- a second, best-effort application audit for this mutation.
+  perform public.write_admin_audit_event(
+    'change_role', 'profile', p_profile_id::text,
+    format('Changed %s from %s to %s.', target_profile.team_name, target_profile.role, p_role),
+    jsonb_build_object('role', target_profile.role, 'is_active', target_profile.is_active),
+    jsonb_build_object('role', p_role, 'is_active', target_profile.is_active)
+  );
+  return jsonb_build_object('profile_id', p_profile_id, 'previous_role', target_profile.role, 'role', p_role);
+end;
+$$;
+
+revoke all on function public.admin_update_participant_role(uuid, text, text) from public, anon, service_role;
+grant execute on function public.admin_update_participant_role(uuid, text, text) to authenticated;
+
+
+
+-- Optional Race Week control. Reuses the existing shared-window snapshot logic.
+-- No data backfill or schema-version change.
+create or replace function public.admin_freeze_race_field(p_race_id bigint)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+set lock_timeout = '3s'
+set statement_timeout = '10s'
+as $$
+declare
+  selected_race public.races%rowtype;
+  selected_season public.league_seasons%rowtype;
+  first_window_round integer;
+  previous_window uuid;
+  opens_at timestamptz;
+  rows_frozen integer;
+  was_frozen boolean;
+begin
+  if auth.role() is distinct from 'authenticated' or not public.is_admin(auth.uid()) then
+    raise exception 'Only an admin can freeze a race field.' using errcode = '42501';
+  end if;
+  -- Fail promptly if roster/schedule maintenance is underway. These short-lived
+  -- table locks prevent a partial driver read or changing window membership;
+  -- NOWAIT avoids deadlocks with existing writers that lock rows in other orders.
+  lock table public.races in share row exclusive mode nowait;
+  lock table public.drivers in share mode nowait;
+  select * into selected_race from public.races where id = p_race_id for update nowait;
+  if not found or selected_race.is_archived then
+    raise exception 'Select a non-archived race in the active season.';
+  end if;
+  select * into selected_season from public.league_seasons
+    where id = selected_race.season_id for update nowait;
+  if not found or selected_season.status <> 'active' then
+    raise exception 'Fields can only be frozen for the active season.';
+  end if;
+  perform id from public.profiles where id = auth.uid() and role = 'admin' for share nowait;
+  if not found then raise exception 'Admin access has changed. Refresh before trying again.'; end if;
+  -- Lock every member before checking deadlines, including the first member when
+  -- the admin opened the second doubleheader race.
+  perform id from public.races where pick_window_key = selected_race.pick_window_key
+    order by id for update nowait;
+  if exists (select 1 from public.races where pick_window_key = selected_race.pick_window_key
+    and (is_archived or season_id <> selected_race.season_id)) then
+    raise exception 'The shared race window is not valid for field freezing.';
+  end if;
+  select bool_and(field_frozen_at is not null) into was_frozen
+    from public.races where pick_window_key = selected_race.pick_window_key;
+  if was_frozen then
+    return jsonb_build_object('already_frozen', true, 'race_id', p_race_id);
+  end if;
+  if exists (select 1 from public.races where pick_window_key = selected_race.pick_window_key
+    and now() >= case when pick_format = 'indy_500' then race_date else qualifying_start_at end) then
+    raise exception 'This pick window has closed. Its field cannot be opened now.';
+  end if;
+  opens_at := public.pick_window_opens_at(p_race_id);
+  if opens_at is not null and now() < opens_at then
+    raise exception 'Opening-round picks open six days before qualifying. Wait until that window opens.';
+  end if;
+  select min(round_number) into first_window_round from public.races
+    where pick_window_key = selected_race.pick_window_key;
+  select pick_window_key into previous_window from public.races
+    where season_id = selected_race.season_id and not is_archived and round_number < first_window_round
+    order by round_number desc limit 1;
+  if previous_window is not null and exists (
+    select 1 from public.races where pick_window_key = previous_window and not is_archived
+      and results_status <> 'published'
+  ) then
+    raise exception 'Publish every race in the previous pick window before freezing this field.';
+  end if;
+  rows_frozen := public.ensure_race_pick_field_snapshot(p_race_id);
+  perform public.write_admin_audit_event(
+    'freeze_race_field', 'race', p_race_id::text,
+    format('Froze the pick field for %s and its shared window.', selected_race.race_name),
+    jsonb_build_object('field_frozen', false),
+    jsonb_build_object('field_frozen', true, 'pick_window_key', selected_race.pick_window_key,
+      'driver_count', rows_frozen)
+  );
+  return jsonb_build_object('already_frozen', false, 'race_id', p_race_id, 'driver_count', rows_frozen);
+end;
+$$;
+revoke all on function public.admin_freeze_race_field(bigint) from public, anon, service_role;
+grant execute on function public.admin_freeze_race_field(bigint) to authenticated;
+
+
+-- Atomic roster status changes preserve saved fields, picks and results.
+create or replace function public.admin_set_driver_roster_status(p_drivers jsonb, p_is_active boolean)
+returns jsonb language plpgsql security definer
+set search_path = public
+set lock_timeout = '3s'
+set statement_timeout = '10s'
+as $$
+declare
+  ids bigint[];
+  selected_count integer;
+  changed_count integer;
+  active_count integer;
+  before_rows jsonb;
+begin
+  if auth.role() is distinct from 'authenticated' or not public.is_admin(auth.uid()) then
+    raise exception 'Only an admin can update the driver roster.' using errcode = '42501';
+  end if;
+  if p_is_active is null or jsonb_typeof(p_drivers) is distinct from 'array' then
+    raise exception 'Choose a roster status and between 1 and 100 drivers.';
+  end if;
+  selected_count := jsonb_array_length(p_drivers);
+  if selected_count < 1 or selected_count > 100 or octet_length(p_drivers::text) > 20000 then
+    raise exception 'Choose between 1 and 100 drivers.';
+  end if;
+  if exists (select 1 from jsonb_array_elements(p_drivers) item
+    where jsonb_typeof(item) is distinct from 'object'
+      or jsonb_typeof(item->'id') is distinct from 'number'
+      or coalesce(item->>'id','') !~ '^[1-9][0-9]{0,14}$'
+      or jsonb_typeof(item->'expected_is_active') is distinct from 'boolean') then
+    raise exception 'Every selected driver requires a valid id and expected current status.';
+  end if;
+  select array_agg((item->>'id')::bigint order by (item->>'id')::bigint) into ids
+    from jsonb_array_elements(p_drivers) item;
+  if (select count(distinct id) from unnest(ids) id) <> selected_count then
+    raise exception 'Select each driver only once.';
+  end if;
+  if current_setting('transaction_isolation') <> 'read committed' then
+    raise exception 'Retry this roster update in a new Read Committed transaction.' using errcode = '40001';
+  end if;
+  -- Ranking touches the entire roster. Briefly stabilize it and fail promptly
+  -- during another write instead of leaving a partial update. Reads continue.
+  lock table public.drivers in exclusive mode nowait;
+  perform id from public.profiles where id = auth.uid() and role = 'admin' for share nowait;
+  if not found then raise exception 'Admin access changed. Refresh before trying again.'; end if;
+  if (select count(*) from public.drivers where id = any(ids)) <> selected_count then
+    raise exception 'A selected driver no longer exists. Refresh the roster.';
+  end if;
+  if exists (select 1 from jsonb_array_elements(p_drivers) item
+    join public.drivers d on d.id = (item->>'id')::bigint
+    where d.is_active is distinct from (item->>'expected_is_active')::boolean) then
+    raise exception 'A selected driver status changed. Refresh before trying again.';
+  end if;
+  select jsonb_agg(jsonb_build_object('id',id,'driver_name',driver_name,'is_active',is_active) order by id)
+    into before_rows from public.drivers where id = any(ids);
+  update public.drivers set is_active = p_is_active where id = any(ids) and is_active is distinct from p_is_active;
+  get diagnostics changed_count = row_count;
+  if changed_count = 0 then return jsonb_build_object('changed_count',0); end if;
+  -- Use the same seeded tie order as published-results and manual roster refreshes.
+  -- Points and opening seeds stay intact; only current ranks and groups change.
+  with ranked as (
+    select id,row_number() over(order by championship_points desc,opening_seed_standing asc nulls last,current_standing,driver_name,id)::integer as n
+    from public.drivers where is_active
+  ) update public.drivers d set current_standing = ranked.n,group_number = least(6,((ranked.n-1)/4)+1)
+    from ranked where d.id = ranked.id;
+  select count(*) into active_count from public.drivers where is_active;
+  with ranked as (
+    select id,row_number() over(order by current_standing,driver_name,id)::integer as n
+    from public.drivers where not is_active
+  ) update public.drivers d set current_standing = active_count+ranked.n,group_number = 6
+    from ranked where d.id = ranked.id;
+  perform public.write_admin_audit_event('bulk_driver_roster_status','driver_roster','current',
+    format('Set %s drivers %s.',changed_count,case when p_is_active then 'active' else 'inactive' end),
+    jsonb_build_object('drivers',before_rows),
+    jsonb_build_object('driver_ids',ids,'is_active',p_is_active,'changed_count',changed_count));
+  return jsonb_build_object('changed_count',changed_count);
+end;
+$$;
+revoke all on function public.admin_set_driver_roster_status(jsonb,boolean) from public,anon,service_role;
+grant execute on function public.admin_set_driver_roster_status(jsonb,boolean) to authenticated;
+
+
+-- Bounded, atomic Admin participant eligibility and explicit season enrollment.
+-- is_active controls league eligibility; it never grants or revokes Admin access.
+
+create or replace function public.admin_bulk_update_participants(
+  p_operation text,
+  p_season_id bigint,
+  p_participants jsonb
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+set lock_timeout = '3s'
+set statement_timeout = '10s'
+as $$
+declare
+  selection jsonb;
+  target_profile public.profiles%rowtype;
+  selected_season public.league_seasons%rowtype;
+  previous_status text;
+  next_status text;
+  enrollment boolean;
+  before_rows jsonb := '[]'::jsonb;
+  after_rows jsonb := '[]'::jsonb;
+  selected_ids uuid[];
+begin
+  if auth.role() is distinct from 'authenticated' or not public.is_admin(auth.uid()) then
+    raise exception 'Only an admin can update participant accounts.';
+  end if;
+  -- The web RPC uses READ COMMITTED. Reject old snapshots rather than miss a
+  -- concurrently added enrollment or pick which was absent from that snapshot.
+  if current_setting('transaction_isolation') <> 'read committed' then
+    raise exception using errcode = '40001', message = 'Refresh Participants before updating accounts.';
+  end if;
+  if p_operation is null or p_operation not in ('enable', 'disable', 'register', 'decline') then
+    raise exception 'Choose an eligibility or season registration action.';
+  end if;
+  if p_participants is null or jsonb_typeof(p_participants) <> 'array' then
+    raise exception 'Select between 1 and 100 participant accounts.';
+  end if;
+  if jsonb_array_length(p_participants) not between 1 and 100 or octet_length(p_participants::text) > 25000 then
+    raise exception 'Select between 1 and 100 participant accounts.';
+  end if;
+  enrollment := p_operation in ('register', 'decline');
+  if (enrollment and (p_season_id is null or p_season_id <= 0)) or (not enrollment and p_season_id is not null) then
+    raise exception 'Choose an active or upcoming season for registration changes.';
+  end if;
+  for selection in select value from jsonb_array_elements(p_participants) loop
+    if jsonb_typeof(selection) <> 'object'
+      or coalesce(selection->>'profile_id', '') !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+      or jsonb_typeof(selection->'expected_is_active') is distinct from 'boolean'
+      or not (selection ? 'expected_status')
+      or (selection->'expected_status' <> 'null'::jsonb and selection->>'expected_status' not in ('registered','declined')) then
+      raise exception 'Refresh Participants and select the accounts again.';
+    end if;
+  end loop;
+  select array_agg((item->>'profile_id')::uuid order by item->>'profile_id') into selected_ids
+    from jsonb_array_elements(p_participants) item;
+  if cardinality(selected_ids) <> (select count(distinct id) from unnest(selected_ids) id) then
+    raise exception 'Each participant may only be selected once.';
+  end if;
+
+  -- Existing pick/registration/rollover writers do not share one row-lock order.
+  -- These brief NOWAIT table locks stabilize all checks, including absent picks
+  -- and absent enrollment rows. Normal reads stay available; busy writes retry.
+  lock table public.league_seasons, public.races, public.profiles,
+    public.season_participants, public.picks in share row exclusive mode nowait;
+  perform id from public.profiles where id = auth.uid() or id = any(selected_ids) order by id for update nowait;
+  if not public.is_admin(auth.uid()) then raise exception 'Your admin access has changed. Refresh before trying again.'; end if;
+  if (select count(*) from public.profiles where id = any(selected_ids)) <> cardinality(selected_ids) then
+    raise exception 'A selected participant no longer exists. Refresh Participants.';
+  end if;
+  if enrollment then
+    select * into selected_season from public.league_seasons where id = p_season_id for update nowait;
+    if not found or selected_season.status not in ('active', 'upcoming') then
+      raise exception 'Registration can only be changed for an active or upcoming season.';
+    end if;
+  end if;
+  for selection in select value from jsonb_array_elements(p_participants) order by value->>'profile_id' loop
+    select * into target_profile from public.profiles where id = (selection->>'profile_id')::uuid;
+    previous_status := null;
+    if enrollment then
+      select status into previous_status from public.season_participants
+        where season_id = p_season_id and profile_id = target_profile.id;
+    end if;
+    if target_profile.is_active is distinct from (selection->>'expected_is_active')::boolean
+      or (enrollment and previous_status is distinct from selection->>'expected_status') then
+      raise exception using errcode = '40001', message = 'Participant data changed. Refresh Participants and select the accounts again.';
+    end if;
+    if p_operation = 'register' and (not target_profile.is_active
+      or length(trim(coalesce(target_profile.full_name, ''))) = 0
+      or length(trim(coalesce(target_profile.team_name, ''))) = 0) then
+      raise exception 'Every account must have participation enabled and a complete name and team before registration.';
+    end if;
+    if p_operation in ('disable', 'decline') and exists (
+      select 1 from public.picks pick
+      join public.races race on race.id = pick.race_id
+      join public.league_seasons season on season.id = race.season_id
+      where pick.user_id = target_profile.id
+        and ((p_operation = 'decline' and race.season_id = p_season_id)
+          or (p_operation = 'disable' and season.status in ('active', 'upcoming')))
+    ) then
+      raise exception 'A selected participant has submitted picks. No accounts were changed. Review that participant individually before removing them from scoring.';
+    end if;
+    before_rows := before_rows || jsonb_build_array(jsonb_build_object('profile_id',target_profile.id,'is_active',target_profile.is_active,'status',previous_status));
+    if enrollment then
+      next_status := case when p_operation = 'register' then 'registered' else 'declined' end;
+      insert into public.season_participants(season_id,profile_id,status,registered_at,decided_at)
+      values(p_season_id,target_profile.id,next_status,case when next_status='registered' then now() else null end,now())
+      on conflict (season_id,profile_id) do update set
+        status=excluded.status,
+        registered_at=case when excluded.status='registered' then coalesce(public.season_participants.registered_at,excluded.registered_at) else null end,
+        decided_at=excluded.decided_at;
+    else
+      update public.profiles set is_active=(p_operation='enable') where id=target_profile.id;
+    end if;
+    after_rows := after_rows || jsonb_build_array(jsonb_build_object('profile_id',target_profile.id,'is_active',case when enrollment then target_profile.is_active else p_operation='enable' end,'status',case when enrollment then next_status else null end));
+  end loop;
+  perform public.write_admin_audit_event('bulk_' || p_operation,'participants',p_season_id::text,
+    format('Applied %s to %s participant account(s).',p_operation,cardinality(selected_ids)),
+    jsonb_build_object('season_id',p_season_id,'participants',before_rows),
+    jsonb_build_object('season_id',p_season_id,'participants',after_rows));
+  return jsonb_build_object('updated_count',cardinality(selected_ids),'operation',p_operation,'season_id',p_season_id);
+end;
+$$;
+revoke all on function public.admin_bulk_update_participants(text,bigint,jsonb) from public,anon,service_role;
+grant execute on function public.admin_bulk_update_participants(text,bigint,jsonb) to authenticated;
+
+
+-- Optional Admin workspace capability. Documents are public, immutable objects;
+-- only the Admin server action uploads them. Existing PDFs are retained for recovery.
+
+-- Never turn an existing private bucket public or broaden its file limits.
+insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+values ('season-rules', 'season-rules', true, 5242880, array['application/pdf'])
+on conflict (id) do nothing;
+do $$
+declare configured storage.buckets%rowtype;
+begin
+  select * into configured from storage.buckets where id = 'season-rules' for update;
+  if configured.name <> 'season-rules' or configured.public is distinct from true
+    or configured.file_size_limit is distinct from 5242880::bigint
+    or configured.allowed_mime_types is distinct from array['application/pdf']::text[] then
+    raise exception 'The existing season-rules bucket has unexpected settings. Review it before enabling rules uploads.';
+  end if;
+end;
+$$;
+
+-- A permissive policy added for another bucket must not enable direct writes to
+-- these immutable documents. The service role bypasses RLS; public URL delivery
+-- is handled by Storage's public-bucket endpoint and does not require this policy.
+drop policy if exists season_rules_server_managed on storage.objects;
+create policy season_rules_server_managed on storage.objects
+as restrictive for all to anon, authenticated
+using (bucket_id <> 'season-rules')
+with check (bucket_id <> 'season-rules');
+
+create or replace function public.set_league_season_rules_document(
+  p_season_id bigint,
+  p_rules_document_url text,
+  p_expected_rules_document_url text
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+set lock_timeout = '3s'
+set statement_timeout = '10s'
+as $$
+declare
+  selected_season public.league_seasons%rowtype;
+  rules_url text := nullif(p_rules_document_url, '');
+  url_parts text[];
+begin
+  if auth.role() is distinct from 'authenticated' or not public.is_admin(auth.uid()) then
+    raise exception using errcode = '42501', message = 'Only an administrator can update season rules.';
+  end if;
+  -- Serialize with demotion. Participation eligibility is intentionally irrelevant.
+  perform id from public.profiles where id = auth.uid() and role = 'admin' for share nowait;
+  if not found then
+    raise exception using errcode = '42501', message = 'Administrator access changed. Refresh and try again.';
+  end if;
+  if p_season_id is null or p_season_id <= 0 or length(p_expected_rules_document_url) > 2048 then
+    raise exception using errcode = '22023', message = 'Refresh Seasons & League before changing its rules.';
+  end if;
+  if rules_url is not null then
+    if length(rules_url) > 2048 or rules_url ~ '[[:space:][:cntrl:]]'
+      or position(chr(92) in rules_url) > 0 or rules_url ~* '%(0[0-9a-f]|1[0-9a-f]|7f|5c)' then
+      raise exception using errcode = '22023', message = 'Use a site path or secure HTTPS URL without spaces or control characters.';
+    end if;
+    if left(rules_url, 1) = '/' then
+      if left(rules_url, 2) = '//' then
+        raise exception using errcode = '22023', message = 'Site paths must start with a single slash.';
+      end if;
+    else
+      url_parts := regexp_match(rules_url, '^https://([a-z0-9]([a-z0-9.-]*[a-z0-9])?)(:([0-9]{1,5}))?([/?#].*)?$', 'i');
+      if url_parts is null or position('..' in url_parts[1]) > 0 or coalesce(url_parts[4]::int, 443) > 65535 then
+        raise exception using errcode = '22023', message = 'Use a valid HTTPS URL without embedded credentials.';
+      end if;
+    end if;
+  end if;
+  select * into selected_season from public.league_seasons where id = p_season_id for update nowait;
+  if not found or selected_season.status not in ('active', 'upcoming') then
+    raise exception using errcode = '22023', message = 'Rules can only be changed for an active or upcoming season.';
+  end if;
+  if selected_season.rules_document_url is distinct from nullif(p_expected_rules_document_url, '') then
+    raise exception using errcode = '40001', message = 'The rules document has changed. Refresh Seasons & League before trying again.';
+  end if;
+  if selected_season.rules_document_url is not distinct from rules_url then
+    return jsonb_build_object('season_id', selected_season.id, 'rules_document_url', rules_url, 'changed', false);
+  end if;
+  update public.league_seasons set rules_document_url = rules_url where id = selected_season.id;
+  perform public.write_admin_audit_event(
+    'update_rules_document', 'league_season', selected_season.id::text,
+    format('Updated the %s rules document.', selected_season.season_year),
+    jsonb_build_object('rules_document_url', selected_season.rules_document_url),
+    jsonb_build_object('rules_document_url', rules_url)
+  );
+  return jsonb_build_object('season_id', selected_season.id, 'rules_document_url', rules_url, 'changed', true);
+end;
+$$;
+
+revoke all on function public.set_league_season_rules_document(bigint, text, text) from public, anon, service_role;
+grant execute on function public.set_league_season_rules_document(bigint, text, text) to authenticated;
+
+-- Optional explicit season completion and Admin capability diagnostics.
+-- Explicit off-season lifecycle and Admin diagnostics. Installs capabilities only;
+-- the administrator chooses when to complete or activate a season in the app.
+begin;
+
+create or replace function public.get_season_closeout_context(p_season_id bigint)
+returns jsonb language plpgsql stable security definer set search_path = public
+set statement_timeout = '10s'
+as $$
+declare snapshot jsonb;
+begin
+  if auth.role() is distinct from 'authenticated' or not public.is_admin(auth.uid()) then
+    raise exception 'Admin access required.' using errcode = '42501';
+  end if;
+  snapshot := public.build_season_recovery_snapshot(p_season_id);
+  return jsonb_build_object(
+    'source_hash', encode(extensions.digest((snapshot - 'hallOfFame')::text, 'sha256'), 'hex'),
+    'already_completed', snapshot->'season'->>'status' = 'completed',
+    'historical_archive', jsonb_typeof(snapshot->'hallOfFame') = 'object' and not exists (
+      select 1 from jsonb_array_elements(coalesce(snapshot->'hallOfFame'->'entries', '[]'::jsonb)) entry
+      where entry->'race_breakdown' is distinct from '[]'::jsonb
+    )
+  );
+end;
+$$;
+revoke all on function public.get_season_closeout_context(bigint) from public, anon, service_role;
+grant execute on function public.get_season_closeout_context(bigint) to authenticated;
+
+create or replace function public.complete_league_season(
+  p_season_id bigint, p_expected_archive_id bigint, p_expected_finalized_at timestamptz,
+  p_expected_source_hash text, p_current_entries jsonb
+)
+returns jsonb language plpgsql security definer set search_path = public
+set lock_timeout = '3s' set statement_timeout = '15s'
+as $$
+declare
+  season public.league_seasons%rowtype;
+  archive public.hall_of_fame_seasons%rowtype;
+  context jsonb;
+  saved_entries jsonb;
+  current_entries jsonb;
+  backup jsonb;
+  finished_at timestamptz := now();
+begin
+  if auth.role() is distinct from 'authenticated' or not public.is_admin(auth.uid()) then
+    raise exception 'Only an administrator can complete a season.' using errcode = '42501';
+  end if;
+  if current_setting('transaction_isolation') <> 'read committed' then
+    raise exception 'Refresh Seasons & League before completing a season.' using errcode = '40001';
+  end if;
+  -- All source writers, including new rows, must settle before verification.
+  -- NOWAIT keeps busy race/roster operations from waiting behind a closeout.
+  lock table public.league_seasons, public.profiles, public.drivers, public.races,
+    public.season_participants, public.picks, public.pick_submission_versions,
+    public.results, public.race_driver_groups, public.hall_of_fame_seasons,
+    public.hall_of_fame_entries in share row exclusive mode nowait;
+  if not public.is_admin(auth.uid()) then raise exception 'Administrator access changed.' using errcode = '42501'; end if;
+  select * into season from public.league_seasons where id = p_season_id;
+  if not found then raise exception 'Selected season was not found.'; end if;
+  select * into archive from public.hall_of_fame_seasons where season_year = season.season_year;
+  if not found or archive.id is distinct from p_expected_archive_id
+    or archive.finalized_at is distinct from p_expected_finalized_at then
+    raise exception 'The final archive changed or is missing. Refresh Seasons & League.' using errcode = '40001';
+  end if;
+  if season.status = 'completed' then
+    return jsonb_build_object('season_year',season.season_year,'already_completed',true);
+  end if;
+  if season.status <> 'active' then raise exception 'Only the active season can be completed.'; end if;
+  if archive.participant_count < 1 or archive.race_count < 1
+    or (select count(*) from public.hall_of_fame_entries where season_id = archive.id) <> archive.participant_count
+    or (select count(*) from public.hall_of_fame_entries where season_id = archive.id and final_rank = 1) <> 1
+    or not exists (select 1 from public.hall_of_fame_entries where season_id = archive.id
+      and final_rank = 1 and team_name = archive.champion_team_name and total_points = archive.champion_total_points) then
+    raise exception 'The final archive is incomplete. Review Hall of Fame before completing this season.';
+  end if;
+  context := public.get_season_closeout_context(season.id);
+  if context->>'source_hash' is distinct from p_expected_source_hash then
+    raise exception 'Season data changed during review. Refresh and try completing the season again.' using errcode = '40001';
+  end if;
+  if (context->>'historical_archive')::boolean then
+    -- The 2026 transition has an imported archive and no operational race data.
+    -- Never silently disregard a real app schedule merely because an import exists.
+    if exists (select 1 from public.races where season_id = season.id) then
+      raise exception 'This historical archive has app race records. Review those records before completing the season.';
+    end if;
+  else
+    if not exists (select 1 from public.races where season_id = season.id and not is_archived)
+      or exists (select 1 from public.races where season_id = season.id and not is_archived
+        and (results_status <> 'published' or race_date > now())) then
+      raise exception 'Publish every scheduled race before completing the season.';
+    end if;
+    if (select count(*) from public.races where season_id = season.id and not is_archived) <> archive.race_count then
+      raise exception 'The archived race count differs from the schedule. Refresh Final Standings before completing the season.';
+    end if;
+    if p_current_entries is null or jsonb_typeof(p_current_entries) <> 'array'
+      or octet_length(p_current_entries::text) > 5 * 1024 * 1024 then
+      raise exception 'Current final standings could not be verified. Refresh and try again.';
+    end if;
+    select jsonb_agg(jsonb_build_object('final_rank', final_rank, 'team_name', team_name,
+      'total_points', total_points, 'race_breakdown', race_breakdown) order by final_rank, team_name)
+      into saved_entries from public.hall_of_fame_entries where season_id = archive.id;
+    select jsonb_agg(entry order by (entry->>'final_rank')::integer, entry->>'team_name')
+      into current_entries from jsonb_array_elements(p_current_entries) entry;
+    if saved_entries is distinct from current_entries then
+      raise exception 'Current standings differ from the saved archive. Refresh Final Standings before completing the season.';
+    end if;
+  end if;
+  backup := public.create_season_restore_point_v2(season.id,
+    format('Before completing %s season', season.season_year), 'pre_rollover', format('season:%s:completion',season.id));
+  update public.races set winner_auto_eligible_at = null where season_id = season.id and winner_auto_eligible_at is not null;
+  update public.league_seasons set status = 'completed', completed_at = finished_at where id = season.id;
+  perform public.write_admin_audit_event('complete_season','league_season',season.id::text,
+    format('Completed %s season. The league is between seasons.',season.season_year),
+    jsonb_build_object('status',season.status),
+    jsonb_build_object('status','completed','archive_id',archive.id,'restore_point_id',backup->>'id'));
+  return jsonb_build_object('season_year',season.season_year,'already_completed',false);
+end;
+$$;
+revoke all on function public.complete_league_season(bigint,bigint,timestamptz,text,jsonb) from public, anon, service_role;
+grant execute on function public.complete_league_season(bigint,bigint,timestamptz,text,jsonb) to authenticated;
+
+create or replace function public.admin_update_participant_v2(
+  p_profile_id uuid, p_full_name text, p_team_name text, p_account_eligible boolean,
+  p_season_registered boolean, p_force_removal boolean, p_expected_season_id bigint
+)
+returns integer language plpgsql security definer set search_path = public
+set lock_timeout = '3s' set statement_timeout = '10s'
+as $$
+declare active_id bigint; before_profile jsonb;
+begin
+  if auth.role() is distinct from 'authenticated' or not public.is_admin(auth.uid()) then
+    raise exception 'Only an admin can update participant accounts.' using errcode = '42501';
+  end if;
+  if current_setting('transaction_isolation') <> 'read committed' then
+    raise exception 'Refresh Participants before saving.' using errcode = '40001';
+  end if;
+  lock table public.league_seasons, public.races, public.profiles, public.season_participants, public.picks
+    in share row exclusive mode nowait;
+  if not public.is_admin(auth.uid()) then raise exception 'Administrator access changed.' using errcode = '42501'; end if;
+  select id into active_id from public.league_seasons where status = 'active';
+  if active_id is distinct from p_expected_season_id then
+    raise exception 'The active season changed. Refresh Participants before saving.' using errcode = '40001';
+  end if;
+  if active_id is not null then
+    return public.admin_update_participant(p_profile_id,p_full_name,p_team_name,p_account_eligible,p_season_registered,p_force_removal);
+  end if;
+  if p_season_registered is distinct from false or p_force_removal is distinct from false then
+    raise exception 'There is no active season to change registration or scoring.';
+  end if;
+  if length(trim(coalesce(p_full_name,''))) not between 1 and 100
+    or length(trim(coalesce(p_team_name,''))) not between 1 and 100 or p_account_eligible is null then
+    raise exception 'Enter a name, team name and participation choice.';
+  end if;
+  select to_jsonb(profile) into before_profile from public.profiles profile where id = p_profile_id;
+  if not found then raise exception 'Participant was not found.'; end if;
+  update public.profiles set full_name = trim(p_full_name), team_name = trim(p_team_name), is_active = p_account_eligible where id = p_profile_id;
+  perform public.write_admin_audit_event('update','participant',p_profile_id::text,
+    'Updated participant profile and eligibility between seasons.',before_profile,
+    (select to_jsonb(profile) from public.profiles profile where id = p_profile_id));
+  return 0;
+end;
+$$;
+revoke all on function public.admin_update_participant_v2(uuid,text,text,boolean,boolean,boolean,bigint) from public, anon, service_role;
+grant execute on function public.admin_update_participant_v2(uuid,text,text,boolean,boolean,boolean,bigint) to authenticated;
+
+create or replace function public.get_admin_capability_status()
+returns jsonb language plpgsql stable security definer set search_path = public
+as $$
+declare items jsonb;
+begin
+  if auth.role() is distinct from 'authenticated' or not public.is_admin(auth.uid()) then
+    raise exception 'Admin access required.' using errcode = '42501';
+  end if;
+  select jsonb_agg(jsonb_build_object('name',name,'installed',
+    to_regprocedure(signature) is not null and coalesce(has_function_privilege('authenticated',to_regprocedure(signature),'EXECUTE'),false)) order by name)
+  into items from (values
+    ('Admin roles','public.admin_update_participant_role(uuid,text,text)'),
+    ('Historical imports','public.import_historical_hall_of_fame_season(integer,integer,jsonb)'),
+    ('Field freezing','public.admin_freeze_race_field(bigint)'),
+    ('Bulk drivers','public.admin_set_driver_roster_status(jsonb,boolean)'),
+    ('Bulk participants','public.admin_bulk_update_participants(text,bigint,jsonb)'),
+    ('Rules documents','public.set_league_season_rules_document(bigint,text,text)'),
+    ('Season closeout review','public.get_season_closeout_context(bigint)'),
+    ('Season completion','public.complete_league_season(bigint,bigint,timestamptz,text,jsonb)'),
+    ('Participant profile editing','public.admin_update_participant_v2(uuid,text,text,boolean,boolean,boolean,bigint)')
+  ) as capability(name,signature);
+  return jsonb_build_object('items',items);
+end;
+$$;
+revoke all on function public.get_admin_capability_status() from public, anon, service_role;
+grant execute on function public.get_admin_capability_status() to authenticated;
+commit;
