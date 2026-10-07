@@ -3,7 +3,7 @@ import { revalidatePath, revalidateTag } from "next/cache";
 import { verifyAdminRequestToken } from "@/lib/admin-request-token";
 import { sanitizeTechnicalSummary } from "@/lib/app-error-safety";
 import { SCORING_CACHE_TAG } from "@/lib/scoring-cache";
-import { canonicalSiteOrigin } from "@/lib/site-url";
+import { hasSameRequestOrigin } from "@/lib/request-origin";
 import {
   SEASON_BACKUP_FORMAT,
   SEASON_BACKUP_FORMAT_VERSION,
@@ -12,6 +12,15 @@ import {
 } from "@/lib/season-recovery";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
 import { isJson } from "@/lib/supabase/json";
+import {
+  MANUAL_BACKUP_PROTECTION_KEY,
+  RECOVERY_RETENTION_MIGRATION_FILE,
+  isRestorePointId,
+  isRetentionReviewToken,
+  parseRecoveryRetention,
+  parseRecoveryCleanupResult,
+  parseRecoveryProtectionResult
+} from "@/lib/recovery-retention";
 
 export const dynamic = "force-dynamic";
 
@@ -59,25 +68,12 @@ const errorMessage = (error: unknown): string =>
   error instanceof Error ? error.message : "Season recovery request failed.";
 
 const isSameOriginRequest = (request: Request): boolean => {
-  const origin = request.headers.get("origin");
-  if (!origin) {
-    return false;
-  }
-
-  try {
-    const expectedOrigin =
-      process.env.NODE_ENV === "production"
-        ? canonicalSiteOrigin()
-        : new URL(request.url).origin;
-    const fetchSite = request.headers.get("sec-fetch-site");
-    return (
-      new URL(origin).origin === expectedOrigin &&
-      (!fetchSite || fetchSite === "same-origin") &&
-      request.headers.get("x-mound-hounds-request") === "season-recovery"
-    );
-  } catch {
-    return false;
-  }
+  const fetchSite = request.headers.get("sec-fetch-site");
+  return (
+    hasSameRequestOrigin(request) &&
+    (!fetchSite || fetchSite === "same-origin") &&
+    request.headers.get("x-mound-hounds-request") === "season-recovery"
+  );
 };
 
 const parseRequestBody = async (request: Request): Promise<Record<string, unknown>> => {
@@ -194,13 +190,16 @@ export async function POST(request: Request) {
         return NextResponse.json({ error: "Select a valid season." }, { status: 400 });
       }
 
+      if (body.keepPermanently !== undefined && typeof body.keepPermanently !== "boolean") {
+        return NextResponse.json({ error: "Choose whether to keep this backup permanently." }, { status: 400 });
+      }
       const label =
         typeof body.label === "string" && body.label.trim()
           ? body.label.trim().slice(0, 160)
           : `Manual backup ${new Date().toISOString()}`;
       const { data, error } = await admin.supabase.rpc("create_season_restore_point_v2", {
         p_label: label,
-        p_retention_key: null,
+        p_retention_key: body.keepPermanently === true ? MANUAL_BACKUP_PROTECTION_KEY : null,
         p_season_id: seasonId,
         p_source: "manual"
       });
@@ -210,6 +209,56 @@ export async function POST(request: Request) {
 
       revalidatePath("/admin");
       return NextResponse.json({ data });
+    }
+
+    if (action === "retention-preview" || action === "cleanup") {
+      const seasonId = Number(body.seasonId);
+      if (!Number.isSafeInteger(seasonId) || seasonId <= 0) {
+        return NextResponse.json({ error: "Select a valid backup season." }, { status: 400 });
+      }
+      if (action === "retention-preview") {
+        const { data, error } = await admin.supabase.rpc("get_season_restore_point_retention", { p_season_id: seasonId });
+        if (error) throw new Error(error.code === "PGRST202"
+          ? `Apply ${RECOVERY_RETENTION_MIGRATION_FILE} to enable retention controls.` : error.message);
+        const retention = parseRecoveryRetention(data);
+        if (!retention || retention.seasonId !== seasonId) throw new Error("The cleanup preview could not be verified. Refresh Recovery before continuing.");
+        return NextResponse.json({ data: retention });
+      }
+      if (!isRetentionReviewToken(body.reviewToken)) {
+        return NextResponse.json({ error: "Review the older backups before removing them." }, { status: 400 });
+      }
+      const { data, error } = await admin.supabase.rpc("cleanup_season_restore_points", {
+        p_season_id: seasonId, p_review_token: body.reviewToken
+      });
+      if (error) throw new Error(error.code === "PGRST202"
+        ? `Apply ${RECOVERY_RETENTION_MIGRATION_FILE} to enable retention controls.` : error.message);
+      const result = parseRecoveryCleanupResult(data);
+      if (!result || result.retention.seasonId !== seasonId) {
+        throw new Error("The cleanup response could not be verified. Refresh Recovery and check the retained backups before trying again.");
+      }
+      try { revalidatePath("/admin"); } catch {
+        return NextResponse.json({ data: result, warning: "Backup cleanup completed, but the list could not refresh. Reload Recovery before another cleanup." });
+      }
+      return NextResponse.json({ data: result });
+    }
+
+    if (action === "protect") {
+      if (!isRestorePointId(body.restorePointId) || typeof body.protected !== "boolean") {
+        return NextResponse.json({ error: "Select a manual backup and its retention option." }, { status: 400 });
+      }
+      const { data, error } = await admin.supabase.rpc("set_season_restore_point_protection", {
+        p_restore_point_id: body.restorePointId, p_protected: body.protected
+      });
+      if (error) throw new Error(error.code === "PGRST202"
+        ? `Apply ${RECOVERY_RETENTION_MIGRATION_FILE} to enable retention controls.` : error.message);
+      const result = parseRecoveryProtectionResult(data);
+      if (!result || result.id !== body.restorePointId || result.protected !== body.protected) {
+        throw new Error("The retention response could not be verified. Refresh Recovery and check this backup before trying again.");
+      }
+      try { revalidatePath("/admin"); } catch {
+        return NextResponse.json({ data: result, warning: "The backup retention option was saved, but the list could not refresh. Reload Recovery before continuing." });
+      }
+      return NextResponse.json({ data: result });
     }
 
     if (action === "import") {

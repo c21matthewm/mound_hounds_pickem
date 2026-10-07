@@ -1,3 +1,4 @@
+import Link from "next/link";
 import {
   correctPickWindowQualifyingStartAction,
   createRaceAction,
@@ -69,6 +70,8 @@ export function AdminRacesWorkspace({
   seasons,
   selectedRaceSeason,
 }: AdminRacesWorkspaceProps) {
+  const schedulableSeasons = seasons.filter((season) => season.status !== "completed");
+
   return (
         <section className="mt-6 rounded-lg ui-panel border border-slate-200 bg-white p-4 sm:p-6">
         <AdminWorkspaceHeader
@@ -104,6 +107,7 @@ export function AdminRacesWorkspace({
         />
 
 
+        {schedulableSeasons.length > 0 ? (
         <form
           action={createRaceAction}
           className="mt-5 grid gap-3 md:grid-cols-6"
@@ -121,9 +125,7 @@ export function AdminRacesWorkspace({
               name="season_id"
             >
               <option value="">Select</option>
-              {seasons
-                .filter((season) => season.status !== "completed")
-                .map((season) => (
+              {schedulableSeasons.map((season) => (
                   <option key={season.id} value={season.id}>
                     {season.season_year} {season.status === "active" ? "(active)" : "(upcoming)"}
                   </option>
@@ -279,15 +281,29 @@ export function AdminRacesWorkspace({
             </SubmitButton>
           </div>
         </form>
-
+        ) : (
+          <div className="mt-5">
+            <EmptyState
+              action={
+                <Link className={actionControlClassName("primary")} href="/admin?tab=seasons">
+                  Open Seasons &amp; League
+                </Link>
+              }
+              description="Create an upcoming season in Seasons & League before adding its race calendar."
+              title="Prepare the next season"
+            />
+          </div>
+        )}
 
         <div className="mt-5 grid gap-3">
-          {races.length === 0 ? (
+          {races.length === 0 ? (schedulableSeasons.length > 0 && (
             <EmptyState
-              description="Add the first race for the selected season using the form above."
+              description={selectedRaceSeason?.status === "completed"
+                ? "This completed season has no races recorded in the app. Its final standings remain in Hall of Fame."
+                : "Add the first race for the selected season using the form above."}
               title="No races scheduled"
             />
-          ) : (
+          )) : (
             races.map((race) => (
               <details key={`race-edit-${race.id}`} className="rounded-md ui-panel border border-slate-200 bg-white">
                 <summary className="cursor-pointer px-3 py-3">

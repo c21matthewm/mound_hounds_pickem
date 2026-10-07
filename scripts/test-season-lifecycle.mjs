@@ -61,6 +61,8 @@ try{
  docker(['run','-d','--rm','--pull=never','--network=none','--name',container,'-e','POSTGRES_HOST_AUTH_METHOD=trust','postgres:16-alpine']);started=true;
  let ready=false;for(let n=0;n<60;n++){try{docker(['exec',container,'pg_isready','-h','127.0.0.1','-U','postgres']);ready=true;break;}catch{await new Promise(r=>setTimeout(r,200));}}assert.ok(ready);
  sql(bootstrap);const migration=read('supabase/migrations/20260921_season_completion.sql');sql(migration);sql(migration);
+ // Exercise lifecycle backups with the installed retention wrapper, not its older implementation.
+ sql(read('supabase/migrations/20260930_recovery_retention.sql'));
  reset();check('inactive administrator retains closeout permission',()=>assert.equal(context().historical_archive,true));
  check('participant cannot read closeout context',()=>assert.throws(()=>asUser('select public.get_season_closeout_context(26);',B),/Admin access/));
  check('anonymous cannot execute completion',()=>assert.throws(()=>sql("set role anon;select public.complete_league_season(26,6,now(),'x',null);"),/permission denied/));
@@ -101,5 +103,12 @@ try{
  try{locker.stdin.write('begin;lock public.drivers in row exclusive mode;\n\\echo LOCK_HELD\n');await locked;
  check('concurrent roster writes make completion retryable',()=>{assert.throws(()=>asUser(close()),/could not obtain lock/);assert.equal(status(),'active');});
  }finally{locker.stdin.end('rollback;\n\\q\n');await closed;}
+ reset();check('routine retention and season completion preserve the milestone together',()=>{
+  for(let n=0;n<5;n++)asUser(`select public.create_season_restore_point_v2(26,'Routine fixture ${n}','manual',null);`);
+  assert.equal(backups(),3);asUser(close());assert.equal(status(),'completed');assert.equal(backups(),4);
+  const retention=JSON.parse(asUser('select public.get_season_restore_point_retention(26);'));
+  assert.equal(retention.routineCount,3);assert.equal(retention.protectedCount,1);assert.equal(retention.cleanupCount,0);
+  assert.equal(sql("select count(*) from public.season_restore_points where source='pre_rollover';"),'1');
+ });
  console.log(`PASS: ${checks} local season lifecycle checks; no live services used.`);
 }finally{if(started)docker(['stop',container]);}

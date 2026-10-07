@@ -17,7 +17,15 @@ const nextSeason={...archivedSeason,id:7,season_year:2027,display_name:"2027 Mou
 const seasonProps={archives:[{id:6,season_year:2026,champion_team_name:"Fixture Champion",champion_total_points:100,participant_count:2,race_count:1,finalized_at:"2026-09-01T00:00:00Z"}],currentSeasonRaces:[],canFinalizeSeason:false,canRefreshArchive:false,finalSeasonRace:undefined,unpublishedSeasonRaces:[],siteOrigin:"https://fixture.example"};
 const recoverySeasons=[{id:6,seasonYear:2026,status:'completed'},{id:7,seasonYear:2027,status:'active'}];
 const backup={id:'00000000-0000-4000-8000-000000000006',season_id:6,season_year:2026,label:'Before completing 2026 season',source:'pre_rollover',retention_key:'season:6:completion',snapshot_bytes:1024,schema_version:'fixture',format_version:1,row_counts:{races:0},checksum:'fixture',created_at:'2026-09-21T12:00:00Z'};
+const routineBackups=[9,8,7,6,5].map((n,index)=>({...backup,id:`00000000-0000-4000-8000-${String(n).padStart(12,'0')}`,season_id:7,season_year:2027,label:`Routine copy ${n}`,source:'manual',retention_key:null,created_at:`2027-01-${String(20-index).padStart(2,'0')}T12:00:00Z`}));
+const protectedBackup={...routineBackups[0],id:'00000000-0000-4000-8000-000000000004',label:'Permanently kept fixture',retention_key:'manual:protected'};
+const retention={seasonId:7,seasonYear:2027,routineLimit:3,totalCount:6,totalBytes:6144,routineCount:5,protectedCount:1,cleanupCount:2,cleanupBytes:2048,reviewToken:'a'.repeat(64)};
+window.fixtureRetention=retention;
+window.fixtureProtectedBackup=protectedBackup;
 const scenes = {
+ recoveryRetention:<SeasonRecoveryCenter activeSeason={{id:7,seasonYear:2027}} seasons={recoverySeasons} selectedSeasonId={7} requestToken="fixture" restorePoints={[...routineBackups,protectedBackup]} retention={retention} />,
+ recoveryRetentionPast:<SeasonRecoveryCenter activeSeason={null} seasons={[{id:7,seasonYear:2027,status:'completed'}]} selectedSeasonId={7} requestToken="fixture" restorePoints={[...routineBackups,protectedBackup]} retention={retention} />,
+ recoveryRetentionMissing:<SeasonRecoveryCenter activeSeason={{id:7,seasonYear:2027}} seasons={recoverySeasons} selectedSeasonId={7} requestToken="fixture" restorePoints={[...routineBackups,protectedBackup]} retentionIssue="Apply the pending recovery retention migration to enable these controls." />,
  recoveryOffseason:<SeasonRecoveryCenter activeSeason={null} seasons={[recoverySeasons[0]]} selectedSeasonId={6} requestToken="fixture" restorePoints={[backup]} />,
  recoveryPast:<SeasonRecoveryCenter activeSeason={{id:7,seasonYear:2027}} seasons={recoverySeasons} selectedSeasonId={6} requestToken="fixture" restorePoints={[backup]} />,
  recoveryActive:<SeasonRecoveryCenter activeSeason={{id:7,seasonYear:2027}} seasons={recoverySeasons} selectedSeasonId={7} requestToken="fixture" restorePoints={[{...backup,season_id:7,season_year:2027,label:'2027 race checkpoint'}]} />,

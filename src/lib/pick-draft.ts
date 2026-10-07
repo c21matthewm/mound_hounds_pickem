@@ -61,12 +61,26 @@ export const parsePickDraft = (raw: string | null): PickDraft | null => {
   }
 };
 
+// The database stores a numeric speed; formatting-only edits are not a change.
+// Invalid input stays different so validation and unsaved-draft recovery remain
+// available rather than treating matching NaN values as a saved submission.
+export const pickAverageSpeedsMatch = (draft: string, saved: string): boolean => {
+  const draftText = draft.trim();
+  const savedText = saved.trim();
+  if (!draftText || !savedText) {
+    return draftText === savedText;
+  }
+  const draftSpeed = Number(draftText);
+  const savedSpeed = Number(savedText);
+  return Number.isFinite(draftSpeed) && Number.isFinite(savedSpeed) && draftSpeed === savedSpeed;
+};
+
 export const pickDraftMatchesSavedState = (
-  draft: PickDraft,
+  draft: Pick<PickDraft, "averageSpeed" | "selections">,
   saved: SavedPickState,
   groupNumbers: number[]
 ): boolean =>
-  draft.averageSpeed.trim() === saved.averageSpeed.trim() &&
+  pickAverageSpeedsMatch(draft.averageSpeed, saved.averageSpeed) &&
   normalizedSelections(draft.selections, groupNumbers).every(
     (driverId, index) =>
       driverId === normalizedSelections(saved.selections, groupNumbers)[index]

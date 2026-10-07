@@ -7,6 +7,12 @@ import {
   type SeasonRestorePreview
 } from "@/lib/season-recovery";
 import { CompactNotice, MetricStrip, SectionHeader, StatusChip } from "@/components/ui-primitives";
+import {
+  formatRecoveryBytes,
+  type RecoveryRetention,
+  type RecoveryCleanupResult,
+  type RecoveryProtectionResult
+} from "@/lib/recovery-retention";
 
 type Props = {
   activeSeason: {
@@ -17,6 +23,8 @@ type Props = {
   selectedSeasonId: number | null;
   requestToken: string;
   restorePoints: SeasonRestorePointSummary[];
+  retention?: RecoveryRetention | null;
+  retentionIssue?: string | null;
 };
 
 type RecoveryResponse<T> = {
@@ -49,7 +57,7 @@ const sourceLabel = (source: SeasonRestorePointSummary["source"]): string => {
     case "uploaded":
       return "Uploaded";
     default:
-      return "Manual";
+      return "Routine download";
   }
 };
 
@@ -93,7 +101,7 @@ const triggerDownload = (restorePointId: string): void => {
   anchor.remove();
 };
 
-export function SeasonRecoveryCenter({ activeSeason, seasons, selectedSeasonId, requestToken, restorePoints }: Props) {
+export function SeasonRecoveryCenter({ activeSeason, seasons, selectedSeasonId, requestToken, restorePoints, retention = null, retentionIssue = null }: Props) {
   const router = useRouter();
   const uploadInputRef = useRef<HTMLInputElement>(null);
   const [busyAction, setBusyAction] = useState<string | null>(null);
@@ -103,21 +111,17 @@ export function SeasonRecoveryCenter({ activeSeason, seasons, selectedSeasonId, 
   const [warning, setWarning] = useState<string | null>(null);
   const [preview, setPreview] = useState<SeasonRestorePreview | null>(null);
   const [selectedId, setSelectedId] = useState(restorePoints[0]?.id ?? "");
+  const [keepPermanently, setKeepPermanently] = useState(false);
+  const [cleanupPreview, setCleanupPreview] = useState<RecoveryRetention | null>(null);
 
   const selectedPoint = useMemo(
-    () => restorePoints.find((point) => point.id === selectedId) ?? null,
+    () => restorePoints.find((point) => point.id === selectedId) ?? (selectedId ? restorePoints[0] ?? null : null),
     [restorePoints, selectedId]
   );
   const canCreate = Boolean(activeSeason && activeSeason.id === selectedSeasonId);
   const canRestore = Boolean(activeSeason && selectedPoint?.season_id === activeSeason.id);
-  const storedBytes = restorePoints.reduce(
-    (sum, point) => sum + Number(point.snapshot_bytes ?? 0),
-    0
-  );
-  const formattedStoredSize =
-    storedBytes < 1024 * 1024
-      ? `${Math.max(0, storedBytes / 1024).toFixed(1)} KB`
-      : `${(storedBytes / (1024 * 1024)).toFixed(1)} MB`;
+  const shownBytes = restorePoints.reduce((sum, point) => sum + Number(point.snapshot_bytes ?? 0), 0);
+  const formattedStoredSize = formatRecoveryBytes(retention?.totalBytes ?? shownBytes);
 
   const runAction = async (name: string, action: () => Promise<void>) => {
     setBusyAction(name);
@@ -142,11 +146,16 @@ export function SeasonRecoveryCenter({ activeSeason, seasons, selectedSeasonId, 
       const { data: created } = await postRecoveryAction<{ id: string }>(
         {
           action: "create",
-          label: `Manual download before weekly operations ${new Date().toISOString()}`,
+          label: `${keepPermanently ? "Protected manual backup" : "Routine download"} ${new Date().toISOString()}`,
+          keepPermanently: Boolean(retention && keepPermanently),
           seasonId: activeSeason.id
         },
         requestToken
       );
+      setSelectedId(created.id);
+      setPreview(null);
+      setCleanupPreview(null);
+      setConfirmationYear("");
       setMessage("Backup created and download started. Store the JSON file somewhere outside the app.");
       triggerDownload(created.id);
       router.refresh();
@@ -171,6 +180,8 @@ export function SeasonRecoveryCenter({ activeSeason, seasons, selectedSeasonId, 
       );
       setSelectedId(imported.id);
       setPreview(null);
+      setCleanupPreview(null);
+      setConfirmationYear("");
       setMessage(
         `${imported.seasonYear} backup validated and imported. Preview it before considering a restore.`
       );
@@ -201,7 +212,7 @@ export function SeasonRecoveryCenter({ activeSeason, seasons, selectedSeasonId, 
 
   const restore = () =>
     runAction("restore", async () => {
-      if (!selectedPoint || !preview || !canRestore) {
+      if (!selectedPoint || !preview || preview.id !== selectedPoint.id || !canRestore) {
         throw new Error("Only a previewed backup for the active season can be restored.");
       }
       if (confirmationYear !== String(selectedPoint.season_year)) {
@@ -231,6 +242,57 @@ export function SeasonRecoveryCenter({ activeSeason, seasons, selectedSeasonId, 
       setMessage(
         `Season restored successfully. A pre-restore safety point (${restored.safetyPointId}) was retained.`
       );
+      setWarning(refreshWarning ?? null);
+      router.refresh();
+    });
+
+  const reviewCleanup = () =>
+    runAction("retention-preview", async () => {
+      if (!retention || !selectedSeasonId) throw new Error("Retention controls are not available for this season.");
+      const { data } = await postRecoveryAction<RecoveryRetention>(
+        { action: "retention-preview", seasonId: selectedSeasonId }, requestToken
+      );
+      setCleanupPreview(data);
+    });
+
+  const cleanup = () =>
+    runAction("cleanup", async () => {
+      if (!cleanupPreview || cleanupPreview.seasonId !== selectedSeasonId || cleanupPreview.cleanupCount === 0) {
+        throw new Error("Review the older backups before removing them.");
+      }
+      if (!window.confirm(`Remove ${cleanupPreview.cleanupCount} older routine backups for ${cleanupPreview.seasonYear}? The newest three routine backups and all points excluded from routine cleanup will be kept. League records and image files will not change.`)) return;
+      try {
+        const { data, warning: refreshWarning } = await postRecoveryAction<RecoveryCleanupResult>(
+          { action: "cleanup", seasonId: selectedSeasonId, reviewToken: cleanupPreview.reviewToken }, requestToken
+        );
+        setCleanupPreview(null);
+        setSelectedId("");
+        setPreview(null);
+        setConfirmationYear("");
+        setMessage(`Removed ${data.deletedCount} older routine backups (${formatRecoveryBytes(data.deletedBytes)} of snapshot data).`);
+        setWarning(refreshWarning ?? null);
+        router.refresh();
+      } catch (cleanupError) {
+        // A stale preview or an uncertain network outcome needs a fresh review.
+        setCleanupPreview(null);
+        throw cleanupError;
+      }
+    });
+
+  const toggleProtection = () =>
+    runAction("protect", async () => {
+      if (!retention || !selectedPoint || selectedPoint.source !== "manual") {
+        throw new Error("Select a manual backup to change its retention option.");
+      }
+      const protect = selectedPoint.retention_key === null;
+      if (!protect && !window.confirm("This backup may be removed after the next backup/checkpoint creation or cleanup. Return it to routine retention?")) return;
+      const { warning: refreshWarning } = await postRecoveryAction<RecoveryProtectionResult>(
+        { action: "protect", restorePointId: selectedPoint.id, protected: protect }, requestToken
+      );
+      setCleanupPreview(null);
+      setPreview(null);
+      setConfirmationYear("");
+      setMessage(protect ? "This backup will be kept permanently until you release it." : "This backup now follows routine retention. It has not been deleted.");
       setWarning(refreshWarning ?? null);
       router.refresh();
     });
@@ -266,10 +328,14 @@ export function SeasonRecoveryCenter({ activeSeason, seasons, selectedSeasonId, 
       <MetricStrip
         className="mt-4 grid-cols-2"
         items={[
-          { label: "Stored points", value: restorePoints.length },
-          { label: "Stored size", value: formattedStoredSize }
+          { label: retention ? "Stored points" : "Shown points", value: retention?.totalCount ?? restorePoints.length },
+          { label: retention ? "Snapshot data" : "Shown snapshot data", value: formattedStoredSize }
         ]}
       />
+
+      <p className="mt-2 text-xs text-slate-500">Snapshot sizes describe backup contents, not physical database disk usage.</p>
+      {retention && retention.totalCount > restorePoints.length ? <CompactNotice className="mt-3">Showing the newest {restorePoints.length} points in the selector. Totals and cleanup review include all {retention.totalCount} points for this season.</CompactNotice> : null}
+      {retentionIssue ? <CompactNotice className="mt-3" tone="warning">{retentionIssue} Existing downloads, imports, and restores remain available.</CompactNotice> : null}
 
       {error ? <CompactNotice className="mt-4" tone="danger">{error}</CompactNotice> : null}
       {message ? <CompactNotice className="mt-4" tone="success">{message}</CompactNotice> : null}
@@ -293,6 +359,12 @@ export function SeasonRecoveryCenter({ activeSeason, seasons, selectedSeasonId, 
           </button>
         </div>
 
+        {retention ? <label className="mt-3 flex items-start gap-2 text-sm text-slate-700">
+          <input checked={keepPermanently} className="mt-1" disabled={!canCreate || busyAction !== null}
+            onChange={event => setKeepPermanently(event.target.checked)} type="checkbox" />
+          <span>Keep this backup permanently<span className="mt-0.5 block text-xs text-slate-500">Otherwise, only the newest three routine downloads for this season are kept in the app.</span></span>
+        </label> : null}
+
         <ol className="mt-4 grid gap-3 text-sm text-slate-700 sm:grid-cols-3">
           <li className="border-l-2 border-cyan-500 pl-3">
             <strong className="block text-slate-950">1. Download</strong>
@@ -309,6 +381,34 @@ export function SeasonRecoveryCenter({ activeSeason, seasons, selectedSeasonId, 
         </ol>
       </div>
 
+      {retention ? <section aria-labelledby="backup-retention-title" className="mt-5 min-w-0 rounded-lg border border-slate-200 p-4">
+        <h3 id="backup-retention-title" className="text-base font-semibold text-slate-950">Routine backup retention</h3>
+        <p className="mt-1 text-sm leading-6 text-slate-600">The newest three routine downloads for each season are kept automatically when a fresh backup or checkpoint is created. Older routine copies can also be removed below. Permanently kept manual backups, imports, safety points, and season milestones are excluded from this cleanup.</p>
+        <MetricStrip className="mt-3 grid-cols-2 sm:grid-cols-3" items={[
+          { label: "Routine downloads", value: retention.routineCount },
+          { label: "Other recovery points", value: retention.protectedCount },
+          { label: "Older routine copies", value: retention.cleanupCount }
+        ]} />
+        <button type="button" className="mt-3 min-h-10 rounded-md border border-slate-300 px-3 py-2 text-sm font-semibold disabled:opacity-50"
+          disabled={busyAction !== null || retention.cleanupCount === 0} onClick={reviewCleanup}>
+          {busyAction === "retention-preview" ? "Reviewing..." : "Review older backups"}
+        </button>
+        {retention.cleanupCount === 0 && !cleanupPreview ? <p className="mt-2 text-sm text-slate-600">There are no older routine copies to remove.</p> : null}
+        {cleanupPreview ? <div className="mt-3 min-w-0 space-y-3">
+          <CompactNotice tone={cleanupPreview.cleanupCount > 0 ? "warning" : "info"}>
+            {cleanupPreview.cleanupCount > 0
+              ? `This will remove ${cleanupPreview.cleanupCount} older routine backups for ${cleanupPreview.seasonYear}, containing ${formatRecoveryBytes(cleanupPreview.cleanupBytes)} of snapshot data. The newest three routine copies and other recovery points will be kept. Season records and images will not change.`
+              : "There are no older routine copies to remove."}
+          </CompactNotice>
+          <button type="button" className="min-h-10 rounded-md border border-red-300 bg-red-50 px-3 py-2 text-sm font-semibold text-red-800 disabled:opacity-50"
+            disabled={busyAction !== null || cleanupPreview.cleanupCount === 0} onClick={cleanup}>
+            {busyAction === "cleanup" ? "Removing..." : "Remove reviewed backups"}
+          </button>
+          <button type="button" className="ml-2 min-h-10 px-3 py-2 text-sm font-semibold text-slate-600 disabled:opacity-50"
+            disabled={busyAction !== null} onClick={() => setCleanupPreview(null)}>Cancel review</button>
+        </div> : null}
+      </section> : null}
+
       <div className="mt-5 grid min-w-0 gap-5 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
         <section className="min-w-0">
           <h3 className="text-base font-semibold text-slate-950">Choose a restore point</h3>
@@ -322,12 +422,13 @@ export function SeasonRecoveryCenter({ activeSeason, seasons, selectedSeasonId, 
             </span>
             <select
               className="w-full rounded-md ui-control-border border border-slate-300 bg-white px-3 py-2 text-sm"
+              disabled={busyAction !== null}
               onChange={(event) => {
                 setSelectedId(event.target.value);
                 setPreview(null);
                 setConfirmationYear("");
               }}
-              value={selectedId}
+              value={selectedPoint?.id ?? ""}
             >
               <option value="">Select a restore point</option>
               {restorePoints.map((point) => (
@@ -342,7 +443,7 @@ export function SeasonRecoveryCenter({ activeSeason, seasons, selectedSeasonId, 
             <div className="mt-3 rounded-md ui-panel border border-slate-200 bg-white px-3 py-3">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <StatusChip tone={sourceTone(selectedPoint.source)}>
-                  {sourceLabel(selectedPoint.source)}
+                  {selectedPoint.source === "manual" && selectedPoint.retention_key !== null ? "Kept permanently" : sourceLabel(selectedPoint.source)}
                 </StatusChip>
                 <span className="text-xs text-slate-500">
                   Schema {selectedPoint.schema_version}
@@ -374,6 +475,11 @@ export function SeasonRecoveryCenter({ activeSeason, seasons, selectedSeasonId, 
                 >
                   {busyAction === "preview" ? "Comparing..." : "Preview Restore"}
                 </button>
+                {retention && selectedPoint.source === "manual" ? <button
+                  className="min-h-10 rounded-md border border-slate-300 px-3 py-2 text-sm font-semibold disabled:opacity-50"
+                  disabled={busyAction !== null} onClick={toggleProtection} type="button">
+                  {busyAction === "protect" ? "Saving..." : selectedPoint.retention_key === null ? "Keep permanently" : "Return to routine retention"}
+                </button> : null}
               </div>
             </div>
           ) : (
@@ -489,8 +595,9 @@ export function SeasonRecoveryCenter({ activeSeason, seasons, selectedSeasonId, 
 
       <CompactNotice className="mt-5">
         Automatic storage is bounded: only the newest checkpoint for each race and a small recent
-        correction buffer are retained. Manual downloads, uploaded files, pre-restore points, and
-        season milestones are preserved.
+        correction buffer are retained. {retention
+          ? "Routine downloads keep the newest three copies per season. Manual backups marked to keep permanently, uploaded files, pre-restore points, and season milestones are preserved."
+          : "Manual downloads, uploaded files, pre-restore points, and season milestones are preserved until routine retention is installed."}
       </CompactNotice>
 
       <CompactNotice className="mt-3">

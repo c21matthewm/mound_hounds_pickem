@@ -1,27 +1,13 @@
 import { NextResponse } from "next/server";
 import { reportAppError } from "@/lib/app-error-reporter";
 import { sanitizeErrorRoute } from "@/lib/app-error-safety";
-import { canonicalSiteOrigin } from "@/lib/site-url";
+import { hasSameRequestOrigin } from "@/lib/request-origin";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
 
 const MAX_REQUEST_BYTES = 4096;
 
-const sameOrigin = (request: Request): boolean => {
-  const origin = request.headers.get("origin");
-  if (!origin) return false;
-
-  try {
-    const expected = process.env.NODE_ENV === "production"
-      ? canonicalSiteOrigin()
-      : new URL(request.url).origin;
-    return new URL(origin).origin === expected;
-  } catch {
-    return false;
-  }
-};
-
 export async function POST(request: Request) {
-  if (!sameOrigin(request)) {
+  if (!hasSameRequestOrigin(request)) {
     return NextResponse.json({ error: "Invalid error report origin." }, { status: 403 });
   }
 

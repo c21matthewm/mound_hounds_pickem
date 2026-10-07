@@ -1,6 +1,6 @@
 # Mound Hounds Pick'em Project Context
 
-Last reviewed: 2026-09-20
+Last reviewed: 2026-10-07
 
 This is the working-memory companion to `README.md`. Keep the README focused on setup and user-facing operation; keep this file updated whenever routes, schema, scoring, admin workflows, auth behavior, or testing strategy changes.
 
@@ -44,7 +44,11 @@ development uses port 3007 with hostname `0.0.0.0`; a phone needs the computer's
 - `/feedback` records participant bug/improvement submissions.
 - `/rules` serves a validated active-season rules URL/PDF, with the bundled 2026 PDF as the 2026 fallback. Seasons & League can publish a PDF or set its URL through one atomic rules/audit RPC; invalid legacy URLs are not embedded.
 - `/admin` defaults to Race Week and exposes Seasons & League, Participants, Drivers & Groups, Race Calendar, System Health, Recovery and Feedback. Legacy `tab=results` opens Race Week’s Results stage. See `docs/ADMIN_EXPANSION_PROGRESS.md` for implemented features, required optional migrations and remaining plan items.
-- `/api/admin/season-backups` is an app-admin-authenticated JSON backup, preview, import, and restore endpoint.
+- `/api/admin/season-backups` is an app-admin-authenticated JSON backup, preview, import, restore,
+  protection and reviewed-retention endpoint. State-changing requests validate the request token
+  and origin. Recovery and browser error reporting share `src/lib/request-origin.ts`: production
+  uses the configured canonical origin; development uses the actual Host because Next can put
+  its bind address in Request.url. Forwarded host/protocol headers are not trusted.
 - `/api/cron/fantasy-winner` finalizes due race winners.
 - `/api/cron/pick-reminders` sends due pick reminders.
 
@@ -94,8 +98,11 @@ a fresh export from the original stored point rather than silently bypassing val
 - `season_registration_secrets`: one-way hashes for per-season private invite codes; authenticated clients cannot read this table.
 - `drivers`: active/inactive INDYCAR drivers with image URL, championship points, current standing, and current group number.
 - `races`: race metadata, `results_status` (`draft` or `published`), publication time, `pick_format` (`standard` or `indy_500`), `pick_window_key`, qualifying/race start, payout, official speed, winner fields, and archive status. Two consecutive standard races may share a pick-window key and qualifying deadline while remaining independently scored.
-- `picks`: one authoritative current row per user/race with average speed, six required standard driver IDs, and two nullable Indy-only driver IDs. Each successful resubmission atomically replaces this scoring row.
-- `pick_submission_versions`: append-only audit history for successful pick saves; these rows are not used directly for scoring.
+- `picks`: one authoritative current row per user/race with average speed, six required standard
+  driver IDs, and two nullable Indy-only driver IDs. Actual resubmission changes atomically replace
+  this scoring row; identical normalized data preserves its timestamp.
+- `pick_submission_versions`: append-only audit history for first saves and genuine pick/speed
+  changes; identical submissions append no version. These rows are not used directly for scoring.
 - `app_error_events`: admin-only, sanitized application incidents. Repeated errors are grouped; resolved incidents expire after 30 days and total retained incidents are capped at 500.
 - Shared error handling recognizes Supabase/PostgREST objects' string `message` fields as well as ordinary errors and strings. Participant messages still use an explicit allowlist, technical summaries are redacted, and database `details`/`hint` fields are not included.
 - `results`: official driver points per race.
@@ -127,10 +134,27 @@ A seventh, `20260921_season_completion.sql`, adds explicit closeout, guarded act
 off-season profile edits and nine capability checks in System Health. This seventh migration
 was confirmed installed by the administrator; it changes no season status on installation.
 Its four new RPC declarations were regenerated from the installed schema and verified with
-`db:types:check` on 2026-09-22. The administrator will complete 2026 later and prepare 2027
-when official season information is available. All 14 affected function/trigger
+`db:types:check` on 2026-09-22. Read-only checks on 2026-10-07 confirmed 2026 is completed;
+there is no active season and 2027 has not been created. It will be prepared when official season
+information is available. All 14 affected function/trigger
 definitions match `supabase/schema.sql`. The expected base version remains
 `20260904_portable_season_backups_v2`; optional capabilities have separate diagnostics.
+
+September 30 storage/pick improvements require, in order,
+`20260930_idempotent_pick_saves.sql`, `20260930_recovery_retention.sql`, and
+`20260930_storage_and_pick_capabilities.sql`. All three are confirmed installed as of 2026-10-07.
+Signed-in System Health shows eleven installed capabilities, including **Routine backup retention**
+and **Unchanged pick saves**. `npm run db:types` regenerated the deployed contract, its diff was
+reviewed and `npm run db:types:check` passed. The regeneration also includes two owner-only
+maintenance functions; their presence in service-role introspection does not grant execution to
+participants or administrators. See `docs/RELEASE_REVIEW_20261007.md` for the verification record.
+Installation deletes no recovery points and changes no season status. Fresh backup/checkpoint creation and
+reviewed cleanup retain the newest three manual points per season; a manual point with a non-null
+`retention_key` is excluded. Imported/safety/milestone points and existing automatic/correction
+policies are unchanged. Protection and cleanup are admin operations; stale cleanup reviews fail.
+
+Race Calendar hides the Add Race form when only completed seasons exist, and links to Seasons &
+League to prepare the next year. Existing active/upcoming season scheduling remains available.
 
 The real 2025/2026 spreadsheet archives are already present. The experimental-season reset is
 complete and must not be repeated. Future archives come from normal app finalization; historical
@@ -169,7 +193,16 @@ import is create-only and never needs accounts or per-race records from the old 
 - Participant selection supports active/upcoming season enrollment and atomic batches of up to 100 accounts. Eligibility is account-wide; register/decline applies to the selected season. Stale state or forbidden removal with submitted picks rolls the entire batch back. Individual profile edits carry the expected active-season ID (explicit null between seasons). Off-season edits preserve registrations; stale forms cannot affect a newly activated season. Routine registration stays self-service.
 - Drivers supports atomic activation/deactivation batches of up to 100 selected records, recalculating current groups while retaining points, opening seeds and saved race fields. Filtering missing photos preserves unsaved row forms and reports hidden selected records.
 - Admin data loading is tab-scoped. The Results workspace defaults to the next unpublished race and loads picks, result rows, race-driver groups, imports, and scoring audit data for only that selected race.
-- Race management loads one selected season at a time. Recovery lists backups by selected season, including completed seasons after closeout. Download/comparison remains available between seasons; creating a fresh backup and restoring remain active-season operations. Existing checksums, safety snapshots and transactional restore safeguards are retained.
+- Race management loads one selected season at a time. Recovery lists backups by selected season,
+  including completed seasons after closeout. Download/comparison, protection and reviewed cleanup
+  remain available between seasons; creating a fresh backup and restoring remain active-season
+  operations. Storage totals include all points for the selected year even when the selector is
+  capped. Snapshot byte totals describe payload sizes. Existing checksums, safety snapshots and
+  transactional restore safeguards are retained.
+- Pick form comparison uses numeric speed equality, shows **Already saved** for unchanged existing
+  submissions, and keeps edits and first saves available. The atomic RPC's conditional upsert
+  still runs insertion validation and locks; unchanged retries do not update timestamps/history.
+  Draft recovery uses the same comparison and eight-group mobile navigation remains bounded.
 - Race Week owns selected-race preparation, snapshot/current-group preview, explicit guarded field freezing, submission monitoring, reminders, results and winner controls. Countdown rendering is local and does not poll. Navigation attention counts use bounded head queries and preserve unknown state on failures.
 - System Health owns schema/cron/errors and on-demand due-winner checks. Audit history uses 25-event cursor pagination, literal summary search, exact action/entity filters, and separate bounded/redacted before/after detail loading; it does not fetch every audit payload for each page.
 - Seasons owns lifecycle, historical imports, fragment-based registration links and rules PDFs. Both typed URL edits and uploads use expected previous URL checks and one rules/audit transaction. Participants owns role delegation and bounded admin-only email lookup.
@@ -214,6 +247,16 @@ import is create-only and never needs accounts or per-race records from the old 
   Docker container with no network and no application credentials. It requires Docker and an
   already-cached PostgreSQL image; see `docs/SEASON_RECOVERY.md`. It is opt-in and is not part of
   `npm run verify`.
+
+- `npm run test:recovery:retention` exercises the three-copy routine limit, protection, reviewed
+  cleanup and stale-review rejection in a fresh network-disabled `postgres:16-alpine` container.
+  It also checks that existing automatic/correction policies and other recovery points remain intact.
+- `npm run test:picks:db` covers first/genuine/unchanged saves, six/eight groups, authorization,
+  season/enrollment/deadline/field/result gates, timestamp/version preservation, concurrent retries
+  and doubleheader navigation in a disposable network-disabled `postgres:16-alpine` container.
+- `npm run test:picks:ui` covers the actual form, mobile layouts, edits/reverts, first saves,
+  numeric speed formatting and draft recovery with fictional props and all browser requests blocked.
+  These focused runners do not load application credentials or contact live services.
 
 - Playwright config starts `npm run dev -- --port 3007` unless `PW_USE_EXISTING_SERVER=1` is set.
 - Read-only production smoke: `tests/e2e/production-readonly.spec.ts` checks public pages and protected redirects without creating data.

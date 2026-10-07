@@ -102,7 +102,7 @@ try {
   await page.locator('main').waitFor();
   return page;
  }
- for(const name of ['drivers','historical','invite','participants','bulk','rules','closeout','offseason','recoveryOffseason','recoveryPast','recoveryActive'])for(const width of [320,375,390,768,1280]){
+ for(const name of ['drivers','historical','invite','participants','bulk','rules','closeout','offseason','recoveryOffseason','recoveryPast','recoveryActive','recoveryRetention','recoveryRetentionPast','recoveryRetentionMissing'])for(const width of [320,375,390,768,1280]){
   const page=await scene(name,width);
   const overflow=await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth+1);
   assert.equal(overflow,false,`${name} overflow at ${width}`);checks++;
@@ -175,6 +175,80 @@ try {
     }
     checks++;await page.close();
   }
+  async function retentionScene(name='recoveryRetention',width=390) {
+    const fixturePage=await scene(name,width);
+    await fixturePage.evaluate(()=>{
+      window.fixtureRecovery=[];window.fixtureDownloads=[];window.fixtureCleanupError=false;
+      // Record download intent without making even a local HTTP request.
+      HTMLAnchorElement.prototype.click=function(){window.fixtureDownloads.push(this.getAttribute('href'));};
+      window.fetch=async(url,options)=>{
+        if(url!=='/api/admin/season-backups'||options?.method!=='POST')throw new Error('Unexpected retention fixture request');
+        const request=JSON.parse(options.body);window.fixtureRecovery.push(request);
+        let data;
+        if(request.action==='retention-preview')data=window.fixtureRetention;
+        else if(request.action==='cleanup'){
+          if(window.fixtureCleanupError)return new Response(JSON.stringify({error:'Backups changed. Review again before cleanup.'}),{status:400,headers:{'Content-Type':'application/json'}});
+          data={deletedCount:2,deletedBytes:2048,retention:{...window.fixtureRetention,totalCount:4,totalBytes:4096,routineCount:3,cleanupCount:0,cleanupBytes:0}};
+        }
+        else if(request.action==='protect')data={id:request.restorePointId,protected:request.protected,retentionKey:request.protected?'manual:protected':null,retention:window.fixtureRetention};
+        else if(request.action==='create')data={id:'00000000-0000-4000-8000-000000000099'};
+        else if(request.action==='preview')data={id:request.restorePointId,seasonId:7,seasonYear:2027,createdAt:'2027-01-20T12:00:00Z',differences:{races:{backupCount:0,currentCount:0,differentRows:0}}};
+        else throw new Error('Unexpected retention action: '+request.action);
+        return new Response(JSON.stringify({data}),{headers:{'Content-Type':'application/json'}});
+      };
+    });
+    return fixturePage;
+  }
+  for(const name of ['recoveryRetention','recoveryRetentionPast']){
+    page=await retentionScene(name,320);
+    await page.getByRole('button',{name:'Review older backups',exact:true}).click();
+    await page.getByText('This will remove 2 older routine backups',{exact:false}).waitFor();
+    assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth+1),false);checks++;
+    await page.evaluate(()=>{window.confirm=()=>false;});
+    await page.getByRole('button',{name:'Remove reviewed backups',exact:true}).click();
+    assert.equal((await page.evaluate(()=>window.fixtureRecovery)).filter(r=>r.action==='cleanup').length,0);checks++;
+    await page.evaluate(()=>{window.confirm=()=>true;});
+    await page.getByRole('button',{name:'Remove reviewed backups',exact:true}).click();
+    await page.getByText('Removed 2 older routine backups',{exact:false}).waitFor();
+    call=(await page.evaluate(()=>window.fixtureRecovery)).at(-1);
+    assert.equal(call.action,'cleanup');assert.equal(call.seasonId,7);assert.equal(call.reviewToken,'a'.repeat(64));
+    assert.equal(await page.getByRole('combobox',{name:/Restore point/}).inputValue(),'');
+    assert.equal(await page.getByRole('button',{name:'Remove reviewed backups',exact:true}).count(),0);checks++;await page.close();
+  }
+  page=await retentionScene();
+  await page.getByRole('button',{name:'Preview Restore',exact:true}).click();
+  await page.getByLabel('Type 2027 to confirm',{exact:true}).fill('2027');
+  await page.getByRole('button',{name:'Keep permanently',exact:true}).click();
+  await page.getByText('This backup will be kept permanently until you release it.',{exact:true}).waitFor();
+  call=(await page.evaluate(()=>window.fixtureRecovery)).at(-1);assert.equal(call.action,'protect');assert.equal(call.protected,true);assert.equal(call.restorePointId,'00000000-0000-4000-8000-000000000009');
+  assert.equal(await page.getByRole('button',{name:'Restore This Season',exact:true}).count(),0);checks++;
+  await page.getByRole('combobox',{name:/Restore point/}).selectOption('00000000-0000-4000-8000-000000000004');
+  await page.evaluate(()=>{window.confirm=()=>false;});
+  const release=page.getByRole('button',{name:'Return to routine retention',exact:true});await release.click();
+  assert.equal((await page.evaluate(()=>window.fixtureRecovery)).filter(r=>r.action==='protect').length,1);checks++;
+  await page.evaluate(()=>{window.confirm=()=>true;});await release.click();
+  await page.getByText('This backup now follows routine retention. It has not been deleted.',{exact:true}).waitFor();
+  call=(await page.evaluate(()=>window.fixtureRecovery)).at(-1);assert.equal(call.protected,false);assert.equal(call.restorePointId,'00000000-0000-4000-8000-000000000004');checks++;
+  await page.getByLabel('Keep this backup permanently',{exact:false}).check();
+  await page.getByRole('button',{name:'Create & Download Backup',exact:true}).click();
+  await page.getByText('Backup created and download started.',{exact:false}).waitFor();
+  call=(await page.evaluate(()=>window.fixtureRecovery)).at(-1);assert.equal(call.action,'create');assert.equal(call.keepPermanently,true);assert.equal(call.seasonId,7);
+  assert.deepEqual(await page.evaluate(()=>window.fixtureDownloads),['/api/admin/season-backups?id=00000000-0000-4000-8000-000000000099']);checks++;await page.close();
+  page=await retentionScene();
+  await page.getByRole('button',{name:'Review older backups',exact:true}).click();
+  await page.getByRole('button',{name:'Cancel review',exact:true}).click();
+  assert.equal(await page.getByRole('button',{name:'Remove reviewed backups',exact:true}).count(),0);checks++;
+  await page.getByRole('button',{name:'Review older backups',exact:true}).click();
+  await page.evaluate(()=>{window.fixtureCleanupError=true;});
+  await page.getByRole('button',{name:'Remove reviewed backups',exact:true}).click();
+  await page.getByText('Backups changed. Review again before cleanup.',{exact:true}).waitFor();
+  assert.equal(await page.getByRole('button',{name:'Remove reviewed backups',exact:true}).count(),0);
+  assert.equal(await page.getByRole('button',{name:'Review older backups',exact:true}).isEnabled(),true);checks++;await page.close();
+  page=await retentionScene('recoveryRetentionMissing');
+  assert.equal(await page.getByRole('button',{name:'Review older backups',exact:true}).count(),0);
+  assert.equal(await page.getByRole('button',{name:'Keep permanently',exact:true}).count(),0);
+  assert.equal(await page.getByRole('button',{name:'Download',exact:true}).isEnabled(),true);
+  assert.equal(await page.getByRole('button',{name:'Create & Download Backup',exact:true}).isEnabled(),true);checks++;await page.close();
   assert.deepEqual(errors, [], "Fixture pages raised browser exceptions.");
   assert.deepEqual(blockedRequests, [], "A component attempted a network request; every request was blocked.");
   console.log(`PASS: ${checks} offline rendered layout and interaction checks; no browser network requests permitted. Screenshots: ${output}`);

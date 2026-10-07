@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   parsePickDraft,
+  pickAverageSpeedsMatch,
   pickDraftMatchesSavedState,
   shouldOfferPickDraftRecovery,
   type PickDraft
@@ -59,5 +60,29 @@ describe("pick draft recovery", () => {
         groupNumbers
       )
     ).toBe(false);
+  });
+});
+
+describe("saved pick comparisons", () => {
+  it("compares speed numerically without hiding changed or invalid input", () => {
+    expect(pickAverageSpeedsMatch(" 135.50 ", "135.500")).toBe(true);
+    expect(pickAverageSpeedsMatch("135.501", "135.500")).toBe(false);
+    expect(pickAverageSpeedsMatch("135.5004", "135.500")).toBe(false);
+    expect(pickAverageSpeedsMatch("", "135.500")).toBe(false);
+    expect(pickAverageSpeedsMatch("invalid", "invalid")).toBe(false);
+    expect(pickAverageSpeedsMatch("Infinity", "Infinity")).toBe(false);
+  });
+
+  it("does not recover a formatting-only speed edit", () => {
+    const saved = { averageSpeed: "135.500", selections: draft.selections, savedAt: "2027-05-01T11:00:00Z" };
+    expect(shouldOfferPickDraftRecovery({ ...draft, averageSpeed: "135.5" }, saved, groupNumbers)).toBe(false);
+  });
+
+  it("checks all eight Indy groups but ignores absent standard groups", () => {
+    const saved = { averageSpeed: draft.averageSpeed, savedAt: draft.savedAt, selections: { ...draft.selections, 7: 25, 8: 29 } };
+    const matching = { ...draft, selections: { ...saved.selections } };
+    expect(pickDraftMatchesSavedState(matching, saved, [...groupNumbers, 7, 8])).toBe(true);
+    expect(pickDraftMatchesSavedState({ ...matching, selections: { ...matching.selections, 8: 30 } }, saved, [...groupNumbers, 7, 8])).toBe(false);
+    expect(pickDraftMatchesSavedState(draft, { ...saved, selections: { ...draft.selections, 7: null, 8: null } }, groupNumbers)).toBe(true);
   });
 });

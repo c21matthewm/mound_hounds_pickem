@@ -7,12 +7,51 @@ The one-time transition from experimental app data is **complete**. The
 record, not a step to run again. Both genuine 2025 and 2026 Hall of Fame archives are present;
 normal future seasons use the existing finalization and rollover workflow.
 
+## Install routine retention and unchanged pick saves
+
+The September 30 migrations are installed in the current project. On 2026-10-07, signed-in
+System Health reported all eleven capabilities **Installed**, and the regenerated deployed types
+passed `db:types:check`. The 2026 season is completed; no active season or 2027 season exists yet.
+See [the verification report](RELEASE_REVIEW_20261007.md). The sequence below is for other
+installations; it does not need to be repeated here:
+
+| Order | File under `supabase/migrations/` | Enables |
+| --- | --- | --- |
+| 1 | [20260930_idempotent_pick_saves.sql](../supabase/migrations/20260930_idempotent_pick_saves.sql) | Unchanged pick saves preserve the original timestamp and submission history |
+| 2 | [20260930_recovery_retention.sql](../supabase/migrations/20260930_recovery_retention.sql) | Three routine backup points per season, permanent protection, reviewed cleanup and size totals |
+| 3 | [20260930_storage_and_pick_capabilities.sql](../supabase/migrations/20260930_storage_and_pick_capabilities.sql) | System Health diagnostics for both changes |
+
+1. In **Supabase > SQL Editor > New query**, paste the entire first file and select **Run**.
+   Confirm success, then repeat in a new query for each remaining file. Each file has its own
+   transaction; stop and inspect any error before continuing.
+2. Open **Admin > System Health** and confirm **Routine backup retention** and **Unchanged pick
+   saves** both show **Installed**. The base schema version remains
+   `20260904_portable_season_backups_v2`; the original nine capabilities also remain available.
+3. Run `npm run db:types` against the updated database, inspect the generated diff, then run
+   `npm run verify:release`. The current project's types were regenerated and checked against
+   the installed schema on 2026-10-07; the report records the isolated build used for verification.
+4. In **Admin > Recovery**, inspect the selected season's storage totals and review any older
+   routine copies before removing them. Installation itself deletes no restore points.
+
+Routine manual downloads retain the newest three points per season. Fresh backup/checkpoint
+creation applies this policy, as does reviewed cleanup. **Keep this backup
+permanently** protects a new point; **Keep permanently** protects an existing manual point.
+**Return to routine retention** releases protection without deleting the point. Imported files,
+pre-restore safety points and season milestones remain excluded from routine cleanup. Existing
+automatic checkpoint/correction retention is unchanged. See [Season Recovery](SEASON_RECOVERY.md)
+for the exact review and cleanup procedure, including completed seasons.
+
+The participant form shows **Already saved** when its selections and numeric speed match the
+saved submission. Editing re-enables Save. A database retry with identical data also creates no
+new version or timestamp change; genuine edits retain their normal audit history and doubleheader
+navigation.
+
 ## Enable the new Admin capabilities
 
 The administrator confirmed all seven capability migrations are installed and the app looked
 correct during review. On 2026-09-22, database types were regenerated and `db:types:check`
 passed. The full sequence below is retained for other installations; do not rerun it for this
-project. Completing 2026 remains an intentional Admin decision, and 2027 will be prepared when
+project. Read-only checks on 2026-10-07 confirmed 2026 is completed. 2027 will be prepared when
 the official season information is available. The application schema version
 remains `20260904_portable_season_backups_v2`; a healthy base schema check does not prove that
 these optional RPCs have been installed.
@@ -34,8 +73,9 @@ these optional RPCs have been installed.
 | 6 | [20260919_add_season_rules_documents.sql](../supabase/migrations/20260919_add_season_rules_documents.sql) | Atomic rules URL changes and the public PDF bucket |
 | 7 | [20260921_season_completion.sql](../supabase/migrations/20260921_season_completion.sql) | Explicit season completion, guarded activation, off-season profile editing and capability diagnostics |
 
-5. Refresh **Admin > System Health**. Confirm the base schema contract is healthy and all nine
-   **Admin capabilities** show **Installed**. This verifies function availability and authenticated
+5. Refresh **Admin > System Health**. Confirm the base schema contract is healthy and all nine original
+   **Admin capabilities** show **Installed** (plus the two September 30 capabilities after their
+   installation). This verifies function availability and authenticated
    execution permission, not a live mutation test.
 6. Optionally run this read-only SQL to confirm that the capability functions exist:
 
@@ -354,6 +394,8 @@ configuration change. Use Race Week's **Picks & Reminders** stage for the select
 readiness and previews. Confirm:
 
 - schema version is `20260904_portable_season_backups_v2` and the database contract reports healthy;
+- **Routine backup retention** and **Unchanged pick saves** report **Installed** after applying
+  the September 30 migrations;
 - the expected season is active and the registered-team count is reasonable;
 - the next race and previous-results gate are correct;
 - the pick-email enabled state matches Vercel;
@@ -382,8 +424,8 @@ The latest matching database migrations are
 `supabase/migrations/20260831_retire_sms_participant_data.sql`, and
 `supabase/migrations/20260904_fix_portable_season_backups.sql`. Run them in filename order in
 Supabase SQL Editor before deploying a database version that lacks them. Do not rerun migrations
-already applied. The six newer optional Admin capability migrations are listed at the top of this
-guide; they do not change the base schema version or reopen registration.
+already applied. The seven earlier Admin capability migrations and the three September 30 migrations are listed
+at the top of this guide; they do not change the base schema version or reopen registration.
 
 Use **Admin audit log** in System Health to search event summaries or filter by exact action/entity
 type. **Older events** and **Newer events** navigate 25-event pages while preserving filters.
@@ -395,7 +437,11 @@ provides retry feedback. These controls are read-only.
 
 Open **Admin > Recovery** and select **Create & Download Backup** before results corrections,
 season rollover, or unusual database work. Store the downloaded JSON outside Supabase and Vercel,
-and retain at least the three newest files.
+and retain at least the three newest files. The app retains the newest three routine points per
+season; mark a manual point **Keep permanently** when it must be excluded from routine cleanup.
+Use **Review older backups** and **Remove reviewed backups** to clean existing older routine
+copies, including completed years. Re-review if the list changes. Cleanup leaves league data,
+archives, image files and external downloads intact.
 
 Result publication and high-risk admin operations also create bounded internal restore points. If
 recovery is needed, use the guided preview in the Recovery tab; it compares season-owned rows,
