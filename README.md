@@ -100,6 +100,19 @@ That runs:
 - `npm run test`
 - `npm run build`
 
+Focused offline pick and recovery-retention checks are available under Node 22:
+
+```bash
+npm run test:picks:db
+npm run test:picks:ui
+npm run test:recovery:retention
+```
+
+The database suites use new network-disabled local Docker containers with an already-cached
+`postgres:16-alpine` image. The browser suite renders the real form with fictional data and blocks
+all requests. Neither uses application credentials or live services; these checks are opt-in and
+separate from `npm run verify`.
+
 Run Playwright smoke tests:
 
 ```bash
@@ -234,6 +247,28 @@ RPC; the expected base schema version stays unchanged. Installation does not cha
 freeze fields or create archives. The 2025/2026 historical archives already exist and must not be
 re-imported. Do not rerun the completed prelaunch cleanup. Follow the migration, Admin closeout
 and release checks in [the 2026-09-21 review](docs/RELEASE_REVIEW_20260921.md).
+
+The September 30 improvements require three additional migrations, in this order:
+
+```text
+supabase/migrations/20260930_idempotent_pick_saves.sql
+supabase/migrations/20260930_recovery_retention.sql
+supabase/migrations/20260930_storage_and_pick_capabilities.sql
+```
+
+All three migrations are installed in the current project. On 2026-10-07, signed-in System Health
+reported all eleven capabilities **Installed**. `npm run db:types` regenerated the deployed contract;
+the diff was reviewed and `npm run db:types:check` passed. The base schema version remains unchanged.
+The 2026 season is completed and no season is currently active. See [the verification report](docs/RELEASE_REVIEW_20261007.md)
+for app checks, fixes and the isolated production-build procedure. For other installations, apply
+each entire file separately, regenerate types and complete `npm run verify:release`.
+
+Recovery keeps the newest three routine manual points per season and provides permanent
+protection plus reviewed cleanup for older copies, including completed years. Installing the
+migration deletes nothing; imports, safety points and season milestones remain excluded from
+routine cleanup. Unchanged pick submissions show **Already saved** and preserve timestamps and
+history; actual edits still create versions. See [Operations Guide](docs/OPERATIONS_GUIDE.md) and
+[Season Recovery](docs/SEASON_RECOVERY.md) for exact controls and installation steps.
 
 Admin now includes group previews, local deadline countdowns, missing-pick email copying,
 selected-season participant controls and paginated audit search. Storage maintenance remains

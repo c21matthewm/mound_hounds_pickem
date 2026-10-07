@@ -11,6 +11,7 @@ import {
 import { MobileActionDock } from "@/components/mobile-action-dock";
 import {
   parsePickDraft,
+  pickDraftMatchesSavedState,
   pickDraftStorageKey,
   shouldOfferPickDraftRecovery,
   type PickDraft
@@ -99,13 +100,15 @@ export function PickemForm({
     [draftOwnerId, raceId]
   );
 
-  const hasUnsavedChanges = useMemo(() => {
-    const averageSpeedChanged = draftAverageSpeed.trim() !== existingAverageSpeed.trim();
-    const picksChanged = groupNumbers.some(
-      (groupNumber) => (draftSelection[groupNumber] ?? null) !== (savedSelection[groupNumber] ?? null)
-    );
-    return averageSpeedChanged || picksChanged;
-  }, [draftAverageSpeed, draftSelection, existingAverageSpeed, groupNumbers, savedSelection]);
+  const hasUnsavedChanges = useMemo(
+    () => !pickDraftMatchesSavedState(
+      { averageSpeed: draftAverageSpeed, selections: draftSelection },
+      { averageSpeed: existingAverageSpeed, savedAt: existingSavedAt, selections: savedSelection },
+      groupNumbers
+    ),
+    [draftAverageSpeed, draftSelection, existingAverageSpeed, existingSavedAt, groupNumbers, savedSelection]
+  );
+  const isAlreadySaved = existingSavedAt !== null && !hasUnsavedChanges;
   const selectedGroupCount = groupNumbers.filter(
     (groupNumber) => draftSelection[groupNumber] !== null && draftSelection[groupNumber] !== undefined
   ).length;
@@ -149,7 +152,7 @@ export function PickemForm({
   };
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
-    if (submitInProgressRef.current) {
+    if (isAlreadySaved || !canSubmit || picksLocked || submitInProgressRef.current) {
       event.preventDefault();
       return;
     }
@@ -397,7 +400,7 @@ export function PickemForm({
         </div>
       ) : null}
 
-      <fieldset className="space-y-5 disabled:opacity-80" disabled={picksLocked || isSubmitting}>
+      <fieldset className="min-w-0 space-y-5 disabled:opacity-80" disabled={picksLocked || isSubmitting}>
         <section className="ui-panel rounded-lg border border-slate-200 bg-white px-3 py-3 sm:px-4">
           <div className="flex items-center justify-between gap-3">
             <p className="text-sm font-semibold text-slate-900">Driver groups</p>
@@ -580,15 +583,23 @@ export function PickemForm({
 
         <button
           className="rounded-md ui-action-primary bg-slate-900 px-5 py-3 text-sm font-semibold text-white hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
-          disabled={!canSubmit || isSubmitting}
+          disabled={!canSubmit || isSubmitting || isAlreadySaved}
           type="submit"
         >
           {picksLocked
             ? "Picks are locked"
             : isSubmitting
               ? "Saving picks..."
-              : "Save Pick'em Form"}
+              : isAlreadySaved
+                ? "Already saved"
+                : "Save Pick'em Form"}
         </button>
+
+        {isAlreadySaved && !picksLocked ? (
+          <p className="text-sm text-emerald-800" role="status">
+            Your picks are saved. Make a change to submit an updated form.
+          </p>
+        ) : null}
 
         {showMobileActionBar ? (
           <MobileActionDock>
@@ -621,10 +632,10 @@ export function PickemForm({
                 </div>
                 <button
                   className="shrink-0 rounded-md ui-action-primary bg-slate-900 px-2.5 py-1.5 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
-                  disabled={!canSubmit || isSubmitting}
+                  disabled={!canSubmit || isSubmitting || isAlreadySaved}
                   type="submit"
                 >
-                  {isSubmitting ? "Saving..." : "Save"}
+                  {isSubmitting ? "Saving..." : isAlreadySaved ? "Already saved" : "Save"}
                 </button>
               </div>
             </div>

@@ -6,5 +6,10 @@ export function parseAdminCapabilities(data: Json | null, failed: boolean): Admi
     || data.items.some(item=>!item || typeof item !== "object" || Array.isArray(item) || typeof item.name !== "string" || typeof item.installed !== "boolean")) {
     return {items:[],issue:"Admin capability checks are unavailable. Apply 20260921_season_completion.sql if it has not been installed, then refresh System Health."};
   }
-  return {items:data.items as {name:string;installed:boolean}[],issue:null};
+  const items = [...data.items] as {name:string;installed:boolean}[];
+  // An older capability RPC must not silently mark newly shipped features ready.
+  for (const name of ["Routine backup retention", "Unchanged pick saves"]) {
+    if (!items.some(item => item.name === name)) items.push({ name, installed: false });
+  }
+  return {items,issue:null};
 }

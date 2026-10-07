@@ -57,6 +57,7 @@ import {
   type ReminderType
 } from "@/lib/reminder-windows";
 import type { SeasonRestorePointSummary } from "@/lib/season-recovery";
+import { RECOVERY_RETENTION_MIGRATION_FILE, parseRecoveryRetention } from "@/lib/recovery-retention";
 import { canonicalSiteOrigin } from "@/lib/site-url";
 
 import type {
@@ -164,7 +165,8 @@ export default async function AdminPage({ searchParams }: PageProps) {
     seasonParticipantsResponse,
     selectedParticipantsResponse,
     participantPicksResponse,
-    restorePointsResponse
+    restorePointsResponse,
+    retentionResponse
   ] = await Promise.all([
     loadAdminAttention(supabase, {seasonId:loadedActiveSeason?.id ?? null, now:currentTime,
       loadErrors:activeTab !== "health", loadRaces:!hasActiveCalendar}),
@@ -218,8 +220,12 @@ export default async function AdminPage({ searchParams }: PageProps) {
           )
           .eq("season_id", selectedRecoverySeason.id)
           .order("created_at", { ascending: false })
+          .order("id", { ascending: false })
           .limit(1000)
-      : emptyResponse
+      : emptyResponse,
+    selectedRecoverySeason && activeTab === "recovery"
+      ? supabase.rpc("get_season_restore_point_retention", { p_season_id: selectedRecoverySeason.id })
+      : { data: null, error: null }
   ]);
 
   const loadedRaces = (racesResponse.data ?? []) as RaceRow[];
@@ -308,6 +314,13 @@ export default async function AdminPage({ searchParams }: PageProps) {
   const feedbackCount = feedbackResponse.count ?? 0;
   const feedbackPageCount = Math.max(1, Math.ceil(feedbackCount / feedbackPageSize));
   const restorePoints = (restorePointsResponse.data ?? []) as SeasonRestorePointSummary[];
+  const parsedRetention = parseRecoveryRetention(retentionResponse.data);
+  const recoveryRetention = parsedRetention?.seasonId === selectedRecoverySeason?.id ? parsedRetention : null;
+  const recoveryRetentionIssue = selectedRecoverySeason && !recoveryRetention
+    ? retentionResponse.error?.code === "PGRST202"
+      ? `Apply ${RECOVERY_RETENTION_MIGRATION_FILE} to enable routine backup retention and cleanup controls.`
+      : "Backup retention totals could not be verified. Refresh Recovery before changing retention options."
+    : null;
   const pickRows: PickSummaryRow[] = (picksResponse.data ?? []) as PickSummaryRow[];
   const raceDriverGroups: RaceDriverGroupRow[] = (
     raceDriverGroupsResponse.data ?? []
@@ -678,6 +691,8 @@ export default async function AdminPage({ searchParams }: PageProps) {
           }
           requestToken={recoveryRequestToken}
           restorePoints={restorePoints}
+          retention={recoveryRetention}
+          retentionIssue={recoveryRetentionIssue}
         />
       ) : null}
 
