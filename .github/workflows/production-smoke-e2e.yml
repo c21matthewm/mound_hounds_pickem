@@ -94,7 +94,7 @@ jobs:
       - name: Run production smoke E2E
         env:
           PW_BASE_URL: ${{ steps.base-url.outputs.value }}
-        run: npx playwright test tests/e2e/production-readonly.spec.ts --config=playwright.config.ts
+        run: npx playwright test tests/e2e/production-readonly.spec.ts --config=playwright.config.ts --reporter=line,github
 
       - name: Upload Playwright artifacts on failure
         if: failure()
