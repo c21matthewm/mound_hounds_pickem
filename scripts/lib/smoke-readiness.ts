@@ -1,3 +1,6 @@
+const PUBLIC_PRODUCTION_ORIGIN = "https://moundhoundspickem.app";
+const LEGACY_PRODUCTION_ORIGIN = "https://moundhoundspickem.vercel.app";
+
 export function smokeTarget(value: string): URL {
   let target: URL;
   try { target = new URL(value); }
@@ -12,7 +15,10 @@ export function smokeTarget(value: string): URL {
   if (/^moundhoundspickem-[a-z0-9-]+-c21matthewms-projects\.vercel\.app$/.test(target.hostname)) {
     throw new Error("Protected Vercel previews are excluded from smoke checks. Use the public production origin.");
   }
-  return target;
+  // Existing repository settings may still use the public Vercel alias, which
+  // redirects to the canonical domain. Normalize that exact known alias without
+  // allowing arbitrary cross-origin redirects or changing Preview protection.
+  return target.origin === LEGACY_PRODUCTION_ORIGIN ? new URL(PUBLIC_PRODUCTION_ORIGIN) : target;
 }
 
 export type SmokeEvent = {
@@ -35,7 +41,7 @@ export function selectSmokeTarget(eventName: string, event: SmokeEvent, fallback
     throw new Error("Smoke checks run only after a successful production deployment or a manual dispatch.");
   }
   // Deployment URLs can be protected Vercel hosts. Use the public production alias.
-  return smokeTarget((eventName === "workflow_dispatch" ? event.inputs?.base_url : "") || fallbackURL || "https://moundhoundspickem.app");
+  return smokeTarget((eventName === "workflow_dispatch" ? event.inputs?.base_url : "") || fallbackURL || PUBLIC_PRODUCTION_ORIGIN);
 }
 
 export type LoginProbe = { ready: boolean; fatal?: string; reason: string };
