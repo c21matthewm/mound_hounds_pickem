@@ -31,7 +31,9 @@ afterEach(() => {
 });
 
 type NpmCall = { command: string; args: string[]; cwd: string; path: string };
-function runNodeScript(root: string, script: string, options: { node?: string; npm?: string; userAgent?: string; installStatus?: number; installedNpm?: string; args?: string[]; npxStatus?: number } = {}) {
+function runNodeScript(root: string, script: string, options: { node?: string; npm?: string; userAgent?: string; installStatus?: number; installedNpm?: string; args?: string[]; npxStatus?: number; enforceNpxDevEngines?: boolean; lifecycleNpm?: string } = {}) {
+  const npmCli = path.join(root, "node runtime/lib/node_modules/npm/bin/npm-cli.js");
+  if (options.lifecycleNpm) writeFileSync(path.join(path.dirname(npmCli), "../package.json"), JSON.stringify({ name: "npm", version: options.lifecycleNpm }));
   const guard = path.join(root, "offline-process.cjs");
   const callLog = path.join(root, "npm-calls.json");
   // Every child-process call is replaced. Tests never contact a registry or
@@ -46,7 +48,14 @@ function runNodeScript(root: string, script: string, options: { node?: string; n
     child.spawnSync = (command, args, options) => {
       calls.push({ command, args, cwd: options.cwd, path: options.env.PATH });
       fs.writeFileSync(process.env.FAKE_CALL_LOG, JSON.stringify(calls));
-      if (command === "npx") return { status: Number(process.env.FAKE_NPX_STATUS), stdout: "", stderr: "" };
+      if (command === "npx") {
+        // Model the observed bundled npm preflight: it rejects a project before
+        // --package can select the required npm. No real registry is contacted.
+        if (process.env.FAKE_NPX_DEV_ENGINES === "true" && fs.existsSync(require("node:path").join(options.cwd, "package.json"))) {
+          return { status: 1, stdout: "", stderr: "EBADDEVENGINES: bundled npm cannot bootstrap inside the project" };
+        }
+        return { status: Number(process.env.FAKE_NPX_STATUS), stdout: "", stderr: "" };
+      }
       if (args.includes("install")) {
         installed = true;
         return { status: Number(process.env.FAKE_INSTALL_STATUS), stdout: "", stderr: "" };
@@ -69,8 +78,10 @@ function runNodeScript(root: string, script: string, options: { node?: string; n
       FAKE_INSTALLED_NPM: options.installedNpm ?? "11.20.0",
       FAKE_INSTALL_STATUS: String(options.installStatus ?? 0),
       FAKE_NPX_STATUS: String(options.npxStatus ?? 0),
+      FAKE_NPX_DEV_ENGINES: String(options.enforceNpxDevEngines ?? false),
       FAKE_CALL_LOG: callLog,
-      ...(options.userAgent === undefined ? {} : { npm_config_user_agent: options.userAgent })
+      ...(options.userAgent === undefined ? {} : { npm_config_user_agent: options.userAgent }),
+      ...(options.lifecycleNpm === undefined ? {} : { npm_execpath: npmCli })
     }
   });
   const calls: NpmCall[] = existsSync(callLog) ? JSON.parse(readFileSync(callLog, "utf8")) : [];
@@ -166,6 +177,22 @@ describe("npm lifecycle runtime checks", () => {
     expect(result.calls).toHaveLength(0);
   });
 
+  it("accepts the actual pinned npm when npx inherited an older parent's user-agent", () => {
+    const result = runNodeScript(fixture(), "check-toolchain.mjs", {
+      userAgent: "npm/11.19.0 node/v24.21.0", lifecycleNpm: "11.20.0"
+    });
+    expect(result.status).toBe(0);
+    expect(result.calls).toHaveLength(0);
+  });
+
+  it("rejects an older actual npm even when its user-agent claims the pinned version", () => {
+    const result = runNodeScript(fixture(), "check-toolchain.mjs", {
+      userAgent: "npm/11.20.0 node/v24.21.0", lifecycleNpm: "11.19.0"
+    });
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("found 11.19.0");
+  });
+
   it("supports a direct Node check using that runtime's npm", () => {
     const result = runNodeScript(fixture(), "check-toolchain.mjs");
     expect(result.status).toBe(0);
@@ -235,10 +262,18 @@ describe("provider-managed pinned npm launcher", () => {
     expect(result.status).toBe(0);
     expect(result.calls).toHaveLength(1);
     expect(result.calls[0].command).toBe("npx");
-    expect(result.calls[0].args).toEqual(["--yes", "--package", "npm@11.20.0", "npm", "run", "build", "--", "argument with spaces", "$(do-not-execute)"]);
+    expect(result.calls[0].args).toEqual(["--yes", "--package", "npm@11.20.0", "npm", "--prefix", `${root}${path.sep}`, "run", "build", "--", "argument with spaces", "$(do-not-execute)"]);
     expect(result.calls[0].args).not.toContain("--global");
-    expect(result.calls[0].cwd).toBe(`${root}${path.sep}`);
+    expect(result.calls[0].cwd).toBe(tmpdir());
     expect(result.calls[0].path.split(path.delimiter)[0]).toBe(path.join(root, "node runtime/bin"));
+  });
+
+  it("selects pinned npm before bundled npm can enforce the project contract", () => {
+    const result = runNodeScript(fixture(), "vercel-npm.mjs", {
+      npm: "11.19.0", enforceNpxDevEngines: true, args: ["ci"]
+    });
+    expect(result.status).toBe(0);
+    expect(result.calls).toHaveLength(1);
   });
 
   it("preserves an npm command failure", () => {

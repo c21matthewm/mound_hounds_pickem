@@ -54,7 +54,9 @@ GitHub actions run on their own Node runtime; this is separate from the app runt
 
 `vercel.json` runs `scripts/vercel-npm.mjs` for install and build. That launcher uses `npx`
 to run the exact npm declared in `packageManager` from its cache, without changing Vercel’s global
-installation or assuming its Node prefix is writable. Vercel does not rely on npm detection
+installation or assuming its Node prefix is writable. It starts that bootstrap outside the project
+and then points the selected npm at the project with `--prefix`, so an older bundled npm cannot
+reject the project contract before the correct npm starts. Vercel does not rely on npm detection
 from the lockfile format. `packageManager` alone does not install the requested npm. Check the
 printed Node/npm versions and successful build on the next Preview deployment. Keep the Vercel
 project's Node setting at 24.x, and do not add a conflicting install-command override.

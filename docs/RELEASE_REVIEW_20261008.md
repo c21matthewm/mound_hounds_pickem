@@ -8,6 +8,10 @@ Node 24 and the same pinned npm through its cache, without assuming its global p
 GitHub action runtimes have moved from the old v4 actions to maintained v7 actions. A first dev
 CI run caught setup-node invoking bundled npm 11.19.0 for caching before the 11.20.0 bootstrap. All
 workflows now disable early caching and restore downloads only after selecting the pinned npm.
+A temporary runtime using original bundled npm 11.19.0 also reproduced the Vercel launcher
+preflight failure. Its bootstrap now starts outside the application and targets it with `--prefix`
+once the selected npm starts; no provider-wide npm installation is required. Lifecycle guards read
+the npm executable's installed version because npx inherits its older parent's user-agent label.
 
 The owner declined deployment bypass automation. Its draft header/cookie integration was removed.
 Preview deployment events explicitly skip smoke checks, preserving Vercel Authentication. Production
@@ -27,7 +31,7 @@ See [the official release](https://github.com/vercel/next.js/releases/tag/v16.3.
 - A physical temporary repository copy excluded all real environment files. It used fictional
   credentials, an empty local season fixture, and guards rejecting external connections.
 - A clean offline install using Vercel's pinned-npm launcher passed.
-- The exact `npm run verify` gate passed: full lint, TypeScript, 657 tests across 67 files, and
+- The exact `npm run verify` gate passed: full lint, TypeScript, 660 tests across 67 files, and
   default Turbopack production build with 23 generated pages.
 - The app-specific readiness probe passed against that production build.
 - Six browser checks passed across desktop Chromium, mobile Chromium and desktop Firefox:

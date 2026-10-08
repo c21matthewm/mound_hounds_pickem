@@ -1,5 +1,6 @@
 import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -21,8 +22,10 @@ if (args.length === 0) fail("Usage: node scripts/vercel-npm.mjs <npm command> [a
 
 // Vercel controls its Node installation layout and permissions. Use npx's
 // package cache rather than installing globally into that provider's prefix.
-const result = spawnSync("npx", ["--yes", "--package", manifest.packageManager, "npm", ...args], {
-  cwd: root,
+// Bootstrap outside the project so bundled npm can select the pinned npm before
+// devEngines is checked. The selected npm targets the application through --prefix.
+const result = spawnSync("npx", ["--yes", "--package", manifest.packageManager, "npm", "--prefix", root, ...args], {
+  cwd: tmpdir(),
   env: {
     ...process.env,
     PATH: `${path.dirname(process.execPath)}${path.delimiter}${process.env.PATH ?? ""}`

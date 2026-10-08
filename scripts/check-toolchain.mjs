@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -19,10 +19,21 @@ if (process.versions.node.split(".")[0] !== nodeMajor) {
   fail(`Node ${nodeMajor} is required; found Node ${process.versions.node}. Run nvm install && nvm use, or use ./scripts/with-node.sh to run the command.`);
 }
 
-// npm 10 does not enforce devEngines. Lifecycle checks must validate the npm
-// actually running the command, rather than another npm found on PATH.
-let activeNpm = /^npm\/([0-9]+\.[0-9]+\.[0-9]+)(?: |$)/.exec(process.env.npm_config_user_agent ?? "")?.[1];
-if (!activeNpm && !process.env.npm_config_user_agent) {
+// npm 10 does not enforce devEngines. Validate the lifecycle's actual npm
+// executable. npx can leave an older parent npm's user-agent in the environment.
+let activeNpm;
+if (process.env.npm_execpath) {
+  try {
+    const cli = realpathSync(process.env.npm_execpath);
+    const installed = JSON.parse(readFileSync(path.join(path.dirname(cli), "../package.json"), "utf8"));
+    if (installed.name === "npm" && /^[0-9]+\.[0-9]+\.[0-9]+$/.test(installed.version ?? "")) activeNpm = installed.version;
+  } catch {
+    // An unreadable or unsupported lifecycle executable must fail the check.
+  }
+} else {
+  activeNpm = /^npm\/([0-9]+\.[0-9]+\.[0-9]+)(?: |$)/.exec(process.env.npm_config_user_agent ?? "")?.[1];
+}
+if (!activeNpm && !process.env.npm_execpath && !process.env.npm_config_user_agent) {
   // Also support a direct `node scripts/check-toolchain.mjs` invocation.
   const executableDirectory = path.dirname(process.execPath);
   const runtimePrefix = process.platform === "win32" ? executableDirectory : path.dirname(executableDirectory);
