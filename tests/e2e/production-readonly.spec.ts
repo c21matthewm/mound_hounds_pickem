@@ -1,7 +1,9 @@
 import { expect, test } from "@playwright/test";
 import { trackClientIssues } from "./helpers/monitoring";
+import { guardReadOnlyRequests } from "./helpers/read-only-network";
 
-test("public auth pages load and protected routes redirect without mutating data", async ({ page }) => {
+test("public auth pages load and protected routes redirect without mutating data", async ({ page, context, baseURL }) => {
+  const writes = await guardReadOnlyRequests(context, baseURL ?? "http://127.0.0.1:3007");
   const clientIssues: string[] = [];
   trackClientIssues(page, "production-readonly", clientIssues);
 
@@ -24,4 +26,5 @@ test("public auth pages load and protected routes redirect without mutating data
   await expect(page).toHaveURL(/\/login(?:\?.*)?$/);
 
   expect(clientIssues).toEqual([]);
+  expect(writes, "Public smoke must not send requests that can write data").toEqual([]);
 });

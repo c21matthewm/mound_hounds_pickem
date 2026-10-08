@@ -5,9 +5,12 @@ on:
   workflow_dispatch:
     inputs:
       base_url:
-        description: "Override base URL (optional)"
+        description: "Public production origin (optional; protected previews are excluded)"
         required: false
         type: string
+
+permissions:
+  contents: read
 
 concurrency:
   group: production-smoke-${{ github.event_name }}-${{ github.ref }}
@@ -16,6 +19,7 @@ concurrency:
 jobs:
   smoke:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     if: |
       github.event_name == 'workflow_dispatch' ||
       (github.event_name == 'deployment_status' && github.event.deployment_status.state == 'success')
@@ -25,83 +29,59 @@ jobs:
       PW_USE_EXISTING_SERVER: "1"
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version-file: ".nvmrc"
           cache: npm
 
-      - name: Resolve base URL
-        id: base-url
-        shell: bash
+      - name: Choose public production smoke target
+        id: target
         env:
-          ENVIRONMENT_URL: ${{ github.event.deployment_status.environment_url }}
-          FALLBACK_URL: ${{ vars.PRODUCTION_BASE_URL }}
-          INPUT_URL: ${{ github.event.inputs.base_url }}
-          TARGET_URL: ${{ github.event.deployment_status.target_url }}
+          PRODUCTION_URL: ${{ vars.PRODUCTION_BASE_URL }}
         run: |
-          set -euo pipefail
-          if [[ -n "${INPUT_URL}" ]]; then
-            echo "value=${INPUT_URL}" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
+          node --input-type=module <<'NODE'
+          import { appendFileSync, readFileSync } from 'node:fs';
+          import { selectSmokeTarget } from './scripts/lib/smoke-readiness.ts';
+          try {
+            const event = JSON.parse(readFileSync(process.env.GITHUB_EVENT_PATH, 'utf8'));
+            const target = selectSmokeTarget(process.env.GITHUB_EVENT_NAME, event, process.env.PRODUCTION_URL);
+            if (!target) {
+              const message = 'Skipped: this is not a successful production deployment. Preview protection remains enabled; no application requests were sent.';
+              console.log(message);
+              appendFileSync(process.env.GITHUB_OUTPUT, 'run_smoke=false\n');
+              appendFileSync(process.env.GITHUB_STEP_SUMMARY, message + '\n');
+            } else {
+              appendFileSync(process.env.GITHUB_OUTPUT, `run_smoke=true\nvalue=${target.origin}\n`);
+            }
+          } catch (error) {
+            console.error(error.message);
+            process.exitCode = 1;
+          }
+          NODE
 
-          if [[ -n "${ENVIRONMENT_URL}" ]]; then
-            echo "value=${ENVIRONMENT_URL}" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
+      - name: Select tested npm
+        if: steps.target.outputs.run_smoke == 'true'
+        run: node scripts/install-toolchain.mjs
 
-          if [[ -n "${TARGET_URL}" ]]; then
-            echo "value=${TARGET_URL}" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-
-          if [[ -n "${FALLBACK_URL}" ]]; then
-            echo "value=${FALLBACK_URL}" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-
-          echo "No deployment URL available. Set repository variable PRODUCTION_BASE_URL or pass workflow_dispatch input base_url."
-          exit 1
-
-      - name: Wait for base URL readiness
-        shell: bash
+      - name: Wait for public application login readiness
+        if: steps.target.outputs.run_smoke == 'true'
         env:
-          PW_BASE_URL: ${{ steps.base-url.outputs.value }}
-        run: |
-          set -euo pipefail
-          echo "Using PW_BASE_URL=${PW_BASE_URL}"
-          for attempt in {1..30}; do
-            status="$(curl -s -o /dev/null -w "%{http_code}" "${PW_BASE_URL}/login" || true)"
-            if [[ "${status}" == "200" || "${status}" == "302" || "${status}" == "307" ]]; then
-              echo "Base URL is ready."
-              exit 0
-            fi
-            echo "Attempt ${attempt}/30: /login returned ${status}. Waiting 10s..."
-            sleep 10
-          done
-          echo "Timed out waiting for ${PW_BASE_URL}/login"
-          exit 1
+          PW_BASE_URL: ${{ steps.target.outputs.value }}
+        run: node scripts/smoke-readiness.mjs
 
       - name: Install dependencies
+        if: steps.target.outputs.run_smoke == 'true'
         run: npm ci
 
       - name: Install Playwright browsers
+        if: steps.target.outputs.run_smoke == 'true'
         run: npx playwright install --with-deps chromium firefox
 
-      - name: Run production smoke E2E
+      - name: Run anonymous read-only production smoke
+        if: steps.target.outputs.run_smoke == 'true'
         env:
-          PW_BASE_URL: ${{ steps.base-url.outputs.value }}
+          PW_BASE_URL: ${{ steps.target.outputs.value }}
         run: npx playwright test tests/e2e/production-readonly.spec.ts --config=playwright.config.ts --reporter=line,github
-
-      - name: Upload Playwright artifacts on failure
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: playwright-artifacts
-          path: |
-            test-results/
-            playwright-report/
-          if-no-files-found: ignore

@@ -35,14 +35,29 @@ season standings, league rules, feedback, and admin operations.
 
 ## Local Setup
 
-Use Node from `.nvmrc`:
+Use the tested Node 24 LTS patch from `.nvmrc` and npm version from `packageManager`:
 
 ```bash
-nvm install 22
+nvm install
 nvm use
+node scripts/install-toolchain.mjs
 npm ci
 cp .env.local.example .env.local
 ```
+
+The installer changes npm only for the selected Node installation and is safe to rerun. npm rejects
+commands run with an incompatible Node or npm version before installing or building. After upgrading
+Node, rerun the installer.
+
+For app panels, automation, or terminals that inherited an older PATH, use the repository launcher:
+
+```bash
+./scripts/with-node.sh npm run dev -- --hostname 0.0.0.0 --port 3007
+./scripts/with-node.sh npm run verify
+```
+
+It selects the installed `.nvmrc` version through NVM without downloading anything. If setup is
+missing, it gives the commands needed to repair it. See [Toolchain maintenance](docs/NODE_TOOLCHAIN.md).
 
 Fill `.env.local` with values from Supabase and your local/dev settings:
 
@@ -100,7 +115,7 @@ That runs:
 - `npm run test`
 - `npm run build`
 
-Focused offline pick and recovery-retention checks are available under Node 22:
+Focused offline pick and recovery-retention checks are available under Node 24:
 
 ```bash
 npm run test:picks:db
@@ -119,7 +134,8 @@ Run Playwright smoke tests:
 npm run e2e:smoke
 ```
 
-The smoke suite is read-only and is safe to point at a deployed app.
+The smoke suite is anonymous and read-only. The CI workflow skips protected previews; production checks
+need no automation secret or database credentials. See [Production smoke checks](docs/PRODUCTION_SMOKE.md).
 
 Run the mutating suite only against a dedicated/local Supabase project:
 
@@ -275,7 +291,7 @@ selected-season participant controls and paginated audit search. Storage mainten
 read-only; it does not delete the candidates it reports. Earlier images are retained when a
 driver/race image is replaced or its record deleted, preserving recovery references.
 
-Run `npm run test:admin:ui` under Node 22 for the offline admin component suite. It checks mobile
+Run `npm run test:admin:ui` under Node 24 for the offline admin component suite. It checks mobile
 and desktop layouts plus key form interactions using fictional data and mocked actions, with
 all browser network requests blocked. No dev server, credentials, or live database is needed.
 Screenshots and temporary build files are written outside the repository.
