@@ -22,10 +22,17 @@ jobs:
         uses: actions/setup-node@v7
         with:
           node-version-file: ".nvmrc"
-          cache: npm
+          # The bundled npm can differ from devEngines; bootstrap before caching.
+          package-manager-cache: false
 
       - name: Select the pinned npm version
         run: node scripts/install-toolchain.mjs
+
+      - name: Restore npm download cache
+        uses: actions/setup-node@v7
+        with:
+          # Keep the already-selected runtime and its bootstrapped npm.
+          cache: npm
 
       - name: Install dependencies
         run: npm ci

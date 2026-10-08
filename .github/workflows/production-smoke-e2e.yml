@@ -35,7 +35,8 @@ jobs:
         uses: actions/setup-node@v7
         with:
           node-version-file: ".nvmrc"
-          cache: npm
+          # The bundled npm can differ from devEngines; bootstrap before caching.
+          package-manager-cache: false
 
       - name: Choose public production smoke target
         id: target
@@ -71,6 +72,13 @@ jobs:
         env:
           PW_BASE_URL: ${{ steps.target.outputs.value }}
         run: node scripts/smoke-readiness.mjs
+
+      - name: Restore npm download cache
+        if: steps.target.outputs.run_smoke == 'true'
+        uses: actions/setup-node@v7
+        with:
+          # Keep the already-selected runtime and its bootstrapped npm.
+          cache: npm
 
       - name: Install dependencies
         if: steps.target.outputs.run_smoke == 'true'

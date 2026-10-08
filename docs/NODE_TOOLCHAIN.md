@@ -45,7 +45,10 @@ An unavailable version produces setup instructions rather than a background down
 
 ## CI and Vercel
 
-Each GitHub workflow uses `.nvmrc`, then bootstraps the pinned npm before `npm ci`. Maintained
+Each GitHub workflow uses `.nvmrc` with automatic npm caching disabled, bootstraps the pinned npm,
+then restores its npm download cache before `npm ci`. The cache-only setup step keeps the selected
+runtime. This ordering matters: the npm bundled with Node can be older than the project pin, and
+cache lookup invokes npm inside the repository where `devEngines` is enforced. Maintained
 GitHub actions run on their own Node runtime; this is separate from the app runtime selected by
 `setup-node`. The actions have been updated from their Node 20 versions.
 

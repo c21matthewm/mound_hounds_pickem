@@ -5,7 +5,9 @@
 Local/CI use Node 24.21.0 and npm 11.20.0 with explicit startup/install checks, automatic local
 version selection, and a portable launcher for GUI environments with a stale PATH. Vercel uses
 Node 24 and the same pinned npm through its cache, without assuming its global prefix is writable.
-GitHub action runtimes have moved from the old v4 actions to maintained v7 actions.
+GitHub action runtimes have moved from the old v4 actions to maintained v7 actions. A first dev
+CI run caught setup-node invoking bundled npm 11.19.0 for caching before the 11.20.0 bootstrap. All
+workflows now disable early caching and restore downloads only after selecting the pinned npm.
 
 The owner declined deployment bypass automation. Its draft header/cookie integration was removed.
 Preview deployment events explicitly skip smoke checks, preserving Vercel Authentication. Production
