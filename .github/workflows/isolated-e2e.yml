@@ -19,13 +19,14 @@ jobs:
       PW_ALLOW_SUPABASE_E2E: "1"
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version-file: ".nvmrc"
-          cache: npm
+          # The bundled npm can differ from devEngines; bootstrap before caching.
+          package-manager-cache: false
 
       - name: Validate isolated database secrets
         shell: bash
@@ -34,6 +35,15 @@ jobs:
           test -n "${E2E_SUPABASE_URL}"
           test -n "${E2E_SUPABASE_ANON_KEY}"
           test -n "${E2E_SUPABASE_SERVICE_ROLE_KEY}"
+
+      - name: Select the pinned npm version
+        run: node scripts/install-toolchain.mjs
+
+      - name: Restore npm download cache
+        uses: actions/setup-node@v7
+        with:
+          # Keep the already-selected runtime and its bootstrapped npm.
+          cache: npm
 
       - name: Install dependencies
         run: npm ci
@@ -46,7 +56,7 @@ jobs:
 
       - name: Upload Playwright artifacts on failure
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: isolated-e2e-artifacts
           path: |

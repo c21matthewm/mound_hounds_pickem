@@ -13,7 +13,7 @@ Mound Hounds Pick'em is a private INDYCAR fantasy league app. Participants submi
 The project currently resides at `/Users/c21matthewm/Personal Projects/python/mound_hounds_pickem`.
 The old `Coding_Projects/python/mound_hounds_pickem` location in the task's saved cwd is stale.
 Run commands against the actual project path; do not recreate the old folder or assume a terminal
-opened at the old path points to this checkout. Use `nvm use` with `.nvmrc` (Node 22). Local/mobile
+opened at the old path points to this checkout. Use `nvm use` with `.nvmrc` (Node 24 LTS). Local/mobile
 development uses port 3007 with hostname `0.0.0.0`; a phone needs the computer's current LAN IP.
 
 ## Stack And Runtime
@@ -23,7 +23,7 @@ development uses port 3007 with hostname `0.0.0.0`; a phone needs the computer's
 - Supabase Auth, Postgres, RLS, Storage, and service-role server utilities.
 - Supabase `pg_cron` and `pg_net` are intended for frequent production cron calls.
 - Vercel production deploys from `main`; normal work happens on `dev`.
-- Node version is `22` from `.nvmrc`.
+- Node 24 LTS is pinned by `.nvmrc`; npm 11.20.0 is pinned by `packageManager`. `devEngines` rejects mismatches. Local/CI run `scripts/install-toolchain.mjs` before `npm ci`; Vercel install/build use `scripts/vercel-npm.mjs` to invoke the pinned npm through npx without changing its global installation; GUI/automation can use `scripts/with-node.sh` to select the installed NVM version. Vercel manages the Node 24 patch through `engines.node`.
 - Verification scripts live in `package.json`: `npm run lint`, `npm run typecheck`, `npm run test`, `npm run build`, `npm run verify`, `npm run verify:release`, `npm run e2e:smoke`, and `npm run e2e`.
 
 ## Important Routes
@@ -259,7 +259,7 @@ import is create-only and never needs accounts or per-race records from the old 
   These focused runners do not load application credentials or contact live services.
 
 - Playwright config starts `npm run dev -- --port 3007` unless `PW_USE_EXISTING_SERVER=1` is set.
-- Read-only production smoke: `tests/e2e/production-readonly.spec.ts` checks public pages and protected redirects without creating data.
+- Read-only production smoke: `tests/e2e/production-readonly.spec.ts` checks public auth pages and anonymous redirects, with writing browser requests blocked. `.github/workflows/production-smoke-e2e.yml` skips protected previews and uses the public production alias after successful production deployments. No bypass/login/database secrets or browser artifact uploads are used. See `docs/PRODUCTION_SMOKE.md`.
 - Mutating auth test: `tests/e2e/public-auth.spec.ts` covers signup validation and account creation cleanup on isolated Supabase only.
 - Full mutation flow: `tests/e2e/full-flow.spec.ts` seeds Supabase users/drivers/races, uploads a race banner, submits picks, verifies unsaved-change guard, locks picks, enters results, checks leaderboard sorting/analytics, submits feedback, archives a race, and cleans up.
 - Indy 500 mutation flow: `tests/e2e/indy-500-flow.spec.ts` seeds a 33-driver qualifying field, creates an Indy 500 race, verifies picks are unavailable before qualifying import, imports qualifying order, submits 8 picks, checks race-start lock behavior, verifies the results publish preview, inserts race results, checks G7/G8 leaderboard display/scoring, and cleans up.

@@ -14,8 +14,8 @@ The Vercel-generated URL can remain available as a fallback, but the custom doma
 
 Vercel should be connected to this GitHub repo and production should deploy from `main`.
 
-Set the Vercel project Node.js version to 22.x. `package.json` is also pinned to `22.x` so Vercel
-cannot silently advance the app to a new major Node version. This matches `.nvmrc`.
+Set the Vercel project Node.js version to 24.x. `package.json` is also pinned to `24.x` so Vercel
+selects the same Node major as local and CI. Vercel updates Node 24 patches automatically.
 
 Daily development flow:
 
@@ -589,21 +589,20 @@ Workflow:
 .github/workflows/production-smoke-e2e.yml
 ```
 
-Required GitHub repository secrets:
+This workflow checks public auth pages and anonymous protected-page redirects without signing in
+or writing league data. Protected Preview deployments are skipped, with an explicit summary.
+No automation bypass or database secret is required. Keep Preview protection enabled.
+See [Production smoke checks](docs/PRODUCTION_SMOKE.md).
 
-```text
-NEXT_PUBLIC_SUPABASE_URL
-SUPABASE_SERVICE_ROLE_KEY
-```
+An optional repository variable `PRODUCTION_BASE_URL` supplies the public production origin;
+it defaults to `https://moundhoundspickem.app`. A successful production deployment triggers the
+checks automatically. Manual runs accept a public origin and reject protected project preview URLs.
 
-Optional repository variable:
-
-```text
-PRODUCTION_BASE_URL=https://moundhoundspickem.app
-```
-
-The workflow can run automatically after successful deployments or manually from the GitHub
-Actions tab.
+Local and CI use `.nvmrc` and `packageManager` from `package.json`. Vercel uses `engines.node: 24.x`
+and the checked-in `vercel.json` install/build commands, which run the pinned npm through a
+cache-backed launcher without altering Vercel’s global npm.
+Vercel manages the Node 24 patch version; verify the Node/npm versions printed in build logs on the
+next Preview deployment. See [Toolchain maintenance](docs/NODE_TOOLCHAIN.md).
 
 ## Troubleshooting
 
