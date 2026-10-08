@@ -32,3 +32,9 @@ Before releasing, run the quality gate plus offline Admin/pick-form and isolated
 checks. These use fictional data and disposable local files/fixtures. They do not touch the real
 league database. The dedicated mutating Supabase E2E workflow remains opt-in and separate; it must
 never be pointed at the league's Supabase project.
+
+The legacy public alias `https://moundhoundspickem.vercel.app` is normalized to the canonical
+custom domain by target selection, the readiness CLI, and the read-only Playwright config. Existing
+repository variables using that alias need no update. Other cross-origin redirects are still rejected.
+Readiness failures expose a sanitized error annotation and the validated target so diagnosis needs
+no account access or log download.

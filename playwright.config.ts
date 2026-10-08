@@ -2,10 +2,10 @@ import { defineConfig, devices } from "@playwright/test";
 import { smokeTarget } from "./scripts/lib/smoke-readiness";
 
 const DEFAULT_PORT = 3007;
-const baseURL = process.env.PW_BASE_URL ?? `http://127.0.0.1:${DEFAULT_PORT}`;
+const requestedBaseURL = process.env.PW_BASE_URL ?? `http://127.0.0.1:${DEFAULT_PORT}`;
 const useExistingServer = process.env.PW_USE_EXISTING_SERVER === "1";
 const readOnly = process.env.PW_READ_ONLY === "1";
-if (readOnly) smokeTarget(baseURL);
+const baseURL = readOnly ? smokeTarget(requestedBaseURL).origin : requestedBaseURL;
 
 const includeFirefox = process.env.CI === "true" || process.env.PW_INCLUDE_FIREFOX === "1";
 

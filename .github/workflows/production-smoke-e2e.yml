@@ -55,6 +55,7 @@ jobs:
               appendFileSync(process.env.GITHUB_OUTPUT, 'run_smoke=false\n');
               appendFileSync(process.env.GITHUB_STEP_SUMMARY, message + '\n');
             } else {
+              console.log(`::notice title=Anonymous smoke target::${target.origin}`);
               appendFileSync(process.env.GITHUB_OUTPUT, `run_smoke=true\nvalue=${target.origin}\n`);
             }
           } catch (error) {
