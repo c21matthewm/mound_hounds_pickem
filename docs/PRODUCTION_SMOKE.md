@@ -38,3 +38,8 @@ custom domain by target selection, the readiness CLI, and the read-only Playwrig
 repository variables using that alias need no update. Other cross-origin redirects are still rejected.
 Readiness failures expose a sanitized error annotation and the validated target so diagnosis needs
 no account access or log download.
+
+Both browser workflows pin `ubuntu-24.04`, which is supported by the installed Playwright 1.58.2
+binaries and dependency installer. A moving `ubuntu-latest` label can select an unsupported OS
+before the test runner is upgraded. Revisit the runner together with a tested Playwright update;
+keep browser installation and application test failures distinct when diagnosing job errors.

@@ -9,7 +9,8 @@ concurrency:
 
 jobs:
   e2e:
-    runs-on: ubuntu-latest
+    # Match the OS supported by the pinned Playwright browser binaries.
+    runs-on: ubuntu-24.04
     env:
       CRON_SECRET: isolated-e2e-only
       E2E_SUPABASE_ANON_KEY: ${{ secrets.E2E_SUPABASE_ANON_KEY }}
