@@ -96,7 +96,7 @@ try {
   page.setDefaultTimeout(10_000);
   page.on('pageerror',error=>errors.push(error.message));
   await page.setContent('<html><head><meta http-equiv="Content-Security-Policy" content="default-src &apos;none&apos;; script-src &apos;unsafe-inline&apos;; style-src &apos;unsafe-inline&apos;; img-src data: blob:; connect-src &apos;none&apos;"><style>'+css+'</style></head><body><div id="root"></div></body></html>');
-  await page.evaluate(()=>{window.fixtureCalls=[];window.confirm=()=>true;});
+  await page.evaluate(()=>{window.fixtureCalls=[];window.confirm=()=>true;Object.defineProperty(navigator,'onLine',{configurable:true,value:true});});
   await page.addScriptTag({content:js});
   await page.evaluate(name=>window.showScene(name),name);
   await page.locator('main').waitFor();
@@ -199,6 +199,11 @@ try {
     });
     return fixturePage;
   }
+  page=await retentionScene();
+  await page.evaluate(()=>Object.defineProperty(navigator,'onLine',{configurable:true,value:false}));
+  await page.getByRole('button',{name:'Review older backups',exact:true}).click();
+  await page.getByText('You are offline. Reconnect before managing season recovery.',{exact:true}).waitFor();
+  assert.equal((await page.evaluate(()=>window.fixtureRecovery)).length,0);checks++;await page.close();
   for(const name of ['recoveryRetention','recoveryRetentionPast']){
     page=await retentionScene(name,320);
     await page.getByRole('button',{name:'Review older backups',exact:true}).click();

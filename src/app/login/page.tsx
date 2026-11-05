@@ -29,6 +29,9 @@ export default async function LoginPage({ searchParams }: PageProps) {
           <Link className="font-semibold text-slate-900 underline" href="/signup">
             Create an account
           </Link>
+          <span className="mt-2 block">
+            <Link className="inline-flex min-h-11 items-center font-semibold text-blue-700 underline" href="/install">Add to your Home Screen</Link>
+          </span>
         </>
       }
       title="Sign in"

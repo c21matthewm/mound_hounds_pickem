@@ -5,6 +5,11 @@ import { requireAppUser } from "@/lib/authenticated-user";
 
 const destinations = [
   {
+    description: "Home Screen setup for iPhone and Android, plus offline support.",
+    href: "/install",
+    label: "Install the app"
+  },
+  {
     description: "Official season rules and regulations.",
     href: "/rules",
     label: "Rules"

@@ -1,5 +1,7 @@
 "use client";
 
+import { usePwa } from "@/components/pwa-provider";
+
 import { raceOptionLabel } from "@/lib/race-label";
 
 type RaceOption = {
@@ -14,10 +16,12 @@ type Props = {
 };
 
 export function PicksRaceSelect({ races, selectedRaceId }: Props) {
+  const { isOffline } = usePwa();
   return (
     <form action="/leaderboard" method="get">
       <input name="tab" type="hidden" value="picks" />
       <select
+        disabled={isOffline}
         className="w-full rounded-md ui-control-border border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900"
         defaultValue={selectedRaceId ? String(selectedRaceId) : ""}
         id="leaderboard-race-select"

@@ -25,7 +25,11 @@
   --warn-bg: #fffbeb;
   --warn-border: #fde68a;
   --warn-ink: #92400e;
-  --mobile-edge-spacing: max(0.75rem, env(safe-area-inset-bottom, 0px));
+  --safe-area-top: env(safe-area-inset-top, 0px);
+  --safe-area-right: env(safe-area-inset-right, 0px);
+  --safe-area-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-area-left: env(safe-area-inset-left, 0px);
+  --mobile-edge-spacing: max(0.75rem, var(--safe-area-bottom));
   --mobile-navigation-bottom: var(--mobile-edge-spacing);
   --mobile-navigation-height: 3.25rem;
   --mobile-action-dock-bottom: calc(
@@ -35,25 +39,34 @@
 
 .mobile-bottom-navigation {
   bottom: 0.75rem;
-  bottom: max(0.75rem, env(safe-area-inset-bottom, 0px));
+  bottom: var(--mobile-navigation-bottom);
+  padding-left: max(0.75rem, var(--safe-area-left));
+  padding-right: max(0.75rem, var(--safe-area-right));
   top: auto;
 }
 
 .mobile-action-dock {
   bottom: 4.25rem;
-  bottom: calc(3.5rem + max(0.75rem, env(safe-area-inset-bottom, 0px)));
+  bottom: var(--mobile-action-dock-bottom);
+  left: max(0.75rem, var(--safe-area-left));
+  right: max(0.75rem, var(--safe-area-right));
   top: auto;
 }
 
 html {
   max-width: 100%;
   scroll-behavior: smooth;
+  scroll-padding-top: calc(1rem + var(--safe-area-top));
 }
 
 body {
   margin: 0;
   max-width: 100%;
   min-height: 100vh;
+  min-height: 100svh;
+  padding-top: var(--safe-area-top);
+  padding-left: var(--safe-area-left);
+  padding-right: var(--safe-area-right);
   overflow-x: clip;
   background:
     linear-gradient(rgba(255, 255, 255, 0.55) 1px, transparent 1px),
@@ -219,4 +232,24 @@ textarea:focus {
     scroll-behavior: auto !important;
     transition-duration: 1ms !important;
   }
+}
+
+/* Cover notches and the Home Screen status bar without blocking browser zoom. */
+.app-viewport > main {
+  min-height: calc(100svh - var(--safe-area-top));
+}
+.connection-notice {
+  position: sticky;
+  top: var(--safe-area-top);
+  z-index: 50;
+  border-bottom: 1px solid var(--warn-border);
+  background: var(--warn-bg);
+  color: var(--warn-ink);
+  padding: 0.75rem 1rem;
+  font-size: 0.875rem;
+  line-height: 1.5;
+}
+@media (max-width: 767px) {
+  html { scroll-padding-bottom: calc(var(--mobile-action-dock-bottom) + 4.5rem); }
+  .pick-form-with-dock { padding-bottom: calc(4rem + var(--safe-area-bottom)); }
 }

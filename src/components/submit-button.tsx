@@ -1,6 +1,7 @@
 "use client";
 
 import { useFormStatus } from "react-dom";
+import { usePwa } from "@/components/pwa-provider";
 import type { ButtonHTMLAttributes, ReactNode } from "react";
 import { actionControlClassName } from "@/components/ui-primitives";
 
@@ -21,7 +22,8 @@ export function SubmitButton({
   ...buttonProps
 }: SubmitButtonProps) {
   const { pending } = useFormStatus();
-  const isDisabled = disabled || pending;
+  const { isOffline } = usePwa();
+  const isDisabled = disabled || pending || isOffline;
 
   return (
     <button

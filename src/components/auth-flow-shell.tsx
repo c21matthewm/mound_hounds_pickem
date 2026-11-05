@@ -22,7 +22,7 @@ export function AuthFlowShell({
 }: AuthFlowShellProps) {
   return (
     <main
-      className={`mx-auto flex min-h-screen w-full ${maxWidth} flex-col justify-center px-5 py-12 sm:px-6 sm:py-16`}
+      className={`mx-auto flex min-h-svh w-full ${maxWidth} flex-col justify-center px-5 py-12 sm:px-6 sm:py-16`}
     >
       <header className="grid grid-cols-[4.25rem_minmax(0,1fr)_auto] items-start gap-3">
         <div

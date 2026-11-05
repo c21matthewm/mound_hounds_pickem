@@ -9,6 +9,7 @@ import {
   type FormEvent
 } from "react";
 import { MobileActionDock } from "@/components/mobile-action-dock";
+import { usePwa } from "@/components/pwa-provider";
 import {
   parsePickDraft,
   pickDraftMatchesSavedState,
@@ -84,6 +85,7 @@ export function PickemForm({
   raceId,
   savedSelection
 }: Props) {
+  const { isOffline } = usePwa();
   const groupNumbers = useMemo(() => groups.map((group) => group.groupNumber), [groups]);
   const [draftSelection, setDraftSelection] = useState<SelectionMap>(() => ({ ...savedSelection }));
   const [draftAverageSpeed, setDraftAverageSpeed] = useState(existingAverageSpeed);
@@ -152,7 +154,7 @@ export function PickemForm({
   };
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
-    if (isAlreadySaved || !canSubmit || picksLocked || submitInProgressRef.current) {
+    if (isOffline || navigator.onLine === false || isAlreadySaved || !canSubmit || picksLocked || submitInProgressRef.current) {
       event.preventDefault();
       return;
     }
@@ -183,6 +185,9 @@ export function PickemForm({
     []
   );
 
+  // Draft recovery must read account/race-scoped browser storage after hydration,
+  // then enable persistence so the initial render cannot overwrite a saved draft.
+  /* eslint-disable react-hooks/set-state-in-effect -- Intentional client-only storage hydration. */
   useEffect(() => {
     try {
       if (picksLocked) {
@@ -223,6 +228,7 @@ export function PickemForm({
     savedSelection,
     storageKey
   ]);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   useEffect(() => {
     if (!draftStorageReady) {
@@ -355,7 +361,7 @@ export function PickemForm({
   }, [hasUnsavedChanges, picksLocked]);
 
   return (
-    <form action={action} className="mt-6 space-y-6" onSubmit={handleSubmit} ref={formRef}>
+    <form action={action} className={`mt-6 space-y-6 ${showMobileActionBar ? "pick-form-with-dock" : ""}`} onSubmit={handleSubmit} ref={formRef}>
       <input name="race_id" type="hidden" value={String(raceId)} />
 
       {recoveryDraft ? (
@@ -583,7 +589,7 @@ export function PickemForm({
 
         <button
           className="rounded-md ui-action-primary bg-slate-900 px-5 py-3 text-sm font-semibold text-white hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
-          disabled={!canSubmit || isSubmitting || isAlreadySaved}
+          disabled={isOffline || !canSubmit || isSubmitting || isAlreadySaved}
           type="submit"
         >
           {picksLocked
@@ -592,7 +598,7 @@ export function PickemForm({
               ? "Saving picks..."
               : isAlreadySaved
                 ? "Already saved"
-                : "Save Pick'em Form"}
+                : isOffline ? "Reconnect to save" : "Save Pick'em Form"}
         </button>
 
         {isAlreadySaved && !picksLocked ? (
@@ -620,7 +626,7 @@ export function PickemForm({
                       return (
                         <a
                           aria-label={`Group ${groupNumber}, ${GROUP_STATUS_LABELS[status]}`}
-                          className={`rounded-md border px-2 py-0.5 text-[11px] font-semibold ${GROUP_STATUS_CLASSES[status]}`}
+                          className={`inline-flex min-h-11 min-w-11 items-center justify-center rounded-md border px-2 text-[11px] font-semibold ${GROUP_STATUS_CLASSES[status]}`}
                           href={`#driver-group-${groupNumber}`}
                           key={`dock-group-${groupNumber}`}
                         >
@@ -631,11 +637,11 @@ export function PickemForm({
                   </div>
                 </div>
                 <button
-                  className="shrink-0 rounded-md ui-action-primary bg-slate-900 px-2.5 py-1.5 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
-                  disabled={!canSubmit || isSubmitting || isAlreadySaved}
+                  className="min-h-11 shrink-0 rounded-md ui-action-primary bg-slate-900 px-2.5 py-1.5 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
+                  disabled={isOffline || !canSubmit || isSubmitting || isAlreadySaved}
                   type="submit"
                 >
-                  {isSubmitting ? "Saving..." : isAlreadySaved ? "Already saved" : "Save"}
+                  {isSubmitting ? "Saving..." : isAlreadySaved ? "Already saved" : isOffline ? "Offline" : "Save"}
                 </button>
               </div>
             </div>
