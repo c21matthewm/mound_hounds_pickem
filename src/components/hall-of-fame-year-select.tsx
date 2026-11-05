@@ -1,11 +1,14 @@
 "use client";
 
+import { usePwa } from "@/components/pwa-provider";
+
 type Props = {
   selectedYear: number;
   years: number[];
 };
 
 export function HallOfFameYearSelect({ selectedYear, years }: Props) {
+  const { isOffline } = usePwa();
   return (
     <form action="/leaderboard" className="min-w-0" method="get">
       <input name="tab" type="hidden" value="hall" />
@@ -14,6 +17,7 @@ export function HallOfFameYearSelect({ selectedYear, years }: Props) {
           Season
         </span>
         <select
+          disabled={isOffline}
           className="min-h-11 max-w-full rounded-md ui-control-border border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-900"
           defaultValue={String(selectedYear)}
           name="year"

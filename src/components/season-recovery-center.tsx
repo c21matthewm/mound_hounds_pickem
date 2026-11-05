@@ -1,6 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
+import { usePwa } from "@/components/pwa-provider";
 import { useMemo, useRef, useState } from "react";
 import {
   type SeasonRestorePointSummary,
@@ -77,6 +78,7 @@ const postRecoveryAction = async <T,>(
   payload: Record<string, unknown>,
   requestToken: string
 ): Promise<{ data: T; warning?: string }> => {
+  if (navigator.onLine === false) throw new Error("You are offline. Reconnect before managing season recovery.");
   const response = await fetch(RECOVERY_ENDPOINT, {
     body: JSON.stringify({ ...payload, requestToken }),
     headers: {
@@ -103,8 +105,10 @@ const triggerDownload = (restorePointId: string): void => {
 
 export function SeasonRecoveryCenter({ activeSeason, seasons, selectedSeasonId, requestToken, restorePoints, retention = null, retentionIssue = null }: Props) {
   const router = useRouter();
+  const { isOffline } = usePwa();
   const uploadInputRef = useRef<HTMLInputElement>(null);
   const [busyAction, setBusyAction] = useState<string | null>(null);
+  const isBusy = busyAction !== null || isOffline;
   const [confirmationYear, setConfirmationYear] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
@@ -124,6 +128,10 @@ export function SeasonRecoveryCenter({ activeSeason, seasons, selectedSeasonId, 
   const formattedStoredSize = formatRecoveryBytes(retention?.totalBytes ?? shownBytes);
 
   const runAction = async (name: string, action: () => Promise<void>) => {
+    if (navigator.onLine === false) {
+      setError("You are offline. Reconnect before managing season recovery.");
+      return;
+    }
     setBusyAction(name);
     setError(null);
     setMessage(null);
@@ -312,13 +320,13 @@ export function SeasonRecoveryCenter({ activeSeason, seasons, selectedSeasonId, 
         <input name="tab" type="hidden" value="recovery" />
         <div className="block min-w-0 flex-1 sm:max-w-sm">
           <label htmlFor="recovery-season" className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-600">Backup season</label>
-          <select id="recovery-season" name="recovery_season_id" defaultValue={selectedSeasonId ?? ""} required disabled={busyAction !== null || !seasons.length}
+          <select id="recovery-season" name="recovery_season_id" defaultValue={selectedSeasonId ?? ""} required disabled={isBusy || !seasons.length}
             className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm">
             {!seasons.length ? <option value="">No seasons available</option> : null}
             {seasons.map(season => <option key={season.id} value={season.id}>{season.seasonYear} ({season.status})</option>)}
           </select>
         </div>
-        <button type="submit" disabled={busyAction !== null || !seasons.length}
+        <button type="submit" disabled={isBusy || !seasons.length}
           className="min-h-10 rounded-md border border-slate-300 px-3 py-2 text-sm font-semibold disabled:opacity-50">View backups</button>
       </form>
       {!canCreate ? <CompactNotice className="mt-3">
@@ -351,7 +359,7 @@ export function SeasonRecoveryCenter({ activeSeason, seasons, selectedSeasonId, 
           </div>
           <button
             className="min-h-10 rounded-md ui-action-primary bg-slate-900 px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
-            disabled={!canCreate || busyAction !== null}
+            disabled={!canCreate || isBusy}
             onClick={createAndDownload}
             type="button"
           >
@@ -360,7 +368,7 @@ export function SeasonRecoveryCenter({ activeSeason, seasons, selectedSeasonId, 
         </div>
 
         {retention ? <label className="mt-3 flex items-start gap-2 text-sm text-slate-700">
-          <input checked={keepPermanently} className="mt-1" disabled={!canCreate || busyAction !== null}
+          <input checked={keepPermanently} className="mt-1" disabled={!canCreate || isBusy}
             onChange={event => setKeepPermanently(event.target.checked)} type="checkbox" />
           <span>Keep this backup permanently<span className="mt-0.5 block text-xs text-slate-500">Otherwise, only the newest three routine downloads for this season are kept in the app.</span></span>
         </label> : null}
@@ -390,7 +398,7 @@ export function SeasonRecoveryCenter({ activeSeason, seasons, selectedSeasonId, 
           { label: "Older routine copies", value: retention.cleanupCount }
         ]} />
         <button type="button" className="mt-3 min-h-10 rounded-md border border-slate-300 px-3 py-2 text-sm font-semibold disabled:opacity-50"
-          disabled={busyAction !== null || retention.cleanupCount === 0} onClick={reviewCleanup}>
+          disabled={isBusy || retention.cleanupCount === 0} onClick={reviewCleanup}>
           {busyAction === "retention-preview" ? "Reviewing..." : "Review older backups"}
         </button>
         {retention.cleanupCount === 0 && !cleanupPreview ? <p className="mt-2 text-sm text-slate-600">There are no older routine copies to remove.</p> : null}
@@ -401,7 +409,7 @@ export function SeasonRecoveryCenter({ activeSeason, seasons, selectedSeasonId, 
               : "There are no older routine copies to remove."}
           </CompactNotice>
           <button type="button" className="min-h-10 rounded-md border border-red-300 bg-red-50 px-3 py-2 text-sm font-semibold text-red-800 disabled:opacity-50"
-            disabled={busyAction !== null || cleanupPreview.cleanupCount === 0} onClick={cleanup}>
+            disabled={isBusy || cleanupPreview.cleanupCount === 0} onClick={cleanup}>
             {busyAction === "cleanup" ? "Removing..." : "Remove reviewed backups"}
           </button>
           <button type="button" className="ml-2 min-h-10 px-3 py-2 text-sm font-semibold text-slate-600 disabled:opacity-50"
@@ -422,7 +430,7 @@ export function SeasonRecoveryCenter({ activeSeason, seasons, selectedSeasonId, 
             </span>
             <select
               className="w-full rounded-md ui-control-border border border-slate-300 bg-white px-3 py-2 text-sm"
-              disabled={busyAction !== null}
+              disabled={isBusy}
               onChange={(event) => {
                 setSelectedId(event.target.value);
                 setPreview(null);
@@ -461,7 +469,7 @@ export function SeasonRecoveryCenter({ activeSeason, seasons, selectedSeasonId, 
               <div className="mt-3 flex flex-wrap gap-2">
                 <button
                   className="min-h-10 rounded-md ui-control-border border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-800"
-                  disabled={busyAction !== null}
+                  disabled={isBusy}
                   onClick={() => triggerDownload(selectedPoint.id)}
                   type="button"
                 >
@@ -469,7 +477,7 @@ export function SeasonRecoveryCenter({ activeSeason, seasons, selectedSeasonId, 
                 </button>
                 <button
                   className="min-h-10 rounded-md ui-action-primary bg-slate-900 px-3 py-2 text-sm font-semibold text-white disabled:opacity-60"
-                  disabled={busyAction !== null}
+                  disabled={isBusy}
                   onClick={previewRestore}
                   type="button"
                 >
@@ -477,7 +485,7 @@ export function SeasonRecoveryCenter({ activeSeason, seasons, selectedSeasonId, 
                 </button>
                 {retention && selectedPoint.source === "manual" ? <button
                   className="min-h-10 rounded-md border border-slate-300 px-3 py-2 text-sm font-semibold disabled:opacity-50"
-                  disabled={busyAction !== null} onClick={toggleProtection} type="button">
+                  disabled={isBusy} onClick={toggleProtection} type="button">
                   {busyAction === "protect" ? "Saving..." : selectedPoint.retention_key === null ? "Keep permanently" : "Return to routine retention"}
                 </button> : null}
               </div>
@@ -494,7 +502,7 @@ export function SeasonRecoveryCenter({ activeSeason, seasons, selectedSeasonId, 
             <input
               accept="application/json,.json"
               className="mt-3 block w-full text-sm text-slate-700 file:mr-3 file:rounded-md file:border file:border-slate-300 file:bg-white file:px-3 file:py-2 file:text-sm file:font-semibold"
-              disabled={busyAction !== null}
+              disabled={isBusy}
               onChange={(event) => {
                 const file = event.target.files?.[0];
                 if (file) {
@@ -579,7 +587,7 @@ export function SeasonRecoveryCenter({ activeSeason, seasons, selectedSeasonId, 
               <button
                 className="mt-3 min-h-10 w-full rounded-md border border-red-300 bg-red-50 px-4 py-2 text-sm font-semibold text-red-800 disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto"
                 disabled={
-                  busyAction !== null ||
+                  isBusy ||
                   confirmationYear !== String(preview.seasonYear)
                 }
                 onClick={restore}

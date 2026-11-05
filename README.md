@@ -346,3 +346,12 @@ documents.
 - `node_modules`, `.next`, Playwright artifacts, and local env files are intentionally ignored.
 - Reminder delivery requires a configured email provider. Without a verified sending domain, leave
   Resend values unset and keep `PICK_EMAILS_ENABLED=false`.
+
+## Home Screen app
+
+Install guidance is available at `/install` (also linked from Sign in and the League Menu).
+The app includes iPhone/Android icons, a standalone web manifest, safe-area layouts, and a small
+public-only offline recovery screen. Already-open forms retain the existing unsent pick-draft
+protection; saving picks and loading current league data still require internet. Nothing queues
+for background submission. See [PWA setup and offline policy](docs/PWA.md) for verification and
+HTTPS/device requirements. `npm run test:pwa` uses an isolated temporary app with no real data.

@@ -12,3 +12,7 @@ Recommended export:
 
 - square PNG
 - at least 1024x1024
+
+Home Screen icons are derived from this same artwork with `npm run icons:generate`.
+Generated PNGs live in `public/icons`; see `docs/PWA.md` for sizes, maskable padding,
+and offline-cache versioning when replacing the artwork.

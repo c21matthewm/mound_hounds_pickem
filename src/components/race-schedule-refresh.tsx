@@ -24,7 +24,7 @@ export function RaceScheduleRefresh({
     let timeoutId: ReturnType<typeof setTimeout> | null = null;
 
     const refresh = () => {
-      if (Date.now() - lastRefreshAt.current < MIN_REFRESH_GAP_MS) {
+      if (navigator.onLine === false || Date.now() - lastRefreshAt.current < MIN_REFRESH_GAP_MS) {
         return;
       }
       lastRefreshAt.current = Date.now();
@@ -35,7 +35,7 @@ export function RaceScheduleRefresh({
       if (timeoutId) {
         clearTimeout(timeoutId);
       }
-      if (document.visibilityState !== "visible") {
+      if (document.visibilityState !== "visible" || navigator.onLine === false) {
         timeoutId = null;
         return;
       }
@@ -72,6 +72,10 @@ export function RaceScheduleRefresh({
       scheduleRefresh();
     };
 
+    // Pause polling offline. Reconnection schedules the next normal check; it
+    // never immediately refreshes or submits an open draft.
+    window.addEventListener("offline", scheduleRefresh);
+    window.addEventListener("online", scheduleRefresh);
     window.addEventListener("focus", handleFocus);
     document.addEventListener("visibilitychange", handleVisibilityChange);
     scheduleRefresh();
@@ -80,6 +84,8 @@ export function RaceScheduleRefresh({
       if (timeoutId) {
         clearTimeout(timeoutId);
       }
+      window.removeEventListener("offline", scheduleRefresh);
+      window.removeEventListener("online", scheduleRefresh);
       window.removeEventListener("focus", handleFocus);
       document.removeEventListener("visibilitychange", handleVisibilityChange);
     };

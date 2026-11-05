@@ -18,7 +18,13 @@ const PROTECTED_ROUTE_PREFIXES = [
 const startsWithPrefix = (pathname: string, prefixes: string[]): boolean =>
   prefixes.some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`));
 
+// These exact public GET resources must not refresh sessions or need Supabase.
+const PUBLIC_APP_PATHS = new Set(["/install", "/manifest.webmanifest", "/sw.js", "/offline.html"]);
+
 export async function middleware(request: NextRequest) {
+  if ((request.method === "GET" || request.method === "HEAD") && PUBLIC_APP_PATHS.has(request.nextUrl.pathname)) {
+    return NextResponse.next({ request });
+  }
   let anonKey: string;
   let url: string;
   try {

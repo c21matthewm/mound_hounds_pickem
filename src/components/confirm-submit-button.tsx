@@ -2,6 +2,7 @@
 
 import type { ButtonHTMLAttributes, MouseEvent, ReactNode } from "react";
 import { useFormStatus } from "react-dom";
+import { usePwa } from "@/components/pwa-provider";
 
 type ConfirmSubmitButtonProps = Omit<
   ButtonHTMLAttributes<HTMLButtonElement>,
@@ -24,6 +25,8 @@ export function ConfirmSubmitButton({
   ...buttonProps
 }: ConfirmSubmitButtonProps) {
   const { pending } = useFormStatus();
+  const { isOffline } = usePwa();
+  const disabled = pending || buttonProps.disabled || (type === "submit" && isOffline);
   const handleClick = (event: MouseEvent<HTMLButtonElement>) => {
     if (!window.confirm(confirmMessage)) {
       event.preventDefault();
@@ -36,9 +39,9 @@ export function ConfirmSubmitButton({
   return (
     <button
       {...buttonProps}
-      aria-disabled={pending || buttonProps.disabled}
+      aria-disabled={disabled}
       className={className}
-      disabled={pending || buttonProps.disabled}
+      disabled={disabled}
       formNoValidate={formNoValidate}
       onClick={handleClick}
       type={type}

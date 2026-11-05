@@ -37,9 +37,14 @@ await build({
     name: "offline-pick-fixture-boundaries",
     enforce: "pre",
     resolveId(source) {
+      if (source === "next/link" || source === "next/navigation") return "\0fixture:" + source;
       if (source === "server-only" || source.startsWith("next/") || source.startsWith("@supabase/") || source.includes("/lib/supabase/")) {
         throw new Error("The offline pick form fixture reached a server/service import.");
       }
+    },
+    load(id) {
+      if (id === "\0fixture:next/link") return "import {createElement} from 'react';export default function Link({children,href,...props}){return createElement('a',{href,...props},children)}";
+      if (id === "\0fixture:next/navigation") return "const router={refresh:()=>{window.fixtureRefreshes=(window.fixtureRefreshes||0)+1;}};export const useRouter=()=>router;export const usePathname=()=>'/picks';";
     },
     transform(code, id) {
       if (normalized(id) === normalized(globalsPath)) {
@@ -74,6 +79,11 @@ try {
     await page.setContent('<html><head><meta http-equiv="Content-Security-Policy" content="default-src &apos;none&apos;; script-src &apos;unsafe-inline&apos;; style-src &apos;unsafe-inline&apos;; img-src data: blob:; connect-src &apos;none&apos;"><style>'+css+'</style></head><body><div id="root"></div></body></html>');
     await page.evaluate(({ key, draft }) => {
       window.fixtureCalls = []; window.confirm = () => true;
+      // The browser's actual networking stays disabled; only this UI signal is
+      // controlled to exercise both connection states with fictional actions.
+      window.fixtureOnline = true;
+      Object.defineProperty(navigator, "onLine", { configurable: true, get: () => window.fixtureOnline });
+      Object.defineProperty(window, "isSecureContext", { configurable: true, value: false });
       const values = new Map(draft ? [[key, JSON.stringify(draft)]] : []);
       Object.defineProperty(window, "localStorage", { configurable: true, value: {
         getItem: key => values.get(key) ?? null,
@@ -127,6 +137,104 @@ try {
   await page.getByRole("button",{name:"Continue draft",exact:true}).click();
   assert.equal(await page.getByRole("button",{name:"Save Pick'em Form",exact:true}).isEnabled(),true);
   assert.equal(await page.locator('[name="average_speed"]').inputValue(),"136.500"); checks++; await page.close();
+  // Editing an already-loaded form remains possible offline; saving is manual.
+  page = await scene("saved");
+  await page.locator('[name="average_speed"]').fill("139.125");
+  await page.evaluate(() => { window.fixtureOnline = false; window.dispatchEvent(new Event("offline")); });
+  await page.getByRole("button", { name: "Reconnect to save", exact: true }).waitFor();
+  assert.equal(await page.getByRole("button", { name: "Reconnect to save", exact: true }).isDisabled(), true);
+  await page.locator("form").evaluate(form => form.requestSubmit());
+  assert.equal(await page.evaluate(() => window.fixtureCalls.length), 0); checks++;
+  await page.locator('[name="average_speed"]').fill("139.250");
+  assert.equal((await page.evaluate(key => JSON.parse(localStorage.getItem(key)), key)).averageSpeed, "139.250"); checks++;
+  await page.evaluate(() => { window.fixtureOnline = true; window.dispatchEvent(new Event("online")); });
+  await page.getByRole("button", { name: "Save Pick'em Form", exact: true }).waitFor();
+  assert.equal(await page.locator('[name="average_speed"]').inputValue(), "139.250");
+  assert.equal(await page.evaluate(() => window.fixtureCalls.length), 0, "Reconnect must not submit a draft"); checks++;
+  await page.getByRole("button", { name: "Save Pick'em Form", exact: true }).click();
+  await page.waitForFunction(() => window.fixtureCalls.length === 1); checks++; await page.close();
+  page = await scene("saved");
+  await page.evaluate(() => window.showPwaScene());
+  await page.getByRole("button", { name: "Save changes", exact: true }).waitFor();
+  await page.evaluate(() => { window.fixtureOnline = false; window.dispatchEvent(new Event("offline")); });
+  await page.waitForFunction(() => document.querySelector('button')?.disabled === true);
+  assert.equal(await page.getByRole("button", { name: "Save changes", exact: true }).isDisabled(), true);
+  assert.equal(await page.getByRole("button", { name: "Confirm changes", exact: true }).isDisabled(), true);
+  await page.getByRole("button", { name: "Plain submit", exact: true }).click();
+  assert.equal(await page.evaluate(() => window.fixtureCalls.length), 0, "Offline capture must also stop ordinary forms"); checks++; await page.close();
+  page = await scene("saved");
+  await page.evaluate(() => {
+    const media = window.matchMedia.bind(window);
+    window.matchMedia = query => query === "(display-mode: standalone)" ? { matches: true, addEventListener() {}, removeEventListener() {} } : media(query);
+    window.showPwaScene();
+  });
+  await page.getByText("You're using the Home Screen app.", { exact: true }).waitFor(); checks++; await page.close();
+  page = await scene("saved");
+  await page.evaluate(() => {
+    Object.defineProperty(window, "isSecureContext", { configurable: true, value: true });
+    Object.defineProperty(navigator, "serviceWorker", { configurable: true, value: { register: async () => { throw new Error("Worker intentionally blocked in fixture"); } } });
+    window.showPwaScene();
+  });
+  await page.getByRole("button", { name: "Save changes", exact: true }).waitFor();
+  await page.getByRole("button", { name: "Save changes", exact: true }).click();
+  await page.waitForFunction(() => window.fixtureCalls.length === 1); checks++; await page.close();
+  page = await scene("saved");
+  await page.evaluate(() => {
+    Object.defineProperty(window, "isSecureContext", { configurable: true, value: true });
+    Object.defineProperty(navigator, "serviceWorker", { configurable: true, value: { register: async () => { throw new Error("Worker intentionally blocked in fixture"); } } });
+    window.showPwaScene();
+  });
+  await page.getByRole("button", { name: "Save changes", exact: true }).waitFor();
+  await page.evaluate(() => {
+    window.fixtureInstallCalls = 0;
+    const event = new Event("beforeinstallprompt", { cancelable: true });
+    event.prompt = async () => { window.fixtureInstallCalls++; };
+    event.userChoice = Promise.resolve({ outcome: "accepted" });
+    window.dispatchEvent(event);
+  });
+  await page.getByRole("button", { name: "Install Mound Hounds", exact: true }).click();
+  await page.getByText("App added. Open Mound Hounds from your Home Screen or app launcher.", { exact: true }).waitFor();
+  assert.equal(await page.evaluate(() => window.fixtureInstallCalls), 1); checks++; await page.close();
+  page = await scene("saved");
+  await page.evaluate(() => {
+    Object.defineProperty(navigator, "standalone", { configurable: true, value: true });
+    window.showPwaScene();
+  });
+  await page.getByText("You're using the Home Screen app.", { exact: true }).waitFor(); checks++; await page.close();
+  page = await scene("saved");
+  await page.setViewportSize({ width: 844, height: 390 });
+  await page.evaluate(() => {
+    for (const [name, value] of Object.entries({ top:44, right:44, bottom:34, left:44 })) document.documentElement.style.setProperty('--safe-area-'+name, value+'px');
+    window.showFrameScene();
+  });
+  // Use a phone-width viewport for fixed navigation, then simulate its safe areas.
+  await page.setViewportSize({ width: 700, height: 390 });
+  await page.locator('[data-mobile-navigation]').waitFor();
+  await page.waitForFunction(() => document.querySelector('[data-mobile-navigation]').getBoundingClientRect().height > 0);
+  const geometry = await page.evaluate(() => {
+    const nav=document.querySelector('[data-mobile-navigation]').getBoundingClientRect();
+    const dock=document.querySelector('[data-mobile-action-dock]').getBoundingClientRect();
+    const profile=document.querySelector('a[aria-label="Profile"]').getBoundingClientRect();
+    return { navTop:nav.top, dockBottom:dock.bottom, dockLeft:dock.left, dockRight:dock.right, profileWidth:profile.width, profileHeight:profile.height, overflow:document.documentElement.scrollWidth>innerWidth+1 };
+  });
+  assert.equal(geometry.overflow, false); assert.ok(geometry.dockBottom <= geometry.navTop, JSON.stringify(geometry));
+  assert.ok(geometry.dockLeft>=44 && geometry.dockRight<=700-44); assert.ok(geometry.profileWidth>=44 && geometry.profileHeight>=44); checks++; await page.close();
+  page = await scene("saved");
+  await page.evaluate(() => { window.fixtureRefreshes = 0; window.showRefreshScene(); });
+  await page.getByText("Schedule refresh fixture", { exact: true }).waitFor();
+  await page.evaluate(() => { window.fixtureOnline = false; window.dispatchEvent(new Event("offline")); window.dispatchEvent(new Event("focus")); });
+  assert.equal(await page.evaluate(() => window.fixtureRefreshes), 0, "Offline focus must preserve the open page"); checks++;
+  await page.evaluate(() => { window.fixtureOnline = true; window.dispatchEvent(new Event("online")); });
+  assert.equal(await page.evaluate(() => window.fixtureRefreshes), 0, "Reconnection must not immediately refresh"); checks++;
+  await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+  await page.waitForFunction(() => window.fixtureRefreshes === 1); checks++; await page.close();
+  page = await scene("saved");
+  await page.evaluate(() => window.showPwaScene());
+  await page.getByRole("button", { name: "Save changes", exact: true }).waitFor();
+  await page.evaluate(() => { window.fixtureOnline = false; window.dispatchEvent(new Event("offline")); });
+  await page.waitForFunction(() => document.querySelector('[name="year"]')?.disabled === true);
+  assert.equal(await page.locator('[name="year"]').isDisabled(), true);
+  assert.equal(await page.locator('#leaderboard-race-select').isDisabled(), true); checks++; await page.close();
   assert.deepEqual(errors,[],"Browser fixture exceptions"); assert.deepEqual(blocked,[],"No network requests are permitted");
   console.log(`PASS: ${checks} offline pick-save UI checks; no browser requests permitted.`);
 } finally { await browser.close(); }
