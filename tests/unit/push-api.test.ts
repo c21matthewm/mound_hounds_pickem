@@ -1,0 +1,21 @@
+import { createECDH, randomBytes } from "node:crypto";
+import { beforeEach, describe, it, expect, vi } from "vitest";
+const mocks = vi.hoisted(() => ({ user: vi.fn(), server: vi.fn(), service: vi.fn(), configured: vi.fn(), key: vi.fn(), deliver: vi.fn(), from: vi.fn(), rpc: vi.fn() }));
+vi.mock("server-only", () => ({}));
+vi.mock("@/lib/supabase/server", () => ({ createServerSupabaseClient: mocks.server }));
+vi.mock("@/lib/supabase/service-role", () => ({ createServiceRoleSupabaseClient: mocks.service }));
+vi.mock("@/lib/push-subscriptions", () => ({ deliverDevicePush: mocks.deliver }));
+vi.mock("@/lib/web-push", async (original) => ({ ...await original<object>(), isWebPushConfigured: mocks.configured, getPublicVapidKey: mocks.key }));
+import { handlePushRequest } from "@/lib/push-api";
+const endpoint = "https://fcm.googleapis.com/fcm/send/fixture";
+const request = (method: string, input: unknown, origin = "https://fixture.example") => new Request("https://fixture.example/api/push/subscription", { method, headers: { Origin: origin, "Content-Type": "application/json" }, body: JSON.stringify(input) });
+let writes: unknown[] = [];
+beforeEach(() => { vi.clearAllMocks(); writes = []; mocks.user.mockResolvedValue({ data: { user: { id: "fixture-user" } } }); mocks.server.mockResolvedValue({ auth: { getUser: mocks.user }, from: mocks.from, rpc: mocks.rpc }); mocks.configured.mockReturnValue(true); mocks.key.mockReturnValue("public-only"); const query = { select: () => query, eq: vi.fn(() => query), limit: () => query, maybeSingle: async () => ({ data: null, error: null }), insert: (value: unknown) => { writes.push(value); return Promise.resolve({ error: { code: "unique" } }); }, delete: () => query, then: (resolve: (v: unknown) => unknown) => resolve({ data: [], error: null }) }; mocks.from.mockReturnValue(query); mocks.rpc.mockResolvedValue({ data: false, error: null }); });
+describe("owner-only push settings API", () => {
+    it("rejects unauthenticated mutations before persistence", async () => { mocks.user.mockResolvedValue({ data: { user: null } }); expect((await handlePushRequest(request("POST", {}))).status).toBe(401); expect(mocks.from).not.toHaveBeenCalled(); expect(mocks.rpc).not.toHaveBeenCalled(); });
+    it("rejects cross-origin mutations before opening a session", async () => { expect((await handlePushRequest(request("DELETE", { endpoint }, "https://evil.invalid"))).status).toBe(403); expect(mocks.server).not.toHaveBeenCalled(); });
+    it("rejects arbitrary relay destinations without writes", async () => { expect((await handlePushRequest(request("POST", { endpoint: "https://127.0.0.1/private" }))).status).toBe(400); expect(writes).toEqual([]); expect(mocks.service).not.toHaveBeenCalled(); });
+    it("does not privileged-upsert endpoints owned by another account", async () => { const ec = createECDH("prime256v1"); ec.generateKeys(); const response = await handlePushRequest(request("POST", { endpoint, keys: { p256dh: ec.getPublicKey().toString("base64url"), auth: randomBytes(16).toString("base64url") } })); expect(response.status).toBe(409); expect(writes[0]).toMatchObject({ user_id: "fixture-user" }); expect(mocks.service).not.toHaveBeenCalled(); });
+    it("cooldown or missing enrollment blocks a test without contacting relay", async () => { expect((await handlePushRequest(request("POST", { endpoint }), true)).status).toBe(429); expect(mocks.deliver).not.toHaveBeenCalled(); });
+    it("configuration response exposes public key and booleans only", async () => { const response = await handlePushRequest(new Request("https://fixture.example/api/push/subscription")); expect(await response.json()).toMatchObject({ publicKey: "public-only", enabled: false, hasDevices: false }); expect(mocks.service).not.toHaveBeenCalled(); });
+});

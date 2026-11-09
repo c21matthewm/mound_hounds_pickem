@@ -3,7 +3,7 @@
 -- Before running:
 -- 1. Rotate CRON_SECRET in Vercel and redeploy production.
 -- 2. Paste that new value below.
--- 3. Leave enable_pick_reminders false until email delivery is intentionally enabled.
+-- 3. Leave enable_pick_reminders false until email and/or push delivery is intentionally enabled.
 -- 4. Run this from an unsaved SQL Editor tab, then close the tab without saving it.
 
 create extension if not exists pg_cron;

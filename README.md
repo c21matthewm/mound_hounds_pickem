@@ -342,7 +342,7 @@ documents.
 
 ## Notes
 
-- `.venv` is not required; this is a Node/Next.js app.
+- `.venv` is not required for the Next.js app. Optional results automation uses a separate Python3.11+ service.
 - `node_modules`, `.next`, Playwright artifacts, and local env files are intentionally ignored.
 - Reminder delivery requires a configured email provider. Without a verified sending domain, leave
   Resend values unset and keep `PICK_EMAILS_ENABLED=false`.
@@ -355,3 +355,12 @@ public-only offline recovery screen. Already-open forms retain the existing unse
 protection; saving picks and loading current league data still require internet. Nothing queues
 for background submission. See [PWA setup and offline policy](docs/PWA.md) for verification and
 HTTPS/device requirements. `npm run test:pwa` uses an isolated temporary app with no real data.
+
+
+## Results detection and optional phone notifications
+
+Start with the [simple commissioner and participant guide](docs/START_HERE.md).
+It separates your one-time setup from the four participant steps. No Python host
+or paid messaging account is needed. Results checks follow the race calendar and
+only verified official results can be approved in Admin; email is independent.
+Technical details live in [the reference runbook](docs/RESULTS_AUTOMATION.md).

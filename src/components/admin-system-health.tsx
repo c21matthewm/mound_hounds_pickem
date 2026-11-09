@@ -15,6 +15,7 @@ import { formatLeagueDateTime } from "@/lib/timezone";
 import { EXPECTED_SCHEMA_VERSION } from "@/lib/supabase/schema-version";
 
 export type AdminReminderHealthRow = {
+  channel?: "email" | "push";
   attempt_count: number;
   delivery_status: "failed" | "pending" | "sent";
   last_error: string | null;
@@ -83,6 +84,7 @@ type AdminSystemHealthProps = {
   cleanupTestFlowDataAction: (formData: FormData) => void | Promise<void>;
   currentTime: number;
   emailEnabled: boolean;
+  pushEnabled?: boolean;
   healthContract: {
     healthy: boolean;
     missing: string[];
@@ -109,6 +111,7 @@ export function AdminSystemHealth({
   cleanupTestFlowDataAction,
   currentTime,
   emailEnabled,
+  pushEnabled=false,
   healthContract,
   jobEvents,
   jobRuns,
@@ -145,7 +148,7 @@ export function AdminSystemHealth({
     "fantasy-winner": 3 * 60 * 60 * 1000,
     "pick-reminders": 20 * 60 * 1000
   };
-  const expectedJobNames: AdminJobRunHealthRow["job_name"][] = !activeSeasonYear ? [] : emailEnabled
+  const expectedJobNames: AdminJobRunHealthRow["job_name"][] = !activeSeasonYear ? [] : (emailEnabled||pushEnabled)
     ? ["fantasy-winner", "pick-reminders"]
     : ["fantasy-winner"];
   const staleJobNames = expectedJobNames.filter((jobName) => {
@@ -369,7 +372,7 @@ export function AdminSystemHealth({
           </section>
 
           <section>
-            <h3 className="font-semibold text-slate-900">Recent email attempts</h3>
+            <h3 className="font-semibold text-slate-900">Recent reminder attempts</h3>
             {reminderRows.length === 0 ? (
               <p className="mt-2 text-sm text-slate-600">No delivery attempts recorded.</p>
             ) : (
@@ -377,7 +380,7 @@ export function AdminSystemHealth({
                 {reminderRows.slice(0, 6).map((row, index) => (
                   <div className="flex items-start justify-between gap-3 text-sm" key={`${row.updated_at}-${index}`}>
                     <div>
-                      <p className="font-medium text-slate-800">{row.reminder_type} · attempt {row.attempt_count}</p>
+                      <p className="font-medium text-slate-800">{row.channel === "push" ? "Push" : "Email"} · {row.reminder_type} · attempt {row.attempt_count}</p>
                       {row.last_error ? <p className="mt-0.5 line-clamp-2 text-xs text-red-700">{row.last_error}</p> : null}
                     </div>
                     <StatusChip tone={row.delivery_status === "failed" ? "danger" : row.delivery_status === "sent" ? "success" : "neutral"}>

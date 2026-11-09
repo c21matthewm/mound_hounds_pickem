@@ -1,0 +1,7 @@
+# Runtime dependencies, pinned after checking the official Python registry.
+fastapi==0.162.2
+pydantic==2.14.3
+httpx==0.28.1
+beautifulsoup4==4.15.0
+uvicorn==0.54.0
+pypdf==7.0.0

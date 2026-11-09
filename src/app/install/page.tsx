@@ -26,6 +26,15 @@ export default function InstallPage() {
           <li>Confirm, then open Mound Hounds from your Home Screen or app launcher.</li>
         </ol>
       </section>
+      <section aria-labelledby="device-reminders" className="mt-6 rounded-lg border border-slate-200 bg-white p-4">
+        <h2 id="device-reminders" className="text-lg font-semibold text-slate-950">Optional notifications</h2>
+        <ol className="mt-2 list-decimal space-y-2 pl-5 text-sm leading-6 text-slate-600">
+          <li>Open the Home Screen app and sign in.</li>
+          <li>Open <Link href="/profile" className="font-semibold underline">Profile</Link> and choose <strong>Enable notifications on this device</strong>, then tap <strong>Allow</strong>.</li>
+          <li>Tap <strong>Send test notification</strong> to check it worked.</li>
+        </ol>
+        <p className="mt-3 text-sm text-slate-600">Email reminders work separately. You can stop device alerts in Profile with <strong>Disable on this device</strong>.</p>
+      </section>
       <section aria-labelledby="offline-support" className="mt-6 rounded-lg border border-blue-200 bg-blue-50 p-4">
         <h2 className="text-lg font-semibold text-slate-950" id="offline-support">What works offline?</h2>
         <p className="mt-2 text-sm leading-6 text-slate-700">After an online visit, the app can show a recovery screen when you lose your connection. An already-open pick form can keep its unsent draft on this device where browser storage is available.</p>

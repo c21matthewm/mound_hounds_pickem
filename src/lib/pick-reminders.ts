@@ -24,7 +24,10 @@ import { loadActiveLeagueSeason } from "@/lib/seasons";
 import { canonicalSiteOrigin } from "@/lib/site-url";
 import { createServiceRoleSupabaseClient } from "@/lib/supabase/service-role";
 
-type ReminderChannel = "email";
+import { isWebPushConfigured } from "@/lib/web-push";
+import { loadPushSubscriptions, loadCurrentPushSubscription, deliverDevicePush } from "@/lib/push-subscriptions";
+
+type ReminderChannel = "email" | "push";
 
 type UpcomingRace = PickReminderRace;
 
@@ -42,6 +45,9 @@ type PickUserRow = {
 type PickReminderSummary = {
   batchDeliveryCount: number;
   emailDeliveryEnabled: boolean;
+  pushDeliveryEnabled: boolean;
+  pushSent: number;
+  pushFailed: number;
   emailFailed: number;
   emailSent: number;
   emailSkippedNoAddress: number;
@@ -296,6 +302,7 @@ export async function sendDuePickReminders(): Promise<PickReminderSummary> {
   const supabase = createServiceRoleSupabaseClient();
   const now = new Date();
   const emailDeliveryEnabled = process.env.PICK_EMAILS_ENABLED?.trim().toLowerCase() === "true";
+  const pushDeliveryEnabled = process.env.PICK_PUSH_ENABLED?.trim().toLowerCase() === "true";
   const emptySummary = (
     reason: PickReminderSummary["reason"],
     raceId: number | null = null,
@@ -304,6 +311,9 @@ export async function sendDuePickReminders(): Promise<PickReminderSummary> {
   ): PickReminderSummary => ({
     batchDeliveryCount: 0,
     emailDeliveryEnabled,
+    pushDeliveryEnabled,
+    pushSent:0,
+    pushFailed:0,
     emailFailed: 0,
     emailSent: 0,
     emailSkippedAlreadySent: 0,
@@ -320,7 +330,7 @@ export async function sendDuePickReminders(): Promise<PickReminderSummary> {
     reminderType
   });
 
-  if (!emailDeliveryEnabled) {
+  if (!emailDeliveryEnabled && !pushDeliveryEnabled) {
     return emptySummary("delivery_disabled");
   }
 
@@ -455,10 +465,11 @@ export async function sendDuePickReminders(): Promise<PickReminderSummary> {
     );
   }
 
-  const emailByUserId = await loadAuthEmailsByUserId(
-    supabase,
-    participantsMissingPicks.map((participant) => participant.id)
-  );
+  let emailLoadFailed=false,pushLoadFailed=false;
+  let emailByUserId=new Map<string,string>();
+  let pushDevices:Awaited<ReturnType<typeof loadPushSubscriptions>>=[];
+  if(emailDeliveryEnabled){try{emailByUserId=await loadAuthEmailsByUserId(supabase,participantsMissingPicks.map(p=>p.id));}catch{emailLoadFailed=true;console.error("[pick-reminders] Email preparation failed.");}}
+  if(pushDeliveryEnabled){try{if(!isWebPushConfigured())throw new Error("Not configured");pushDevices=await loadPushSubscriptions(supabase,participantsMissingPicks.map(p=>p.id),true);}catch{pushLoadFailed=true;console.error("[pick-reminders] Push preparation failed.");}}
   const participantById = new Map(
     participantsMissingPicks.map((participant) => [participant.id, participant])
   );
@@ -476,15 +487,14 @@ export async function sendDuePickReminders(): Promise<PickReminderSummary> {
     .sort((left, right) => left.id.localeCompare(right.id))
     .forEach((participant) => {
       const recipientEmail = emailByUserId.get(participant.id) ?? null;
-      if (recipientEmail) {
+      if (emailDeliveryEnabled && recipientEmail) {
         desiredDeliveryByKey.set(`${participant.id}:email`, {
           channel: "email",
           participant,
           recipient: recipientEmail
         });
-      } else {
-        emailSkippedNoAddress += 1;
-      }
+      } else if(emailDeliveryEnabled) {emailSkippedNoAddress += 1;}
+      if(pushDevices.some(device=>device.user_id===participant.id))desiredDeliveryByKey.set(`${participant.id}:push`,{channel:"push",participant,recipient:"web-push"});
     });
 
   const queueFields =
@@ -503,7 +513,7 @@ export async function sendDuePickReminders(): Promise<PickReminderSummary> {
     .filter(
       (row) =>
         row.delivery_status !== "sent" &&
-        !desiredDeliveryByKey.has(`${row.user_id}:${row.channel}`)
+        !desiredDeliveryByKey.has(`${row.user_id}:${row.channel}`) && !(row.channel==="email"?emailLoadFailed:pushLoadFailed)
     )
     .map((row) => row.id);
   if (staleQueueIds.length > 0) {
@@ -560,6 +570,8 @@ export async function sendDuePickReminders(): Promise<PickReminderSummary> {
     REMINDER_SEND_CONCURRENCY,
     async (queueRow) => {
       const counts = {
+        pushSent:0,
+        pushFailed:0,
         emailFailed: 0,
         emailSent: 0,
         emailSkippedAlreadySent: 0,
@@ -572,6 +584,7 @@ export async function sendDuePickReminders(): Promise<PickReminderSummary> {
       if (!participant || !desiredDelivery) {
         return counts;
       }
+      if(Date.now()-now.getTime()>40_000)return counts;
       const recipient = desiredDelivery.recipient;
       let reminderId: number | null = null;
       try {
@@ -580,17 +593,36 @@ export async function sendDuePickReminders(): Promise<PickReminderSummary> {
           upcomingRace.id,
           participant.id,
           reminderWindow.key,
-          "email",
+          queueRow.channel,
           recipient
         );
 
         if (!reminderId) {
-          counts.emailSkippedAlreadySent = 1;
+          if(queueRow.channel==="email")counts.emailSkippedAlreadySent = 1;
         } else {
           const claimedReminderId = reminderId;
           const freshContext = await loadFreshReminderContext(supabase, claimedReminderId);
           if (!freshContext) {
             await discardUnsentReminder(supabase, claimedReminderId);
+            return counts;
+          }
+          if(queueRow.channel==="push") {
+            const devices=await loadPushSubscriptions(supabase,[participant.id],true);
+            const outcomes=await Promise.allSettled(devices.map(async device=>{
+              if(!reminderContextsMatch(freshContext,await loadFreshReminderContext(supabase,claimedReminderId)))return "skipped";
+              const active=await loadCurrentPushSubscription(supabase,device.id,participant.id);
+              if(!active)return "skipped";
+              const missing=freshContext.missingRaces;
+              const raceName=pickWindowDisplayName(missing,missing[0].race_name);
+              const deadline=pickLockAtForRace(freshContext.races[0]);
+              const result=await deliverDevicePush(supabase,active,{title:"🏁 Mound Hounds Pick Reminder",body:`${raceName}: picks close ${new Date(deadline).toLocaleString("en-US",{timeZone:"America/Indiana/Indianapolis",month:"short",day:"numeric",hour:"numeric",minute:"2-digit"})} Indianapolis time. ${reminderWindow.key==="4h"?"Final four-hour reminder.":"Two-day reminder."}`,url:"/picks",tag:`pick-reminder-${reminderWindow.key}-${upcomingRace.pick_window_key}`},reminderWindow.key==="4h"?14400:86400);
+              return result.status;
+            }));
+            const sent=outcomes.filter(result=>result.status==="fulfilled"&&result.value==="sent").length;
+            const failed=outcomes.filter(result=>result.status==="rejected"||result.value==="failed").length;
+            if(sent>0){await markReminderSent(supabase,claimedReminderId,`web-push:${sent}/${devices.length}`);counts.pushSent=1;}
+            else if(failed>0){await markReminderFailed(supabase,claimedReminderId,"Push delivery could not be confirmed.");counts.pushFailed=1;}
+            else await discardUnsentReminder(supabase,claimedReminderId);
             return counts;
           }
           const message = buildPickReminderMessage({
@@ -622,8 +654,8 @@ export async function sendDuePickReminders(): Promise<PickReminderSummary> {
       } catch (error) {
         const reason =
           error instanceof Error ? error.message : "Unknown email reminder send failure.";
-        counts.emailFailed = 1;
-        console.error(`[pick-reminders] Email failed for profile ${participant.id}: ${reason}`);
+        if(queueRow.channel==="push")counts.pushFailed=1;else counts.emailFailed = 1;
+        console.error("[pick-reminders] Delivery failed.");
         if (reminderId) {
           await markReminderFailed(supabase, reminderId, reason).catch((markError) => {
             console.error("[pick-reminders] Failed recording email error:", markError);
@@ -637,12 +669,16 @@ export async function sendDuePickReminders(): Promise<PickReminderSummary> {
 
   const totals = deliveryResults.reduce(
     (sum, row) => ({
+      pushSent:sum.pushSent+row.pushSent,
+      pushFailed:sum.pushFailed+row.pushFailed,
       emailFailed: sum.emailFailed + row.emailFailed,
       emailSent: sum.emailSent + row.emailSent,
       emailSkippedAlreadySent: sum.emailSkippedAlreadySent + row.emailSkippedAlreadySent,
       emailSkippedNoAddress: sum.emailSkippedNoAddress + row.emailSkippedNoAddress
     }),
     {
+      pushSent:0,
+      pushFailed:0,
       emailFailed: 0,
       emailSent: 0,
       emailSkippedAlreadySent: 0,
@@ -666,7 +702,10 @@ export async function sendDuePickReminders(): Promise<PickReminderSummary> {
   return {
     batchDeliveryCount: deliveryBatch.length,
     emailDeliveryEnabled,
+    pushDeliveryEnabled,
     ...totals,
+    emailFailed:totals.emailFailed+Number(emailLoadFailed),
+    pushFailed:totals.pushFailed+Number(pushLoadFailed),
     emailSkippedAlreadySent:
       totals.emailSkippedAlreadySent +
       queueRows.filter(

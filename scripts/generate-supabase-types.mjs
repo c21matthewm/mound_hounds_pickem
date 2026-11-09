@@ -76,6 +76,9 @@ const NULLABLE_RPC_ARGUMENTS = {
   admin_bulk_update_participants: { p_season_id: "number" },
   // 20260921_season_completion.sql: explicit null means no active season.
   admin_update_participant_v2: { p_expected_season_id: "number" },
+  // 20261108_results_automation.sql: explicit null follows the calendar / clears errors.
+  configure_results_monitor: { p_poll_after: "string" },
+  results_automation_monitor_result: { p_error_code: "string", p_poll_token: "string" },
   set_league_season_rules_document: {
     p_expected_rules_document_url: "string",
     p_rules_document_url: "string"

@@ -1,0 +1,6 @@
+# Send only runtime source to the Docker daemon; no dotenv, tests or league data.
+**
+!services/
+!services/*.py
+!services/requirements.txt
+!services/Dockerfile

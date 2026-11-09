@@ -1,14 +1,9 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import { normalizeDriverName, parseIndycarResultsPaste } from "@/lib/indycar-results";
-import {
-  groupNumbersForCount,
-  normalizeRacePickFormat,
-  pickGroupCountForFormat,
-  type RacePickFormat
-} from "@/lib/race-format";
-import { buildRaceScoringProjection } from "@/lib/race-scoring-model";
+import { useState } from "react";
+import { parseIndycarResultsPaste } from "@/lib/indycar-results";
+import { buildRaceResultsPreview, MAX_STANDARD_NONSTARTERS, type RaceResultsPreview } from "@/lib/race-results-preview";
+import type { RacePickFormat } from "@/lib/race-format";
 import { SubmitButton } from "@/components/submit-button";
 
 type RaceOption = {
@@ -42,41 +37,12 @@ type RaceDriverGroupOption = {
   race_id: number;
 };
 
-type PreviewRow = {
-  groupNumber: number | null;
-  lineNumber: number;
-  mappedDriverId: number | null;
-  mappedDriverName: string | null;
-  points: number;
-  position: number | null;
-  sourceDriverName: string;
-  status: "duplicate" | "ready" | "unmatched";
-};
-
-type PreviewState = {
-  duplicateCount: number;
-  expectedResultCount: number;
-  groupCount: number;
-  highestPossibleScore: number | null;
-  ignoredLineCount: number;
+type PreviewState = RaceResultsPreview & {
   inputKey: string;
-  lowestPossibleScore: number | null;
-  missingOfficialGroups: number[];
-  missingScoreGroups: number[];
   noPickTeamNames: string[];
-  parsedRowCount: number;
-  positionsValid: boolean;
-  readyCount: number;
-  rows: PreviewRow[];
   selectedRaceName: string;
   selectedRacePickFormat: RacePickFormat;
-  unmatchedDriverNames: string[];
-  unmatchedLineCount: number;
-  winningAverageSpeed: number | null;
-  zeroPointDriverNames: string[];
 };
-
-const MAX_STANDARD_NONSTARTERS = 5;
 
 type Props = {
   action: (formData: FormData) => void | Promise<void>;
@@ -106,40 +72,9 @@ export function AdminResultsImportForm({
   const [previewError, setPreviewError] = useState<string | null>(null);
   const raceId = selectedRace ? String(selectedRace.id) : "";
 
-  const driverMap = useMemo(() => {
-    const byNormalizedName = new Map<string, { groupNumber: number; id: number; name: string }>();
-    drivers.forEach((driver) => {
-      byNormalizedName.set(normalizeDriverName(driver.driverName), {
-        groupNumber: driver.groupNumber,
-        id: driver.id,
-        name: driver.driverName
-      });
-    });
-    return byNormalizedName;
-  }, [drivers]);
-
-  const driverById = useMemo(() => {
-    const byId = new Map<number, DriverOption>();
-    drivers.forEach((driver) => byId.set(driver.id, driver));
-    return byId;
-  }, [drivers]);
-
   const currentInputKey = buildInputKey(raceId, rawPaste);
   const previewIsStale = previewState ? previewState.inputKey !== currentInputKey : false;
-  const canPublish =
-    previewState !== null &&
-    !previewIsStale &&
-    previewState.readyCount > 0 &&
-    previewState.readyCount <= previewState.expectedResultCount &&
-    (previewState.selectedRacePickFormat === "standard" ||
-      previewState.readyCount === previewState.expectedResultCount) &&
-    previewState.duplicateCount === 0 &&
-    previewState.unmatchedLineCount === 0 &&
-    previewState.positionsValid &&
-    previewState.missingOfficialGroups.length === 0 &&
-    previewState.zeroPointDriverNames.length <= MAX_STANDARD_NONSTARTERS &&
-    previewState.winningAverageSpeed !== null &&
-    previewState.missingScoreGroups.length === 0;
+  const canPublish = previewState !== null && !previewIsStale && previewState.canPublishManually;
 
   const runPreview = () => {
     if (!selectedRace) {
@@ -147,208 +82,38 @@ export function AdminResultsImportForm({
       setPreviewState(null);
       return;
     }
-
     if (!rawPaste.trim()) {
       setPreviewError("Paste results text before previewing.");
       setPreviewState(null);
       return;
     }
-
-    const parsed = parseIndycarResultsPaste(rawPaste);
-    if (parsed.rows.length === 0) {
+    const preview = buildRaceResultsPreview({
+      drivers,
+      parsed: parseIndycarResultsPaste(rawPaste),
+      pickFormat: selectedRace.pickFormat,
+      raceDriverGroups,
+      raceId: selectedRace.id
+    });
+    if (preview.parsedRowCount === 0) {
       setPreviewError("No result rows were detected from your pasted table.");
       setPreviewState(null);
       return;
     }
-
-    if (parsed.winningAverageSpeed === null) {
-      setPreviewError(
-        "Could not read the winning driver's average speed. Include exactly one first-place row with an Average Speed greater than 0 and no more than 300 MPH."
-      );
+    if (preview.winningAverageSpeed === null) {
+      setPreviewError(preview.flags.find(flag => flag.code === "missing_winning_speed")?.message ?? "The official winning average speed is missing.");
       setPreviewState(null);
       return;
     }
-
-    const selectedRaceId = Number(raceId);
-    const racePickFormat = normalizeRacePickFormat(selectedRace.pickFormat);
-    const groupCount = pickGroupCountForFormat(racePickFormat);
-    const groupNumbers = groupNumbersForCount(groupCount);
-    const raceGroupByDriverId = new Map<number, number>();
-    raceDriverGroups
-      .filter((group) => group.race_id === selectedRaceId)
-      .forEach((group) => {
-        raceGroupByDriverId.set(group.driver_id, group.group_number);
-      });
-    const expectedDriverIds =
-      raceGroupByDriverId.size > 0
-        ? new Set(raceGroupByDriverId.keys())
-        : new Set(
-            racePickFormat === "standard"
-              ? drivers
-                  .filter(
-                    (driver) =>
-                      driver.isActive && driver.groupNumber >= 1 && driver.groupNumber <= groupCount
-                  )
-                  .map((driver) => driver.id)
-              : []
-          );
-
-    const resolveGroupNumber = (driverId: number): number | null => {
-      const raceGroup = raceGroupByDriverId.get(driverId);
-      if (raceGroup !== undefined) {
-        return raceGroup;
-      }
-
-      if (racePickFormat === "standard") {
-        return driverById.get(driverId)?.groupNumber ?? null;
-      }
-
-      return null;
-    };
-
-    const seenDriverIds = new Set<number>();
-    const unmatchedNames = new Set<string>();
-    const previewRows: PreviewRow[] = parsed.rows.map((row) => {
-      const normalized = normalizeDriverName(row.driverName);
-      const matched = driverMap.get(normalized);
-
-      if (!matched) {
-        unmatchedNames.add(row.driverName);
-        return {
-          groupNumber: null,
-          lineNumber: row.lineNumber,
-          mappedDriverId: null,
-          mappedDriverName: null,
-          points: row.points,
-          position: row.position,
-          sourceDriverName: row.driverName,
-          status: "unmatched"
-        };
-      }
-
-      if (!expectedDriverIds.has(matched.id)) {
-        unmatchedNames.add(`${row.driverName} (outside race field)`);
-        return {
-          groupNumber: null,
-          lineNumber: row.lineNumber,
-          mappedDriverId: matched.id,
-          mappedDriverName: matched.name,
-          points: row.points,
-          position: row.position,
-          sourceDriverName: row.driverName,
-          status: "unmatched"
-        };
-      }
-
-      if (seenDriverIds.has(matched.id)) {
-        return {
-          groupNumber: resolveGroupNumber(matched.id),
-          lineNumber: row.lineNumber,
-          mappedDriverId: matched.id,
-          mappedDriverName: matched.name,
-          points: row.points,
-          position: row.position,
-          sourceDriverName: row.driverName,
-          status: "duplicate"
-        };
-      }
-
-      seenDriverIds.add(matched.id);
-      return {
-        groupNumber: resolveGroupNumber(matched.id),
-        lineNumber: row.lineNumber,
-        mappedDriverId: matched.id,
-        mappedDriverName: matched.name,
-        points: row.points,
-        position: row.position,
-        sourceDriverName: row.driverName,
-        status: "ready"
-      };
-    });
-
-    const readyCount = previewRows.filter((row) => row.status === "ready").length;
-    const duplicateCount = previewRows.filter((row) => row.status === "duplicate").length;
-    const unmatchedLineCount = previewRows.filter((row) => row.status === "unmatched").length;
-    const readyRows = previewRows.filter((row) => row.status === "ready");
-    const readyPositions = readyRows
-      .map((row) => row.position)
-      .filter((position): position is number => position !== null);
-    const sortedPositions = [...readyPositions].sort((a, b) => a - b);
-    const positionsValid =
-      readyPositions.length === readyRows.length &&
-      new Set(readyPositions).size === readyRows.length &&
-      sortedPositions.every((position, index) => position === index + 1);
-    const zeroPointDriverIds = Array.from(expectedDriverIds).filter(
-      (driverId) => !seenDriverIds.has(driverId)
-    );
-    const zeroPointDriverNames = zeroPointDriverIds
-      .map((driverId) => driverById.get(driverId)?.driverName ?? `Driver #${driverId}`)
-      .sort((a, b) => a.localeCompare(b));
-    const officialResultGroups = new Set(
-      readyRows
-        .map((row) => row.groupNumber)
-        .filter((groupNumber): groupNumber is number => groupNumber !== null)
-    );
-    const missingOfficialGroups = groupNumbers.filter(
-      (groupNumber) => !officialResultGroups.has(groupNumber)
-    );
-    const scoringProjection = buildRaceScoringProjection({
-      currentDrivers: drivers.map((driver) => ({
-        group_number: driver.groupNumber,
-        id: driver.id
-      })),
-      officialWinningAverageSpeed: parsed.winningAverageSpeed,
-      participants: [],
-      pickFormat: racePickFormat,
-      picks: [],
-      raceDriverGroups: raceDriverGroups.filter(
-        (group) => group.race_id === selectedRaceId
-      ),
-      results: [
-        ...readyRows.flatMap((row) =>
-          row.mappedDriverId === null
-            ? []
-            : [{ driver_id: row.mappedDriverId, points: row.points }]
-        ),
-        ...zeroPointDriverIds.map((driverId) => ({ driver_id: driverId, points: 0 }))
-      ]
-    });
-    const missingScoreGroups = groupNumbers.filter(
-      (groupNumber) => !scoringProjection.minimumPointsByGroup.has(groupNumber)
-    );
-
-    const pickedUserIds = new Set(
-      picks.filter((pick) => pick.race_id === selectedRaceId).map((pick) => pick.user_id)
-    );
-    const noPickTeamNames = participants
-      .filter((participant) => !pickedUserIds.has(participant.id))
-      .map((participant) => participant.teamName)
-      .sort((a, b) => a.localeCompare(b));
-
+    const pickedUserIds = new Set(picks.filter(pick => pick.race_id === selectedRace.id).map(pick => pick.user_id));
+    const noPickTeamNames = participants.filter(participant => !pickedUserIds.has(participant.id))
+      .map(participant => participant.teamName).sort((a, b) => a.localeCompare(b));
     setPreviewError(null);
     setPreviewState({
-      duplicateCount,
-      expectedResultCount: expectedDriverIds.size,
-      groupCount,
-      highestPossibleScore:
-        missingScoreGroups.length > 0 ? null : scoringProjection.highestPossibleScore,
-      ignoredLineCount: parsed.ignoredLineCount,
+      ...preview,
       inputKey: currentInputKey,
-      lowestPossibleScore:
-        missingScoreGroups.length > 0 ? null : scoringProjection.lowestPossibleScore,
-      missingOfficialGroups,
-      missingScoreGroups,
       noPickTeamNames,
-      parsedRowCount: parsed.rows.length,
-      positionsValid,
-      readyCount,
-      rows: previewRows,
       selectedRaceName: selectedRace.raceName,
-      selectedRacePickFormat: racePickFormat,
-      unmatchedDriverNames: Array.from(unmatchedNames),
-      unmatchedLineCount,
-      winningAverageSpeed: parsed.winningAverageSpeed,
-      zeroPointDriverNames
+      selectedRacePickFormat: selectedRace.pickFormat
     });
   };
 
@@ -527,6 +292,12 @@ export function AdminResultsImportForm({
               <dd className="mt-1 text-2xl font-semibold text-slate-900">{previewState.ignoredLineCount}</dd>
             </div>
           </dl>
+
+          {previewState.flags.filter(flag => ["invalid_points", "invalid_field_group", "conflicting_field_group", "incomplete_qualifying_field"].includes(flag.code)).map(flag => (
+            <p className="mt-3 rounded-md border ui-status-danger border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700" key={`${flag.code}:${flag.message}`}>
+              {flag.message}
+            </p>
+          ))}
 
           {previewState.missingScoreGroups.length > 0 ? (
             <p className="mt-3 rounded-md border ui-status-warning border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">

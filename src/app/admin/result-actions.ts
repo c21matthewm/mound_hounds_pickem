@@ -6,6 +6,7 @@ import { revalidatePath } from "next/cache";
 import { requireAdmin } from "@/lib/admin";
 import { recordAdminAudit } from "@/lib/admin-audit";
 import { normalizeDriverName, parseIndycarResultsPaste } from "@/lib/indycar-results";
+import { buildRaceResultsPreview } from "@/lib/race-results-preview";
 import { parseQualifyingOrderPaste } from "@/lib/qualifying-order";
 import {
   INDY_500_QUALIFYING_FIELD_SIZE,
@@ -578,10 +579,12 @@ export async function importIndycarResultsAction(formData: FormData) {
 
   const { data: selectedRace, error: selectedRaceError } = await supabase
     .from("races")
-    .select("race_name,results_status,round_number,season_id")
+    .select("race_name,results_status,round_number,season_id,pick_format,field_frozen_at")
     .eq("id", raceId)
     .maybeSingle<{
       race_name: string;
+      pick_format: "standard" | "indy_500";
+      field_frozen_at: string | null;
       results_status: "draft" | "published";
       round_number: number;
       season_id: number;
@@ -622,7 +625,7 @@ export async function importIndycarResultsAction(formData: FormData) {
 
   const { data: drivers, error: driversError } = await supabase
     .from("drivers")
-    .select("id,driver_name");
+    .select("id,driver_name,group_number,is_active");
 
   if (driversError) {
     await reportResultFailure({
@@ -636,89 +639,40 @@ export async function importIndycarResultsAction(formData: FormData) {
     });
   }
 
-  const driverRows = drivers ?? [];
-  const driverMap = new Map<string, { id: number; name: string }>();
-  driverRows.forEach((driver) => {
-    driverMap.set(normalizeDriverName(driver.driver_name), {
+  const { data: raceField, error: raceFieldError } = await supabase
+    .from("race_driver_groups")
+    .select("race_id,driver_id,group_number,qualifying_position")
+    .eq("race_id", raceId);
+  if (raceFieldError) {
+    await reportResultFailure({
+      code: "load-result-field-failed",
+      error: raceFieldError,
+      fallback: "The saved race field could not be loaded.",
+      operation: "import_results",
+      raceId,
+      resultRaceId,
+      userId: user.id
+    });
+  }
+  const preview = buildRaceResultsPreview({
+    drivers: (drivers ?? []).map(driver => ({
+      driverName: driver.driver_name,
+      groupNumber: driver.group_number,
       id: driver.id,
-      name: driver.driver_name
-    });
+      isActive: driver.is_active
+    })),
+    fieldFrozen: Boolean(importResultRace.field_frozen_at),
+    parsed,
+    pickFormat: importResultRace.pick_format,
+    raceDriverGroups: raceField ?? [],
+    raceId
   });
-
-  const unmatchedNames = new Set<string>();
-  const duplicateNames = new Set<string>();
-  const payload: Array<{
-    driver_id: number;
-    points: number;
-    position: number | null;
-    race_id: number;
-  }> = [];
-  const seenDriverIds = new Set<number>();
-
-  parsed.rows.forEach((row) => {
-    const normalized = normalizeDriverName(row.driverName);
-    const match = driverMap.get(normalized);
-
-    if (!match) {
-      unmatchedNames.add(row.driverName);
-      return;
-    }
-
-    if (seenDriverIds.has(match.id)) {
-      duplicateNames.add(match.name);
-      return;
-    }
-
-    seenDriverIds.add(match.id);
-    payload.push({
-      driver_id: match.id,
-      points: row.points,
-      position: row.position,
-      race_id: raceId
-    });
-  });
-
-  if (unmatchedNames.size > 0) {
-    redirectWithTab(
-      "error",
-      `Could not match these drivers in your database: ${Array.from(unmatchedNames).join(", ")}`
-    );
+  const officialWinningAverageSpeed = preview.winningAverageSpeed;
+  if (!preview.canPublishManually || officialWinningAverageSpeed === null) {
+    return redirectWithTab("error", preview.flags.filter(flag => flag.blocksManualPublish)
+      .map(flag => flag.message).join(" ") || "Review the result preview before publishing.");
   }
-
-  if (duplicateNames.size > 0) {
-    redirectWithTab(
-      "error",
-      `Duplicate result rows were found for: ${Array.from(duplicateNames).join(", ")}`
-    );
-  }
-
-  if (payload.length === 0) {
-    redirectWithTab("error", "No valid rows were mapped to drivers.");
-  }
-
-  const positions = payload.map((row) => row.position);
-  const validPositions = positions.filter((position): position is number => position !== null);
-  const sortedPositions = [...validPositions].sort((a, b) => a - b);
-  const positionsAreComplete =
-    validPositions.length === payload.length &&
-    new Set(validPositions).size === payload.length &&
-    sortedPositions.every((position, index) => position === index + 1);
-  if (!positionsAreComplete) {
-    redirectWithTab(
-      "error",
-      `Official finishing positions must be unique and contiguous from 1 through ${payload.length}.`
-    );
-  }
-
-  if (
-    parsed.winningAverageSpeed === null ||
-    !isValidAverageSpeedMph(parsed.winningAverageSpeed)
-  ) {
-    return redirectWithTab(
-      "error",
-      "Could not read the winning driver's average speed. Include exactly one first-place row with an Average Speed greater than 0 and no more than 300 MPH."
-    );
-  }
+  const payload = preview.publishRows;
 
   if (importResultRace.results_status === "published") {
     try {
@@ -745,7 +699,7 @@ export async function importIndycarResultsAction(formData: FormData) {
   const { data: publishedCount, error: publishError } = await supabase.rpc(
     "publish_race_results",
     {
-      p_official_winning_average_speed: parsed.winningAverageSpeed,
+      p_official_winning_average_speed: officialWinningAverageSpeed,
       p_race_id: raceId,
       p_results: payload.map(({ driver_id, points, position }) => ({
         driver_id,
@@ -785,7 +739,7 @@ export async function importIndycarResultsAction(formData: FormData) {
       fantasy_winner_error: winnerOutcome.errorMessage,
       fantasy_winner_status: winnerOutcome.status,
       recovery_checkpoint_error: checkpointError,
-      official_winning_average_speed: parsed.winningAverageSpeed,
+      official_winning_average_speed: officialWinningAverageSpeed,
       published_result_count: Number(publishedCount ?? payload.length),
       winner_profile_id: winnerOutcome.winnerProfileId
     },

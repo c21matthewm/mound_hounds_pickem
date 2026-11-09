@@ -5,12 +5,12 @@ import type { AdminReminderQueueHealth, AdminReminderPreview } from "@/component
 const formatHealthTime = (value: string) => formatLeagueDateTime(value, {dateStyle: "medium", timeStyle: "short"});
 type Props = {
   selectedRaceId: number;
-  emailEnabled: boolean; reminderQueue: AdminReminderQueueHealth | null; reminderPreview: AdminReminderPreview | null;
+  emailEnabled: boolean; pushEnabled?: boolean; reminderQueue: AdminReminderQueueHealth | null; reminderPreview: AdminReminderPreview | null;
   retryFailedRemindersAction: (data: FormData) => void | Promise<void>;
   sendReminderTestAction: (data: FormData) => void | Promise<void>;
   nextRace: {expectedPickCount: number; pickCount: number; roundLabel: string; roundNumber: number; raceName: string; pickLockAt: string; previousResultsStatus: string} | null;
 };
-export function AdminRemindersWorkspace({ selectedRaceId, emailEnabled, reminderQueue, reminderPreview, retryFailedRemindersAction, sendReminderTestAction, nextRace }: Props) {
+export function AdminRemindersWorkspace({ selectedRaceId, emailEnabled, pushEnabled=false, reminderQueue, reminderPreview, retryFailedRemindersAction, sendReminderTestAction, nextRace }: Props) {
  const permanentReminderFailures = reminderQueue?.permanentFailed ?? 0;
  return <>
       <div className="mt-5 grid gap-5 border-y border-slate-200 py-5 lg:grid-cols-2 lg:divide-x lg:divide-slate-200">
@@ -63,7 +63,7 @@ export function AdminRemindersWorkspace({ selectedRaceId, emailEnabled, reminder
                     className={actionControlClassName("secondary", "text-red-700")}
                     pendingLabel="Queueing..."
                   >
-                    Retry failed emails
+                    Retry failed reminders
                   </SubmitButton>
                 </form>
               ) : null}
@@ -85,8 +85,8 @@ export function AdminRemindersWorkspace({ selectedRaceId, emailEnabled, reminder
                 missing at least one form for {reminderPreview.raceName}.
               </p>
             </div>
-            <StatusChip tone={emailEnabled ? "success" : "warning"}>
-              {emailEnabled ? "Delivery enabled" : "Delivery disabled"}
+            <StatusChip tone={emailEnabled||pushEnabled ? "success" : "warning"}>
+              {`Email ${emailEnabled ? "on" : "off"} · Push ${pushEnabled ? "on" : "off"}`}
             </StatusChip>
           </div>
 

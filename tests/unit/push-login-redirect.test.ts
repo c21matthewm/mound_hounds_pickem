@@ -1,0 +1,9 @@
+import {beforeEach,describe,it,expect,vi} from "vitest";
+const mocks=vi.hoisted(()=>({redirect:vi.fn(),signin:vi.fn()}));
+vi.mock("server-only",()=>({}));vi.mock("next/navigation",()=>({redirect:mocks.redirect}));vi.mock("next/headers",()=>({headers:vi.fn()}));vi.mock("@/lib/supabase/server",()=>({createServerSupabaseClient:async()=>({auth:{signInWithPassword:mocks.signin}})}));vi.mock("@/lib/supabase/service-role",()=>({createServiceRoleSupabaseClient:vi.fn()}));vi.mock("@/lib/seasons",()=>({loadActiveLeagueSeason:vi.fn()}));vi.mock("@/lib/scoring-cache",()=>({invalidateScoringCache:vi.fn()}));vi.mock("@/lib/registration-rate-limit",()=>({consumeRegistrationAttempt:vi.fn()}));vi.mock("@/lib/app-error-reporter",()=>({reportAppError:vi.fn(),errorReference:()=>""}));
+import {signInAction} from "@/app/actions/auth";
+beforeEach(()=>{vi.clearAllMocks();mocks.redirect.mockImplementation((url:string)=>{throw Error(url);});});
+describe("notification login destination",()=>{
+ it.each(["missing","incorrect"])("retains next after %s credentials",async state=>{const form=new FormData();form.set("next","/picks");if(state==="incorrect"){form.set("email","fixture@example.test");form.set("password","fictional");mocks.signin.mockResolvedValue({error:{message:"Invalid login credentials"}});}const log=vi.spyOn(console,"error").mockImplementation(()=>{});await expect(signInAction(form)).rejects.toThrow();const url=new URL(mocks.redirect.mock.calls[0][0],"https://fixture.example");expect(url.searchParams.get("next")).toBe("/picks");expect(url.searchParams.has("error")).toBe(true);log.mockRestore();});
+ it("returns to Picks after successful sign-in",async()=>{const form=new FormData();form.set("next","/picks");form.set("email","fixture@example.test");form.set("password","fictional");mocks.signin.mockResolvedValue({error:null});await expect(signInAction(form)).rejects.toThrow("/picks");expect(mocks.redirect).toHaveBeenCalledWith("/picks");});
+});

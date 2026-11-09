@@ -17,12 +17,12 @@ const MIN_PASSWORD_LENGTH = 10;
 
 const errorRedirect = (path: string, message: string): never => {
   const params = new URLSearchParams({ error: message });
-  redirect(`${path}?${params.toString()}`);
+  redirect(`${path}${path.includes("?") ? "&" : "?"}${params.toString()}`);
 };
 
 const messageRedirect = (path: string, message: string): never => {
   const params = new URLSearchParams({ message });
-  redirect(`${path}?${params.toString()}`);
+  redirect(`${path}${path.includes("?") ? "&" : "?"}${params.toString()}`);
 };
 
 const asText = (value: FormDataEntryValue | null): string =>
@@ -65,8 +65,9 @@ export async function signInAction(formData: FormData) {
   const password = asText(formData.get("password"));
   const next = sanitizeNextPath(asText(formData.get("next")) || "/dashboard");
 
+  const loginPath=`/login?next=${encodeURIComponent(next)}`;
   if (!email || !password) {
-    errorRedirect("/login", "Email and password are required.");
+    errorRedirect(loginPath, "Email and password are required.");
   }
 
   const supabase = await createServerSupabaseClient();
@@ -84,7 +85,7 @@ export async function signInAction(formData: FormData) {
           subsystem: "auth"
         });
     errorRedirect(
-      "/login",
+      loginPath,
       `${friendlyAuthError(error.message)}${reported ? errorReference(reported) : ""}`
     );
   }

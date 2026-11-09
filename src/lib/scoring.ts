@@ -455,18 +455,6 @@ export const buildPicksByRaceSnapshot = (
 ): Promise<PicksByRaceSnapshot> =>
   buildCachedPicksByRaceSnapshot(seasonId, selectedRaceIdInput);
 
-export async function buildParticipantAnalyticsSnapshotUncached(
-  userId: string,
-  seasonId: number
-): Promise<ParticipantAnalyticsSnapshot> {
-  const model = await loadSeasonScoringModelUncached(seasonId);
-  const snapshot = model.analyticsByUserId[userId];
-  if (!snapshot) {
-    throw new Error("Participant profile not found for analytics.");
-  }
-  return snapshot;
-}
-
 export const buildParticipantAnalyticsSnapshot = async (
   userId: string,
   seasonId: number

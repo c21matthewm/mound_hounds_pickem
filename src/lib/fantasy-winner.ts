@@ -5,8 +5,6 @@ import { createServiceRoleSupabaseClient } from "@/lib/supabase/service-role";
 import type { RacePickFormat } from "@/lib/race-format";
 import { buildRaceScoringProjection } from "@/lib/race-scoring-model";
 
-export const AUTO_WINNER_DELAY_MINUTES = 15;
-
 type PickRow = {
   average_speed: number | string;
   driver_group1_id: number;
@@ -60,28 +58,6 @@ const withOfficialSpeedMigrationHint = (message: string): string =>
   message.includes("official_winning_average_speed")
     ? `${message}. Run the latest Supabase migration to add official race average speed support.`
     : message;
-
-export async function scheduleRaceWinnerAutoCalculation(supabase: AppSupabaseClient, raceId: number) {
-  const eligibleAt = new Date(Date.now() + AUTO_WINNER_DELAY_MINUTES * 60_000).toISOString();
-
-  const { data: updatedRace, error } = await supabase
-    .from("races")
-    .update({
-      winner_auto_eligible_at: eligibleAt,
-      winner_is_manual_override: false
-    })
-    .eq("id", raceId)
-    .eq("is_archived", false)
-    .select("id")
-    .maybeSingle();
-
-  if (error) {
-    throw new Error(error.message);
-  }
-  if (!updatedRace) {
-    throw new Error("Cannot schedule winner auto-calculation for an archived race.");
-  }
-}
 
 export async function calculateRaceWinnerProfileId(
   supabase: AppSupabaseClient,
