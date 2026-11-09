@@ -101,13 +101,13 @@ try {
   await page.evaluate(()=>{window.fixtureCalls=[];window.confirm=()=>true;Object.defineProperty(navigator,'onLine',{configurable:true,value:true});});
   if(name.startsWith('push'))await page.evaluate(name=>{
     window.fixturePwa={isOffline:false,isStandalone:name!=='pushInstall',needsHttps:false};
-    window.fixturePush=[];window.fixturePushEnabled=false;window.fixturePushSub=null;
+    window.fixturePush=[];window.fixturePushEnabled=false;window.fixturePushSub=null;window.fixtureWorkerResponds=name!=='pushRetry';window.fixtureRegisterResponds=name!=='pushRegister';
     const sub={endpoint:'https://fcm.googleapis.com/fcm/send/fixture',toJSON:()=>({endpoint:sub.endpoint,keys:{p256dh:'fixture',auth:'fixture'}}),unsubscribe:async()=>{window.fixturePush.push('unsubscribe');window.fixturePushSub=null;return true;}};
-    const registration={active:{postMessage:(message,ports)=>ports[0].postMessage({push:true})},pushManager:{getSubscription:async()=>window.fixturePushSub,subscribe:async options=>{if(options.userVisibleOnly!==true)throw Error('Invisible subscription');window.fixturePush.push('subscribe');window.fixturePushSub=sub;return sub;}}};
-    Object.defineProperty(navigator,'serviceWorker',{configurable:true,value:{ready:Promise.resolve(registration),getRegistration:async()=>registration,register:async()=>{window.fixturePush.push('register');return registration;}}});
+    const registration={waiting:name==='pushUpdate'?{state:'installed'}:null,active:{postMessage:(message,ports)=>{if(name==='pushUpdate')return;setTimeout(()=>ports[0].postMessage({push:window.fixtureWorkerResponds}),name==='pushDelayed'?2500:0);}},pushManager:{getSubscription:async()=>window.fixturePushSub,subscribe:async options=>{if(options.userVisibleOnly!==true)throw Error('Invisible subscription');window.fixturePush.push('subscribe');window.fixturePushSub=sub;return sub;}}};
+    Object.defineProperty(navigator,'serviceWorker',{configurable:true,value:{ready:Promise.resolve(registration),getRegistration:async()=>registration,register:async()=>{window.fixturePush.push('register');if(!window.fixtureRegisterResponds)return new Promise(()=>{});return registration;}}});
     window.PushManager=function(){};
-    window.Notification={permission:name==='pushDenied'?'denied':'default',requestPermission:async()=>{window.fixturePush.push('permission');window.Notification.permission='granted';return 'granted';}};
-    window.fetch=async(url,options={})=>{if(!String(url).startsWith('/api/push/'))throw Error('Unexpected push fixture request');const input=options.body?JSON.parse(options.body):{};let data={configured:true,publicKey:'BAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',enabled:window.fixturePushEnabled,pickDeliveryEnabled:true};
+    window.Notification={permission:name==='pushDenied'?'denied':'default',requestPermission:async()=>{window.fixturePush.push('permission');window.Notification.permission=name==='pushDismiss'?'default':'granted';return window.Notification.permission;}};
+    window.fetch=async(url,options={})=>{if(!String(url).startsWith('/api/push/'))throw Error('Unexpected push fixture request');const input=options.body?JSON.parse(options.body):{};let data={configured:true,publicKey:'BAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',enabled:window.fixturePushEnabled,pickDeliveryEnabled:name!=='pushSettings'};
       if(options.method==='DELETE'){window.fixturePush.push('DELETE');window.fixturePushEnabled=false;data={enabled:false};}
       else if(input.action==='status')data={enabled:window.fixturePushEnabled};
       else if(options.method==='POST'){window.fixturePush.push(url.endsWith('/test')?'test':'POST');window.fixturePushEnabled=true;data={enabled:true,sent:true};}
@@ -126,18 +126,48 @@ try {
   await page.close();
  }
  let page=await scene('pushInstall');
- await page.getByRole('link',{name:'Installation instructions'}).waitFor();
+ await page.getByRole('link',{name:'How to install'}).waitFor();
  assert.deepEqual(await page.evaluate(()=>window.fixturePush),[]);checks++;await page.close();
- page=await scene('pushSettings');const enablePush=page.getByRole('button',{name:'Enable notifications on this device'});
+ page=await scene('pushSettings');const enablePush=page.getByRole('button',{name:'Enable notifications'});
  await enablePush.waitFor();await page.waitForFunction(()=>!document.querySelector('button')?.disabled);
- assert.deepEqual(await page.evaluate(()=>window.fixturePush),[]);checks++;
+ assert.deepEqual(await page.evaluate(()=>window.fixturePush),['register']);checks++;
+ assert.equal(await page.getByText(/Email|administrators|staged-results/).count(),0);checks++;
+ await page.getByText('Pick reminders haven’t started yet.',{exact:true}).waitFor();checks++;
+ await page.screenshot({path:output+'/push-off-390.png',fullPage:true});
  await enablePush.click();await page.getByRole('button',{name:'Send test notification'}).waitFor();
- assert.deepEqual(await page.evaluate(()=>window.fixturePush),['permission','register','subscribe','POST']);checks++;
- await page.getByRole('button',{name:'Send test notification'}).click();await page.getByText('Test sent. Check this device’s notifications.',{exact:true}).waitFor();checks++;
- await page.getByRole('button',{name:'Disable on this device'}).click();await enablePush.waitFor();
+ assert.deepEqual(await page.evaluate(()=>window.fixturePush),['register','permission','subscribe','POST']);checks++;
+ await page.screenshot({path:output+'/push-on-390.png',fullPage:true});
+ await page.getByRole('button',{name:'Send test notification'}).click();await page.getByText('Test sent. Check your notifications.',{exact:true}).waitFor();checks++;
+ await page.getByRole('button',{name:'Disable notifications'}).click();await enablePush.waitFor();
  assert.deepEqual((await page.evaluate(()=>window.fixturePush)).slice(-2),['DELETE','unsubscribe']);checks++;
+ await page.setViewportSize({width:320,height:900});
  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth+1),false);checks++;await page.close();
- page=await scene('pushDenied');await page.getByText('Notifications are blocked.',{exact:false}).waitFor();assert.deepEqual(await page.evaluate(()=>window.fixturePush),[]);checks++;await page.close();
+ page=await scene('pushDenied');await page.getByText('Notifications are blocked.',{exact:false}).waitFor();assert.deepEqual(await page.evaluate(()=>window.fixturePush.filter(action=>action!=='register')),[]);checks++;await page.close();
+ for(const name of ['pushDelayed']){
+  page=await scene(name);const enable=page.getByRole('button',{name:'Enable notifications',exact:true});
+  await enable.waitFor();await page.waitForFunction(()=>!document.querySelector('button')?.disabled);
+  assert.deepEqual(await page.evaluate(()=>window.fixturePush),['register']);checks++;
+  await enable.click();await page.getByRole('button',{name:'Send test notification'}).waitFor();
+  assert.equal(await page.getByText(/Close Mound Hounds|reopen/i).count(),0);checks++;
+  assert.deepEqual(await page.evaluate(()=>window.fixturePush),['register','permission','subscribe','POST']);checks++;
+  await page.close();
+ }
+ page=await scene('pushUpdate');await page.getByText('An app update is ready.',{exact:false}).waitFor();
+ assert.equal(await page.getByRole('button',{name:'Enable notifications',exact:true}).count(),0);checks++;
+ assert.deepEqual(await page.evaluate(()=>window.fixturePush),['register']);checks++;await page.close();
+ page=await scene('pushRetry');await page.getByRole('button',{name:'Try again',exact:true}).waitFor();
+ assert.equal(await page.getByText(/Close Mound Hounds|reopen/i).count(),0);checks++;
+ await page.evaluate(()=>{window.fixtureWorkerResponds=true;});await page.getByRole('button',{name:'Try again',exact:true}).click();
+ await page.waitForFunction(()=>{const b=[...document.querySelectorAll('button')].find(b=>b.textContent==='Enable notifications');return b&&!b.disabled;});
+ assert.deepEqual(await page.evaluate(()=>window.fixturePush),['register','register']);checks++;await page.close();
+ page=await scene('pushRegister');await page.getByRole('button',{name:'Try again',exact:true}).waitFor({timeout:15000});
+ assert.deepEqual(await page.evaluate(()=>window.fixturePush),['register']);checks++;
+ await page.evaluate(()=>{window.fixtureRegisterResponds=true;});await page.getByRole('button',{name:'Try again',exact:true}).click();
+ await page.waitForFunction(()=>{const b=[...document.querySelectorAll('button')].find(b=>b.textContent==='Enable notifications');return b&&!b.disabled;});
+ assert.deepEqual(await page.evaluate(()=>window.fixturePush),['register','register']);checks++;await page.close();
+ page=await scene('pushDismiss');await page.waitForFunction(()=>!document.querySelector('button')?.disabled);
+ await page.getByRole('button',{name:'Enable notifications',exact:true}).click();await page.getByText('Notifications are still off.',{exact:false}).waitFor();
+ assert.deepEqual(await page.evaluate(()=>window.fixturePush),['register','permission']);checks++;await page.close();
  page=await scene('results');
 
  const paste=page.getByTestId('admin-results-import-paste');

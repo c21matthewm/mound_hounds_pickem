@@ -47,7 +47,7 @@ Home Screen installation itself needs no account permission. Optional notificati
 
 ## Development and verification
 
-Automatic registration runs in a production build on a secure origin. Explicit notification opt-in also registers the worker on secure localhost during development. HTTPS is required on a phone;
+Automatic registration runs in a production build on a secure origin. Opening notification settings prepares the worker on supported standalone installations, including secure localhost during development. HTTPS is required on a phone;
 the desktop localhost exception is suitable for automated tests. Plain LAN HTTP on port 3007
 can verify responsive layouts but does not provide normal phone service-worker installation.
 Workers blocked by browser settings degrade to the normal online website without reporting an
@@ -113,9 +113,38 @@ exactly the same two public cached recovery assets. It never requests permission
 on page load and never caches authenticated data, APIs or notification payloads.
 Device controls are in Profile and require an installed standalone app, secure
 context and Web Push support (iOS 16.4+ Home Screen or supported Android browser).
-Permission is requested only from the explicit enable button. An old installed
-worker must finish updating: close all app windows and reopen if prompted.
+The page checks worker readiness before offering Enable notifications, and permission
+is requested directly from that tap. An old installed worker with a waiting update
+shows close/reopen guidance before permission. Slow or temporarily unavailable
+workers have a retry path; no page reload or worker takeover is forced.
 Email and scheduled push are independently controlled; no subscription means off.
 Sign-out keeps an explicitly enabled subscription, so a reminder can open the
 sign-in flow and return to Picks. Explicit device opt-out stops future delivery.
 See the [complete VAPID/operator and device-test runbook](RESULTS_AUTOMATION.md).
+
+
+## iOS and Android notification compatibility checks
+
+Run `./scripts/with-node.sh npm run test:push:mobile` for focused iPhone WebKit and
+Android Chromium emulation. Install the pinned test engines first, if needed, with
+`./scripts/with-node.sh npx playwright install chromium webkit`.
+
+The suite mounts the real PwaProvider and notification card. iPhone cases exercise
+`navigator.standalone`; Android cases exercise `(display-mode: standalone)`. It
+checks touch-triggered permission requests, 65-byte P256 subscription keys, enable,
+test and disable controls, slow startup, denied/dismissed permission, old-worker
+updates and narrow layouts. It also verifies that unrelated page state survives.
+It reads no dotenv files, creates no league data and blocks all external requests.
+Permission responses, push registration and server replies are explicit fixtures.
+
+Both engine runs passed all 36 checks. This is browser emulation, not physical
+Home Screen installation or APNs/FCM delivery certification. Supported phone paths
+are iOS/iPadOS 16.4+ Home Screen apps and current Android Chrome installed apps over
+HTTPS. The commissioner confirmed an earlier real iPhone test arrived; the revised
+flow still needs its post-deployment phone check, and actual Android delivery needs
+one explicit test on an Android phone. No additional compatibility blocker was
+found in the shared VAPID transport or worker notification/click handling.
+
+Platform references: [Apple/WebKit Home Screen Web Push](https://webkit.org/blog/13878/),
+[Google's Push API subscription guidance](https://web.dev/articles/push-notifications-subscribing-a-user),
+and [Playwright emulation limits](https://playwright.dev/docs/emulation).

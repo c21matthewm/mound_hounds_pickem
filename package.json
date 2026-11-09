@@ -35,7 +35,8 @@
     "icons:generate": "node scripts/generate-app-icons.mjs",
     "test:pwa": "node scripts/test-pwa.mjs",
     "test:results:db": "node scripts/test-results-automation.mjs",
-    "test:unit": "vitest run"
+    "test:unit": "vitest run",
+    "test:push:mobile": "node scripts/test-push-mobile.mjs"
   },
   "dependencies": {
     "@supabase/ssr": "0.12.0",

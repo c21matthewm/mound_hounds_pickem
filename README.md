@@ -295,6 +295,10 @@ Run `npm run test:admin:ui` under Node 24 for the offline admin component suite.
 and desktop layouts plus key form interactions using fictional data and mocked actions, with
 all browser network requests blocked. No dev server, credentials, or live database is needed.
 Screenshots and temporary build files are written outside the repository.
+For iOS/Android notification flow coverage, `npm run test:push:mobile` uses WebKit and
+Chromium with the real app display-mode detector and simulated push APIs; see
+[phone verification details](docs/PWA.md#ios-and-android-notification-compatibility-checks).
+
 
 Example paste formats live in:
 

@@ -27,9 +27,14 @@ window.fixtureProtectedBackup=protectedBackup;
 const resultDrivers=Array.from({length:12},(_,index)=>({id:index+1,driverName:`Fixture Driver ${index+1}`,groupNumber:Math.floor(index/2)+1,isActive:true}));
 window.fixtureResultsPaste=resultDrivers.map((driver,index)=>`${index+1}\t${index+1}\t${index+1}\t${driver.driverName}\tFixture Racing\t80\t0\t0\t01:00:00\t150.125\tRunning\t${53-index}`).join('\n');
 const scenes = {
- pushSettings:<PushNotificationSettings isAdmin />,
+ pushSettings:<PushNotificationSettings />,
  pushInstall:<PushNotificationSettings />,
  pushDenied:<PushNotificationSettings />,
+ pushDelayed:<PushNotificationSettings />,
+ pushUpdate:<PushNotificationSettings />,
+ pushRetry:<PushNotificationSettings />,
+ pushRegister:<PushNotificationSettings />,
+ pushDismiss:<PushNotificationSettings />,
  results:<AdminResultsImportForm action={async form=>{window.fixtureCalls.push({name:'manualResults',fields:Object.fromEntries(form)});}} drivers={resultDrivers} participants={[{id:memberId,teamName:'Fixture missing submission'}]} picks={[]} raceDriverGroups={resultDrivers.map(driver=>({driver_id:driver.id,group_number:driver.groupNumber,qualifying_position:driver.id,race_id:1}))} selectedRace={{id:1,raceName:'Fixture Grand Prix',pickFormat:'standard',resultsStatus:'draft'}} />,
  recoveryRetention:<SeasonRecoveryCenter activeSeason={{id:7,seasonYear:2027}} seasons={recoverySeasons} selectedSeasonId={7} requestToken="fixture" restorePoints={[...routineBackups,protectedBackup]} retention={retention} />,
  recoveryRetentionPast:<SeasonRecoveryCenter activeSeason={null} seasons={[{id:7,seasonYear:2027,status:'completed'}]} selectedSeasonId={7} requestToken="fixture" restorePoints={[...routineBackups,protectedBackup]} retention={retention} />,

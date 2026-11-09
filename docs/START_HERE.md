@@ -13,12 +13,13 @@ Then, on either phone:
 
 1. Open the Mound Hounds Home Screen icon and sign in.
 2. Open **Profile**.
-3. Choose **Enable notifications on this device**, then **Allow**.
+3. Choose **Enable notifications**, then **Allow**.
 4. Tap **Send test notification**.
 
-That is all. Each device opts in separately. Email reminders work separately.
-To stop device alerts, choose Profile → **Disable on this device**. If a phone says
-an app update is ready, close all Mound Hounds windows and reopen the icon.
+Each device opts in separately.
+To stop device alerts, choose Profile → **Disable notifications**. If a phone says
+an app update is ready, close all Mound Hounds windows and reopen the icon before
+enabling notifications. A normal permission prompt does not require restarting.
 
 ## Database setup: completed
 
