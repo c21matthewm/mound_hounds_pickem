@@ -86,7 +86,7 @@ export default async function ProfilePage() {
           <SignOutButton />
         </div>
       </ContentPanel>
-      <PushNotificationSettings isAdmin={profile?.role === "admin"} />
+      <PushNotificationSettings />
     </AuthenticatedPageShell>
   );
 }
