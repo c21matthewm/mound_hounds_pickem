@@ -1,5 +1,7 @@
 # Home Screen app and offline policy
 
+For everyday instructions, use [Start here](START_HERE.md).
+
 Mound Hounds supports iPhone/iPad and Android Home Screen installation. The manifest uses a
 stable root ID, root launch URL, and `standalone` display. Opening the icon follows the existing
 sign-in, season-registration, and dashboard flow. Installation does not create an account.
@@ -17,7 +19,8 @@ when shown. Users may need to sign in again in the installed app.
 | Reconnecting | No automatic page reload or pick submission. Users retry navigation or save explicitly; the existing server deadline and authorization checks still apply. Normal schedule refresh resumes while online. |
 | Fresh/current dashboard, standings, race details, rules, and archives | Internet required. Already-visible content may remain on screen but cannot refresh offline. Race/year selectors pause offline to avoid mismatched labels and data. |
 | Sign-in, pick submission, feedback, and Admin operations | Internet required. Form submissions and recovery API actions are guarded offline. |
-| Queued writes, background submission, background sync, push notifications | Not implemented. |
+| Queued writes, background submission, background sync | Not implemented. |
+| Opted-in device notifications | Network delivery is required; notifications do not submit picks or cache league data. |
 
 A draft cannot be opened from a fresh offline launch: application pages and JavaScript are not
 preloaded for offline league browsing. Reconnect, reopen the form, and use its existing draft
@@ -40,11 +43,11 @@ script is served with no-cache/no-store headers and registered with `updateViaCa
 The exact public GET/HEAD routes `/install`, `/manifest.webmanifest`, `/sw.js`, and `/offline.html`
 bypass session-refresh middleware. Other routes/methods retain their existing authentication
 checks. Existing CSP already permits the same-origin manifest and worker; no policy was relaxed.
-No database migration, subscription, notification permission, or new dependency is required.
+Home Screen installation itself needs no account permission. Optional notifications require the device subscription migration and an explicit Profile opt-in; permission is never requested on page load.
 
 ## Development and verification
 
-Registration runs only in a production build on a secure origin. HTTPS is required on a phone;
+Automatic registration runs in a production build on a secure origin. Explicit notification opt-in also registers the worker on secure localhost during development. HTTPS is required on a phone;
 the desktop localhost exception is suitable for automated tests. Plain LAN HTTP on port 3007
 can verify responsive layouts but does not provide normal phone service-worker installation.
 Workers blocked by browser settings degrade to the normal online website without reporting an
@@ -101,3 +104,18 @@ have moderate advisories; the full development audit is not reported as clean.
 
 No live accounts, league database writes, deployment changes, or remote application requests were
 used. Actual iPhone/Android Home Screen installation remains a manual HTTPS deployment check.
+
+
+## Opt-in Web Push
+
+Worker v2 adds visible push and same-origin notification clicks while retaining
+exactly the same two public cached recovery assets. It never requests permission
+on page load and never caches authenticated data, APIs or notification payloads.
+Device controls are in Profile and require an installed standalone app, secure
+context and Web Push support (iOS 16.4+ Home Screen or supported Android browser).
+Permission is requested only from the explicit enable button. An old installed
+worker must finish updating: close all app windows and reopen if prompted.
+Email and scheduled push are independently controlled; no subscription means off.
+Sign-out keeps an explicitly enabled subscription, so a reminder can open the
+sign-in flow and return to Picks. Explicit device opt-out stops future delivery.
+See the [complete VAPID/operator and device-test runbook](RESULTS_AUTOMATION.md).

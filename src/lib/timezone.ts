@@ -159,23 +159,6 @@ export const getLeagueYear = (referenceDate: Date = new Date()): number => {
   return Number.isInteger(parsedYear) ? parsedYear : referenceDate.getUTCFullYear();
 };
 
-export const getLeagueSeasonDateRange = (
-  seasonYear: number = getLeagueYear()
-): { seasonEndExclusiveIso: string; seasonStartIso: string; seasonYear: number } => {
-  const seasonStartIso = parseLeagueDateTimeLocalInput(`${seasonYear}-01-01T00:00`);
-  const seasonEndExclusiveIso = parseLeagueDateTimeLocalInput(`${seasonYear + 1}-01-01T00:00`);
-
-  if (!seasonStartIso || !seasonEndExclusiveIso) {
-    throw new Error("Failed to compute league season date range.");
-  }
-
-  return {
-    seasonEndExclusiveIso,
-    seasonStartIso,
-    seasonYear
-  };
-};
-
 export const formatLeagueDateTime = (
   value: string,
   options: Omit<Intl.DateTimeFormatOptions, "timeZone"> = { dateStyle: "medium", timeStyle: "short" }

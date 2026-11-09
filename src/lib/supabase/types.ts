@@ -11,3 +11,5 @@ export type {
   TablesInsert,
   TablesUpdate
 } from "@/lib/supabase/database.types";
+
+export type PushSubscriptionRow = Database["public"]["Tables"]["push_subscriptions"]["Row"];

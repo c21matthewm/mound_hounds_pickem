@@ -15,6 +15,8 @@ const contract = () => ({
     "/rpc/admin_bulk_update_participants":rpc({p_operation:{type:"string"},p_participants:{type:"object"},p_season_id:{type:"integer"}}),
     "/rpc/admin_update_participant_v2":rpc({p_expected_season_id:{type:"integer"},p_profile_id:{type:"string"}}),
     "/rpc/set_league_season_rules_document":rpc({p_expected_rules_document_url:{type:"string"},p_rules_document_url:{type:"string"},p_season_id:{type:"integer"}}),
+    "/rpc/configure_results_monitor":rpc({p_poll_after:{type:"string"},p_race_id:{type:"integer"}}),
+    "/rpc/results_automation_monitor_result":rpc({p_error_code:{type:"string"},p_poll_token:{type:"string"},p_race_id:{type:"integer"}}),
     "/rpc/unrelated_function":rpc({p_name:{type:"string"}})
   }
 });
@@ -38,6 +40,11 @@ describe("database type generation",()=>{
   it("preserves SQL-supported null arguments without making required keys optional",()=>{
     const test=fixture(contract());const result=test.run();expect(result.status,result.stderr).toBe(0);
     const output=readFileSync(test.outputPath,"utf8");
+    for (const name of ["p_poll_after", "p_error_code", "p_poll_token"]) {
+      expect(output).toContain(`"${name}": string | null`);
+      expect(output).not.toContain(`"${name}"?:`);
+    }
+    expect(output).toContain('"p_race_id": number\n');
     expect(output).toContain('"p_expected_rules_document_url": string | null');
     expect(output).toContain('"p_rules_document_url": string | null');
     expect(output).toContain('"p_season_id": number | null');

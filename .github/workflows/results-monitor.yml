@@ -1,0 +1,40 @@
+name: Official results monitor
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Read sources only (no staging or alerts)
+        type: boolean
+        default: true
+permissions:
+  contents: read
+concurrency:
+  group: official-results-monitor
+  cancel-in-progress: false
+jobs:
+  monitor:
+    if: vars.RESULTS_MONITOR_ENABLED == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: services/requirements.txt
+      - run: python -m pip install -r services/requirements.txt
+      - name: Check configured official results once
+        env:
+          RESULTS_BRIDGE_URL: ${{ vars.RESULTS_BRIDGE_URL }}
+          RESULTS_BRIDGE_SECRET: ${{ secrets.RESULTS_BRIDGE_SECRET }}
+          RACE_RESULTS_WEBHOOK_SECRET: ${{ secrets.RACE_RESULTS_WEBHOOK_SECRET }}
+          RACE_RESULTS_WEBHOOK_URL: http://127.0.0.1:8001/api/webhooks/race-results
+          RESULTS_MONITOR_ENABLED: 'true'
+          READ_ONLY: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}
+        run: |
+          if [ "$READ_ONLY" = "true" ]; then
+            python -m services.monitor_results --once --in-process --dry-run
+          else
+            python -m services.monitor_results --once --in-process
+          fi

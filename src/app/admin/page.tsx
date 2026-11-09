@@ -1,3 +1,5 @@
+export const runtime = "nodejs";
+import { AdminResultsAutomation } from "@/components/admin-results-automation";
 import { parseAdminCapabilities } from "@/lib/admin-capabilities";
 import { AdminSeasonsWorkspace, type AdminArchiveSummary } from "@/components/admin-seasons-workspace";
 import { AdminRaceWeekWorkspace } from "@/components/admin-race-week-workspace";
@@ -417,7 +419,7 @@ export default async function AdminPage({ searchParams }: PageProps) {
       supabase.from("app_metadata").select("value").eq("key", "schema_version").maybeSingle(),
       supabase
         .from("pick_reminders")
-        .select("delivery_status,reminder_type,attempt_count,last_error,updated_at")
+        .select("channel,delivery_status,reminder_type,attempt_count,last_error,updated_at")
         .order("updated_at", { ascending: false })
         .limit(10),
       supabase
@@ -529,7 +531,7 @@ export default async function AdminPage({ searchParams }: PageProps) {
           : Promise.resolve({data: [], error: null}),
         paginatedAdminLoad<{reminder_type:string; delivery_status:string; channel:string}>("reminder history", (from,to) => supabase
           .from("pick_reminders").select("reminder_type,delivery_status,channel")
-          .eq("race_id", healthNextRace!.id).eq("channel", "email")
+          .eq("race_id", healthNextRace!.id)
           .order("id", {ascending:true}).range(from,to))
       ]);
       if (healthPicksResponse.error || queueResponse.error || reminderHistoryResponse.error) {
@@ -666,6 +668,7 @@ export default async function AdminPage({ searchParams }: PageProps) {
           auditLog={healthAuditLog!}
           cleanupTestFlowDataAction={cleanupTestFlowDataAction}
           currentTime={currentTime}
+          pushEnabled={process.env.PICK_PUSH_ENABLED === "true"}
           emailEnabled={process.env.PICK_EMAILS_ENABLED?.toLowerCase() === "true"}
           healthContract={healthContract}
           capabilities={healthCapabilities}
@@ -731,14 +734,18 @@ export default async function AdminPage({ searchParams }: PageProps) {
 
       {isRaceWeek ? <AdminRaceWeekWorkspace key={`${selectedResultRace?.id}-${raceWeekPhase}`} race={selectedResultRace}
         drivers={drivers} snapshot={raceDriverGroups} currentTime={currentTime} races={currentSeasonRaces} phase={raceWeekPhase} participants={activeParticipants} teamNameByProfileId={teamNameByProfileId}>
-        {raceWeekPhase === "results" ? <AdminResultsWorkspace activeParticipants={activeParticipants}
+        {raceWeekPhase === "results" ? <>
+          {selectedResultRace ? <AdminResultsAutomation supabase={supabase} race={selectedResultRace} /> : null}
+          <AdminResultsWorkspace activeParticipants={activeParticipants}
           driverNameById={driverNameById} drivers={drivers} pickRows={pickRows} raceById={raceById}
           raceDriverGroups={raceDriverGroups} scoringAudits={scoringAudits}
-          selectedResultRace={selectedResultRace} sortedResults={sortedResults} /> : null}
+          selectedResultRace={selectedResultRace} sortedResults={sortedResults} />
+        </> : null}
         {raceWeekPhase === "picks" && selectedResultRace ? <>
           <AdminMissingPicks participants={missingParticipants.map(participant => ({id:participant.id, teamName:participant.team_name, email:participantEmails.emailsByProfileId.get(participant.id) ?? null}))}
             total={activeParticipants.length} emailWarning={participantEmails.warning} />
-          <AdminRemindersWorkspace selectedRaceId={selectedResultRace.id} emailEnabled={process.env.PICK_EMAILS_ENABLED?.toLowerCase() === "true"}
+          <AdminRemindersWorkspace selectedRaceId={selectedResultRace.id} pushEnabled={process.env.PICK_PUSH_ENABLED === "true"}
+          emailEnabled={process.env.PICK_EMAILS_ENABLED?.toLowerCase() === "true"}
             reminderQueue={healthReminderQueue} reminderPreview={healthReminderPreview}
             retryFailedRemindersAction={retryFailedPickRemindersAction} sendReminderTestAction={sendPickReminderTestAction}
             nextRace={healthNextRace ? {

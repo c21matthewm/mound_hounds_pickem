@@ -10,6 +10,8 @@ import { fileURLToPath } from "node:url";
 // A local-only production-build verification. Never read dotenv files, sign in,
 // or use real league services. Fixtures and all browser storage are temporary.
 const root = fileURLToPath(new URL("../", import.meta.url));
+assert.ok(fs.readFileSync(path.join(root,"public/sw.js"),"utf8").includes('addEventListener("push"'));
+assert.ok(fs.readFileSync(path.join(root,"public/sw.js"),"utf8").includes('addEventListener("notificationclick"'));
 if (process.versions.node.split(".")[0] !== "24") {
   throw new Error("Run this verification with Node 24: ./scripts/with-node.sh node scripts/test-pwa.mjs");
 }

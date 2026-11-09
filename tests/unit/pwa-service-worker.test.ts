@@ -9,6 +9,8 @@ const OFFLINE_HTML = "<main><h1>You are offline</h1><p>Reconnect to use league f
 
 type WorkerEvent = {
   request?: Request;
+  data?: {json:()=>unknown};
+  notification?: {data?:{url?:string};close:()=>void};
   respondWith: (response: Response | PromiseLike<Response>) => void;
   waitUntil: (work: PromiseLike<unknown>) => void;
 };
@@ -89,12 +91,13 @@ function createWorker() {
       return undefined;
     })
   };
-  const clients = { claim: vi.fn(async () => undefined), openWindow: vi.fn() };
+  const clients = { claim: vi.fn(async () => undefined), openWindow: vi.fn(),matchAll:vi.fn(async()=>[] as Array<{url:string;navigate:ReturnType<typeof vi.fn>;focus:ReturnType<typeof vi.fn>}>) };
+  const showNotification=vi.fn(async()=>undefined);
   const skipWaiting = vi.fn();
   const self = {
     origin: ORIGIN,
     location: new URL(`${ORIGIN}/sw.js`),
-    registration: { scope: `${ORIGIN}/` },
+    registration: { scope: `${ORIGIN}/`,showNotification },
     clients,
     caches,
     skipWaiting,
@@ -125,7 +128,7 @@ function createWorker() {
   }
 
   return {
-    caches, cachePut, clients, fetchRequest, listeners, requests, skipWaiting, stores,
+    caches, cachePut, clients, fetchRequest, listeners, requests, skipWaiting, stores,showNotification,
     install: () => dispatch("install"),
     activate: () => dispatch("activate"),
     request: (request: Request) => dispatch("fetch", request),
@@ -150,7 +153,7 @@ describe("PWA service worker cache boundaries", () => {
     }
     expect(worker.cachedPaths()).toEqual([...PUBLIC_PATHS].sort());
     expect([...worker.stores.keys()]).toHaveLength(1);
-    expect([...worker.stores.keys()][0]).toMatch(/^mound-hounds-pwa-.*v1/);
+    expect([...worker.stores.keys()][0]).toMatch(/^mound-hounds-pwa-.*v2/);
     expect(worker.skipWaiting).not.toHaveBeenCalled();
   });
 
@@ -246,7 +249,7 @@ describe("PWA service worker cache boundaries", () => {
     expect(worker.clients.claim).toHaveBeenCalledOnce();
     expect(worker.clients.openWindow).not.toHaveBeenCalled();
     expect(worker.skipWaiting).not.toHaveBeenCalled();
-    expect([...worker.listeners.keys()].sort()).toEqual(["activate", "fetch", "install"]);
+    expect([...worker.listeners.keys()].sort()).toEqual(["activate", "fetch", "install", "message", "notificationclick", "push"]);
   });
 });
 
@@ -288,4 +291,20 @@ describe("PWA service worker leaves data traffic to the browser without replay",
     expect(worker.fetchRequest).not.toHaveBeenCalled();
     expect(worker.cachePut).toHaveBeenCalledTimes(initialWrites);
   });
+});
+
+
+describe("visible push events without private caching",()=>{
+ it.each([null,{title:"Fixture",body:"Review results",url:"/admin?tab=results&result_race_id=1",tag:"fixture"},"malformed"])("always displays a notification for %j",async value=>{
+ const worker=createWorker();const pending:PromiseLike<unknown>[]=[];
+ worker.listeners.get("push")!({data:{json:()=>{if(value==="malformed")throw new Error("bad");return value;}},respondWith:()=>{},waitUntil:work=>pending.push(work)});await Promise.all(pending);
+ expect(worker.showNotification).toHaveBeenCalledOnce();expect(worker.fetchRequest).not.toHaveBeenCalled();expect(worker.stores.size).toBe(0);
+ });
+ it.each(["https://evil.invalid/","/admin?tab=results&result_race_id=1"])("opens only a safe app destination %s",async url=>{const worker=createWorker();const close=vi.fn(),pending:PromiseLike<unknown>[]=[];worker.listeners.get("notificationclick")!({notification:{data:{url},close},respondWith:()=>{},waitUntil:work=>pending.push(work)});await Promise.all(pending);expect(close).toHaveBeenCalledOnce();expect(worker.clients.openWindow).toHaveBeenCalledWith(url.startsWith("/")?ORIGIN+url:ORIGIN+"/picks");expect(worker.stores.size).toBe(0);});
+});
+
+it("focuses an existing app window after navigating to the notification target",async()=>{
+ const worker=createWorker(),navigate=vi.fn(),focus=vi.fn();navigate.mockResolvedValue({focus});worker.clients.matchAll.mockResolvedValue([{url:ORIGIN+"/dashboard",navigate,focus}]);
+ const work:PromiseLike<unknown>[]=[];worker.listeners.get("notificationclick")!({notification:{data:{url:"/picks"},close:vi.fn()},respondWith:()=>{},waitUntil:value=>work.push(value)});await Promise.all(work);
+ expect(navigate).toHaveBeenCalledWith(ORIGIN+"/picks");expect(focus).toHaveBeenCalledOnce();expect(worker.clients.openWindow).not.toHaveBeenCalled();expect(worker.stores.size).toBe(0);
 });

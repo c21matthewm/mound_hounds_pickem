@@ -56,18 +56,3 @@ export async function loadActiveLeagueSeason(
 
   return data ? toLeagueSeason(data) : null;
 }
-
-export async function loadLeagueSeasons(
-  supabase: AppSupabaseClient
-): Promise<LeagueSeason[]> {
-  const { data, error } = await supabase
-    .from("league_seasons")
-    .select(SEASON_FIELDS)
-    .order("season_year", { ascending: false });
-
-  if (error) {
-    throw new Error(`Failed loading league seasons: ${error.message}`);
-  }
-
-  return ((data ?? []) as LeagueSeasonRow[]).map(toLeagueSeason);
-}

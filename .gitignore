@@ -33,3 +33,10 @@ pnpm-debug.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# Python service local artifacts
+__pycache__/
+.pytest_cache/
+
+# Optional Python operator environment
+/services/.env

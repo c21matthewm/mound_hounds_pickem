@@ -1,6 +1,6 @@
 /* Only public recovery assets belong here. Never cache league or account data. */
 const CACHE_PREFIX = "mound-hounds-pwa-";
-const CACHE_NAME = `${CACHE_PREFIX}v1`;
+const CACHE_NAME = `${CACHE_PREFIX}v2`;
 const OFFLINE_URL = "/offline.html";
 const PUBLIC_ASSETS = [OFFLINE_URL, "/icons/icon-192.png"];
 
@@ -59,3 +59,23 @@ self.addEventListener("fetch", (event) => {
   // RSC, APIs, third-party resources and all writes stay network-only.
   // There is no background sync, submission queue, or automatic retry.
 });
+
+
+function safeNotificationPath(value) {
+  try {const url=new URL(typeof value==="string"?value:"/picks",self.location.origin);return url.origin===self.location.origin&&!url.username&&!url.password?url.pathname+url.search:"/picks";}catch{return "/picks";}
+}
+self.addEventListener("push",event=>{
+  let payload={};try{const parsed=event.data?.json();if(parsed&&typeof parsed==="object"&&!Array.isArray(parsed))payload=parsed;}catch{/* Always show a generic visible notification. */}
+  const text=(value,fallback,max)=>typeof value==="string"&&value.trim()?value.slice(0,max):fallback;
+  event.waitUntil(self.registration.showNotification(text(payload.title,"Mound Hounds",100),{body:text(payload.body,"Open the app for an update.",500),icon:"/icons/icon-192.png",badge:"/icons/icon-192.png",tag:text(payload.tag,"mound-hounds-update",180),data:{url:safeNotificationPath(payload.url)}}));
+});
+self.addEventListener("notificationclick",event=>{
+  event.notification.close();
+  const path=safeNotificationPath(event.notification.data?.url);
+  event.waitUntil((async()=>{const target=new URL(path,self.location.origin).href;const windows=await self.clients.matchAll({type:"window",includeUncontrolled:true});
+    for(const client of windows){try{if(new URL(client.url).origin===self.location.origin&&"focus" in client){const navigated=await client.navigate(target);await(navigated??client).focus();return;}}catch{/* Try another window or open one. */}}
+    await self.clients.openWindow(target);
+  })());
+});
+
+self.addEventListener("message",event=>{if(event.data?.type==="PUSH_CAPABILITY")event.ports?.[0]?.postMessage({push:true});});

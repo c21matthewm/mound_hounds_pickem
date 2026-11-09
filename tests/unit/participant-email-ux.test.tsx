@@ -20,17 +20,8 @@ describe("participant email UX", () => {
     );
   });
 
-  it("keeps the branded recovery template connected to Supabase's secure link", () => {
-    const template = readFileSync("supabase/templates/password-recovery.html", "utf8");
-
-    expect(template).toContain("Mound Hounds Pick'em");
-    expect(template).toContain('href="{{ .ConfirmationURL }}"');
-    expect(template).toContain("{{ .Email }}");
-    expect(template).not.toContain("TEST EMAIL");
-  });
-
-  it("keeps the branded signup template connected to Supabase's confirmation link", () => {
-    const template = readFileSync("supabase/templates/signup-confirmation.html", "utf8");
+  it.each(["password-recovery", "signup-confirmation"])("keeps the branded %s template connected to Supabase's secure link", (name) => {
+    const template = readFileSync(`supabase/templates/${name}.html`, "utf8");
 
     expect(template).toContain("Mound Hounds Pick'em");
     expect(template).toContain('href="{{ .ConfirmationURL }}"');

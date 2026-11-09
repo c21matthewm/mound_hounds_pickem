@@ -1,6 +1,8 @@
 // Local component fixtures only. Server actions are replaced by the runner.
 // Names, IDs, scores, documents, and email addresses are fictional.
+import { PushNotificationSettings } from '@/components/push-notification-settings';
 import { createRoot } from 'react-dom/client';
+import { AdminResultsImportForm } from '@/components/admin-results-import-form';
 import { AdminDriverPhotoFilter } from '@/components/admin-driver-photo-filter';
 import { AdminHistoricalHallOfFameImport } from '@/components/admin-historical-hall-of-fame-import';
 import { AdminInviteLinks } from '@/components/admin-invite-links';
@@ -22,7 +24,13 @@ const protectedBackup={...routineBackups[0],id:'00000000-0000-4000-8000-00000000
 const retention={seasonId:7,seasonYear:2027,routineLimit:3,totalCount:6,totalBytes:6144,routineCount:5,protectedCount:1,cleanupCount:2,cleanupBytes:2048,reviewToken:'a'.repeat(64)};
 window.fixtureRetention=retention;
 window.fixtureProtectedBackup=protectedBackup;
+const resultDrivers=Array.from({length:12},(_,index)=>({id:index+1,driverName:`Fixture Driver ${index+1}`,groupNumber:Math.floor(index/2)+1,isActive:true}));
+window.fixtureResultsPaste=resultDrivers.map((driver,index)=>`${index+1}\t${index+1}\t${index+1}\t${driver.driverName}\tFixture Racing\t80\t0\t0\t01:00:00\t150.125\tRunning\t${53-index}`).join('\n');
 const scenes = {
+ pushSettings:<PushNotificationSettings isAdmin />,
+ pushInstall:<PushNotificationSettings />,
+ pushDenied:<PushNotificationSettings />,
+ results:<AdminResultsImportForm action={async form=>{window.fixtureCalls.push({name:'manualResults',fields:Object.fromEntries(form)});}} drivers={resultDrivers} participants={[{id:memberId,teamName:'Fixture missing submission'}]} picks={[]} raceDriverGroups={resultDrivers.map(driver=>({driver_id:driver.id,group_number:driver.groupNumber,qualifying_position:driver.id,race_id:1}))} selectedRace={{id:1,raceName:'Fixture Grand Prix',pickFormat:'standard',resultsStatus:'draft'}} />,
  recoveryRetention:<SeasonRecoveryCenter activeSeason={{id:7,seasonYear:2027}} seasons={recoverySeasons} selectedSeasonId={7} requestToken="fixture" restorePoints={[...routineBackups,protectedBackup]} retention={retention} />,
  recoveryRetentionPast:<SeasonRecoveryCenter activeSeason={null} seasons={[{id:7,seasonYear:2027,status:'completed'}]} selectedSeasonId={7} requestToken="fixture" restorePoints={[...routineBackups,protectedBackup]} retention={retention} />,
  recoveryRetentionMissing:<SeasonRecoveryCenter activeSeason={{id:7,seasonYear:2027}} seasons={recoverySeasons} selectedSeasonId={7} requestToken="fixture" restorePoints={[...routineBackups,protectedBackup]} retentionIssue="Apply the pending recovery retention migration to enable these controls." />,

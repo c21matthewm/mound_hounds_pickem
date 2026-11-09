@@ -6,6 +6,7 @@ import { getSupabaseEnv } from "./src/lib/supabase/env";
 const AUTH_ROUTE_PREFIXES = ["/login", "/resend-confirmation", "/signup"];
 const PROTECTED_ROUTE_PREFIXES = [
   "/dashboard",
+  "/profile",
   "/onboarding",
   "/season-registration",
   "/race-center",
@@ -22,6 +23,9 @@ const startsWithPrefix = (pathname: string, prefixes: string[]): boolean =>
 const PUBLIC_APP_PATHS = new Set(["/install", "/manifest.webmanifest", "/sw.js", "/offline.html"]);
 
 export async function middleware(request: NextRequest) {
+  // This exact server-to-server route authenticates its independent capabilities
+  // in the handler; session refresh must not run before webhook authentication.
+  if (request.nextUrl.pathname === "/api/internal/results-automation") return NextResponse.next({ request });
   if ((request.method === "GET" || request.method === "HEAD") && PUBLIC_APP_PATHS.has(request.nextUrl.pathname)) {
     return NextResponse.next({ request });
   }

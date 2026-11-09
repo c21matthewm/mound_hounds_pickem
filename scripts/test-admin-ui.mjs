@@ -44,6 +44,7 @@ await build({
       const id = resolveSource(source);
       if (normalized(id).includes("/app/admin/") && /actions(?:\.ts)?$/.test(id)) return "\0fixture-action:" + id;
       if (normalized(id).endsWith("/app/admin/admin-data") || normalized(id).endsWith("/app/admin/admin-data.ts")) return "\0fixture:admin-data";
+      if(normalized(id).endsWith("/components/pwa-provider")||normalized(id).endsWith("/components/pwa-provider.tsx"))return "\0fixture:pwa";
       if (source === "next/link" || source === "next/navigation") return "\0fixture:" + source;
       if (source === "server-only" || source.startsWith("@supabase/") || normalized(id).includes("/lib/supabase/")) {
         throw new Error("An offline fixture reached a server boundary. Add an explicit fixture mock before proceeding.");
@@ -61,6 +62,7 @@ await build({
           return {ok:true,status:'success',message:'Fixture save complete',seasonYear:2024};
         }`).join("\n");
       }
+      if(id === "\0fixture:pwa")return "export const usePwa=()=>window.fixturePwa??{isOffline:false,isStandalone:false,needsHttps:false};";
       if (id === "\0fixture:admin-data") return "export const formatDateTime=value=>value.slice(0,10);";
       if (id === "\0fixture:next/link") return "import {createElement} from 'react';export default function Link({children,href,...props}){return createElement('a',{href,...props},children)}";
       if (id === "\0fixture:next/navigation") return "export const useRouter=()=>({push:(url)=>window.fixtureNavigation=url,refresh:()=>{}});";
@@ -97,19 +99,68 @@ try {
   page.on('pageerror',error=>errors.push(error.message));
   await page.setContent('<html><head><meta http-equiv="Content-Security-Policy" content="default-src &apos;none&apos;; script-src &apos;unsafe-inline&apos;; style-src &apos;unsafe-inline&apos;; img-src data: blob:; connect-src &apos;none&apos;"><style>'+css+'</style></head><body><div id="root"></div></body></html>');
   await page.evaluate(()=>{window.fixtureCalls=[];window.confirm=()=>true;Object.defineProperty(navigator,'onLine',{configurable:true,value:true});});
+  if(name.startsWith('push'))await page.evaluate(name=>{
+    window.fixturePwa={isOffline:false,isStandalone:name!=='pushInstall',needsHttps:false};
+    window.fixturePush=[];window.fixturePushEnabled=false;window.fixturePushSub=null;
+    const sub={endpoint:'https://fcm.googleapis.com/fcm/send/fixture',toJSON:()=>({endpoint:sub.endpoint,keys:{p256dh:'fixture',auth:'fixture'}}),unsubscribe:async()=>{window.fixturePush.push('unsubscribe');window.fixturePushSub=null;return true;}};
+    const registration={active:{postMessage:(message,ports)=>ports[0].postMessage({push:true})},pushManager:{getSubscription:async()=>window.fixturePushSub,subscribe:async options=>{if(options.userVisibleOnly!==true)throw Error('Invisible subscription');window.fixturePush.push('subscribe');window.fixturePushSub=sub;return sub;}}};
+    Object.defineProperty(navigator,'serviceWorker',{configurable:true,value:{ready:Promise.resolve(registration),getRegistration:async()=>registration,register:async()=>{window.fixturePush.push('register');return registration;}}});
+    window.PushManager=function(){};
+    window.Notification={permission:name==='pushDenied'?'denied':'default',requestPermission:async()=>{window.fixturePush.push('permission');window.Notification.permission='granted';return 'granted';}};
+    window.fetch=async(url,options={})=>{if(!String(url).startsWith('/api/push/'))throw Error('Unexpected push fixture request');const input=options.body?JSON.parse(options.body):{};let data={configured:true,publicKey:'BAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',enabled:window.fixturePushEnabled,pickDeliveryEnabled:true};
+      if(options.method==='DELETE'){window.fixturePush.push('DELETE');window.fixturePushEnabled=false;data={enabled:false};}
+      else if(input.action==='status')data={enabled:window.fixturePushEnabled};
+      else if(options.method==='POST'){window.fixturePush.push(url.endsWith('/test')?'test':'POST');window.fixturePushEnabled=true;data={enabled:true,sent:true};}
+      return new Response(JSON.stringify(data),{headers:{'Content-Type':'application/json'}});};
+  },name);
   await page.addScriptTag({content:js});
   await page.evaluate(name=>window.showScene(name),name);
   await page.locator('main').waitFor();
   return page;
  }
- for(const name of ['drivers','historical','invite','participants','bulk','rules','closeout','offseason','recoveryOffseason','recoveryPast','recoveryActive','recoveryRetention','recoveryRetentionPast','recoveryRetentionMissing'])for(const width of [320,375,390,768,1280]){
+ for(const name of ['results','drivers','historical','invite','participants','bulk','rules','closeout','offseason','recoveryOffseason','recoveryPast','recoveryActive','recoveryRetention','recoveryRetentionPast','recoveryRetentionMissing'])for(const width of [320,375,390,768,1280]){
   const page=await scene(name,width);
   const overflow=await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth+1);
   assert.equal(overflow,false,`${name} overflow at ${width}`);checks++;
   if(width===390||width===1280)await page.screenshot({path:`${output}/${name}-${width}.png`,fullPage:true});
   await page.close();
  }
- let page=await scene('drivers');
+ let page=await scene('pushInstall');
+ await page.getByRole('link',{name:'Installation instructions'}).waitFor();
+ assert.deepEqual(await page.evaluate(()=>window.fixturePush),[]);checks++;await page.close();
+ page=await scene('pushSettings');const enablePush=page.getByRole('button',{name:'Enable notifications on this device'});
+ await enablePush.waitFor();await page.waitForFunction(()=>!document.querySelector('button')?.disabled);
+ assert.deepEqual(await page.evaluate(()=>window.fixturePush),[]);checks++;
+ await enablePush.click();await page.getByRole('button',{name:'Send test notification'}).waitFor();
+ assert.deepEqual(await page.evaluate(()=>window.fixturePush),['permission','register','subscribe','POST']);checks++;
+ await page.getByRole('button',{name:'Send test notification'}).click();await page.getByText('Test sent. Check this device’s notifications.',{exact:true}).waitFor();checks++;
+ await page.getByRole('button',{name:'Disable on this device'}).click();await enablePush.waitFor();
+ assert.deepEqual((await page.evaluate(()=>window.fixturePush)).slice(-2),['DELETE','unsubscribe']);checks++;
+ assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth+1),false);checks++;await page.close();
+ page=await scene('pushDenied');await page.getByText('Notifications are blocked.',{exact:false}).waitFor();assert.deepEqual(await page.evaluate(()=>window.fixturePush),[]);checks++;await page.close();
+ page=await scene('results');
+
+ const paste=page.getByTestId('admin-results-import-paste');
+ const preview=page.getByTestId('admin-results-import-preview');
+ const publish=page.getByTestId('admin-results-import-submit');
+ const resultText=await page.evaluate(()=>window.fixtureResultsPaste);
+ assert.equal(await publish.isDisabled(),true);
+ await paste.fill(resultText);await preview.click();
+ await page.getByText('Preview is clean. Ready to publish.',{exact:true}).waitFor();
+ assert.equal(await publish.isEnabled(),true);checks++;
+ assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth+1),false);checks++;
+ await paste.fill(resultText+'\n');
+ await page.getByText('Preview is stale. Run preview again before publishing.',{exact:true}).waitFor();
+ assert.equal(await publish.isDisabled(),true);checks++;
+ await paste.fill(resultText.replace('Fixture Driver 1\t','Unknown Fixture Driver\t'));await preview.click();
+ assert.equal(await publish.isDisabled(),true);checks++;
+ await paste.fill(resultText.split('\n').slice(0,-1).join('\n'));await preview.click();
+ assert.equal(await publish.isEnabled(),true);
+ await page.getByText('These pickable drivers are absent from the official finishing order and will receive 0 points.',{exact:false}).waitFor();checks++;
+ await publish.click();await page.waitForFunction(()=>window.fixtureCalls.length===1);
+ assert.equal((await page.evaluate(()=>window.fixtureCalls[0])).fields.race_id,'1');checks++;
+ await page.close();
+ page=await scene('drivers');
  await page.getByLabel('Driver draft').fill('Edited but unsaved');
  await page.getByLabel('Select Fixture A',{exact:true}).check();
  await page.getByLabel('Missing photos (1)',{exact:true}).check();

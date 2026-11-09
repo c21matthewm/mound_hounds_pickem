@@ -1,3 +1,5 @@
+export const runtime = "nodejs";
+export const maxDuration = 60;
 import { NextResponse } from "next/server";
 import { checkCronAuthorization } from "@/lib/cron-auth";
 import { sendDuePickReminders } from "@/lib/pick-reminders";
@@ -12,7 +14,7 @@ async function handleCronRequest(request: Request) {
   try {
     const result = await withJobRun("pick-reminders", sendDuePickReminders, {
       completionForResult: (summary) => {
-        const failedAttempts = summary.emailFailed;
+        const failedAttempts = summary.emailFailed + summary.pushFailed;
         const unresolvedFailures =
           summary.queueRetrying + summary.queuePermanentFailed;
         return failedAttempts > 0 || unresolvedFailures > 0
@@ -27,7 +29,7 @@ async function handleCronRequest(request: Request) {
       },
       shouldRecordResult: (summary) =>
         summary.batchDeliveryCount > 0 ||
-        summary.emailFailed > 0 ||
+        summary.emailFailed > 0 || summary.pushFailed > 0 ||
         summary.queuePermanentFailed > 0
     });
     return NextResponse.json({

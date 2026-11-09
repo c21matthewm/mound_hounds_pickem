@@ -1,3 +1,5 @@
+export const runtime = "nodejs";
+import { PushNotificationSettings } from "@/components/push-notification-settings";
 import { redirect } from "next/navigation";
 import { AuthenticatedPageShell } from "@/components/authenticated-page-shell";
 import { SignOutButton } from "@/components/sign-out-button";
@@ -19,7 +21,7 @@ export default async function ProfilePage() {
   } = await supabase.auth.getUser();
 
   if (!user) {
-    redirect("/login");
+    redirect("/login?next=%2Fprofile");
   }
 
   const { data: profile, error: profileError } = await supabase
@@ -84,6 +86,7 @@ export default async function ProfilePage() {
           <SignOutButton />
         </div>
       </ContentPanel>
+      <PushNotificationSettings isAdmin={profile?.role === "admin"} />
     </AuthenticatedPageShell>
   );
 }
