@@ -1,4 +1,5 @@
 type QueryError = {
+  code?: string;
   message: string;
 };
 
@@ -19,7 +20,7 @@ export async function loadAllRows<T>(
   for (let from = 0; ; from += pageSize) {
     const { data, error } = await loadPage(from, from + pageSize - 1);
     if (error) {
-      throw new Error(`Failed to load ${label}: ${error.message}`);
+      throw new Error(`Failed to load ${label}: ${error.message}`, { cause: error });
     }
 
     const page = data ?? [];

@@ -630,7 +630,6 @@ export default async function AdminPage({ searchParams }: PageProps) {
       }
       eyebrow="League Ops"
       maxWidth="max-w-7xl"
-      showMobileNavigation={false}
       title="Admin Dashboard"
     >
 

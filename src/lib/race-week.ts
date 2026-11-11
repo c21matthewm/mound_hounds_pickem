@@ -132,7 +132,7 @@ const actionForState = ({
         href: isAdmin
           ? `/admin?tab=results&result_race_id=${pendingResultRace.id}`
           : "/leaderboard",
-        label: isAdmin ? "Post race results" : "View current standings",
+        label: isAdmin ? "Post race results" : "View Leaderboard",
         status: "season_results_pending",
         statusLabel: "Results Pending",
         title: "Awaiting final results"
@@ -142,7 +142,7 @@ const actionForState = ({
     return {
       body: `All results for the ${activeSeason.seasonYear} season have been posted. View the final standings to see where every team finished.`,
       href: "/leaderboard",
-      label: "View final standings",
+      label: "View Leaderboard",
       status: "season_complete",
       statusLabel: "Season Complete",
       title: "Final standings are ready"
@@ -186,7 +186,7 @@ const actionForState = ({
     return {
       body: `${previousResultsMessage} Driver standings and pick groups will refresh before the form opens.`,
       href: isAdmin ? "/admin?tab=results" : "/leaderboard",
-      label: isAdmin ? "Publish results" : "View standings",
+      label: isAdmin ? "Publish results" : "View Leaderboard",
       status: "waiting_results",
       statusLabel: "Results Needed",
       title: "Waiting on results"
@@ -201,7 +201,7 @@ const actionForState = ({
       href: windowComplete
         ? `/leaderboard?tab=picks&race_id=${currentRace.id}`
         : "/leaderboard",
-      label: windowComplete ? "View locked picks" : "View standings",
+      label: windowComplete ? "View locked picks" : "View Leaderboard",
       status: "locked",
       statusLabel: "Locked",
       title: windowComplete ? "Picks saved and locked" : "Picks are locked"

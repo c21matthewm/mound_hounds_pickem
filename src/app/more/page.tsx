@@ -6,7 +6,7 @@ import { requireAppUser } from "@/lib/authenticated-user";
 const destinations = [
   {
     description: "Home Screen setup for iPhone and Android, plus offline support.",
-    href: "/install",
+    href: "/more/install",
     label: "Install the app"
   },
   {

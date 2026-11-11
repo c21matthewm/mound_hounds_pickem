@@ -140,6 +140,9 @@ export default async function DashboardPage({ searchParams }: PageProps) {
                 <div className="mt-2 grid gap-2">
                   {raceWeek.races.map((race) => {
                     const saved = raceWeek.pickByRaceId.has(race.id);
+                    const label = saved
+                      ? action.status === "locked" ? "Saved & locked" : "Saved"
+                      : action.status === "form_open" ? "Open" : action.statusLabel;
                     return (
                       <Link
                         className="flex min-w-0 items-center justify-between gap-2 rounded-md border border-slate-200 px-3 py-2 hover:bg-slate-50"
@@ -149,8 +152,8 @@ export default async function DashboardPage({ searchParams }: PageProps) {
                         <span className="min-w-0 text-sm font-semibold leading-5 text-slate-900">
                           R{race.round_number} · {race.race_name}
                         </span>
-                        <StatusChip className="shrink-0" tone={saved ? "success" : "warning"}>
-                          {saved ? "Saved" : "Open"}
+                        <StatusChip className="shrink-0" tone={saved ? "success" : statusTone(action.status)}>
+                          {label}
                         </StatusChip>
                       </Link>
                     );

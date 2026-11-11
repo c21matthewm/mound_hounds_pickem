@@ -6,7 +6,7 @@ export type PrimaryNavigationItem = {
 export const PRIMARY_NAVIGATION_ITEMS: PrimaryNavigationItem[] = [
   { href: "/dashboard", label: "Dashboard" },
   { href: "/picks", label: "Pick'em Form" },
-  { href: "/leaderboard", label: "Standings" }
+  { href: "/leaderboard", label: "Leaderboard" }
 ];
 
 export const isPrimaryNavigationRouteActive = (

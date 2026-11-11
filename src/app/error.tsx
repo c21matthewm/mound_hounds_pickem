@@ -5,10 +5,10 @@ import { ActionButton, ActionLink } from "@/components/ui-primitives";
 
 export default function AppError({
   error,
-  reset
+  retry
 }: {
   error: Error & { digest?: string };
-  reset: () => void;
+  retry: () => void;
 }) {
   const [reference, setReference] = useState<string | null>(null);
 
@@ -56,7 +56,7 @@ export default function AppError({
           <p className="mt-2 text-xs font-semibold text-slate-600">Reference: {reference}</p>
         ) : null}
         <div className="mt-5 flex flex-wrap gap-2">
-          <ActionButton onClick={reset}>Try again</ActionButton>
+          <ActionButton onClick={retry}>Try again</ActionButton>
           <ActionLink href="/dashboard" variant="secondary">
             Dashboard
           </ActionLink>

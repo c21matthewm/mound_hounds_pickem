@@ -113,7 +113,7 @@ describe("dashboard race-week lifecycle", () => {
 
       expect(state.action).toMatchObject({
         href: "/leaderboard",
-        label: "View current standings",
+        label: "View Leaderboard",
         status: "season_results_pending",
         statusLabel: "Results Pending",
         title: "Awaiting final results"
@@ -145,7 +145,7 @@ describe("dashboard race-week lifecycle", () => {
 
     expect(state.action).toMatchObject({
       href: "/leaderboard",
-      label: "View final standings",
+      label: "View Leaderboard",
       status: "season_complete",
       statusLabel: "Season Complete",
       title: "Final standings are ready"
@@ -249,8 +249,8 @@ describe("dashboard race-week lifecycle", () => {
   });
 
   it.each([
-    ["draft", "season_results_pending", "View current standings"],
-    ["published", "season_complete", "View final standings"]
+    ["draft", "season_results_pending", "View Leaderboard"],
+    ["published", "season_complete", "View Leaderboard"]
   ] as const)("shows the terminal %s state to a declined participant", async (resultsStatus, status, label) => {
     const state = await load([race({ results_status: resultsStatus })], { participation: declined });
 

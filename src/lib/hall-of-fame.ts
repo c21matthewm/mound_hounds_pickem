@@ -125,8 +125,11 @@ export async function loadHallOfFameSnapshot(
       }))
     };
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Failed to load the Hall of Fame.";
-    if (/hall_of_fame|schema cache|does not exist/i.test(message)) {
+    const cause = error instanceof Error ? error.cause : undefined;
+    if (
+      typeof cause === "object" && cause !== null && "code" in cause &&
+      (cause.code === "PGRST205" || cause.code === "42P01")
+    ) {
       return { migrationReady: false, seasons: [] };
     }
 

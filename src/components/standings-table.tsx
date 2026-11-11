@@ -1,6 +1,7 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
+import { flushSync } from "react-dom";
 import { compactRoundLabel } from "@/lib/race-label";
 import {
   compareNullableNumber,
@@ -8,7 +9,7 @@ import {
   sortIndicator,
   type SortDirection
 } from "@/lib/table-utils";
-import { DataSurface, Pagination, RankBadge } from "@/components/ui-primitives";
+import { ActionButton, DataSurface, Pagination, RankBadge } from "@/components/ui-primitives";
 
 export type StandingsTableRaceColumn = {
   raceId: number;
@@ -69,6 +70,8 @@ export function StandingsTable({
   const [page, setPage] = useState(1);
   const [sortDirection, setSortDirection] = useState<SortDirection>("asc");
   const [sortKey, setSortKey] = useState<SortKey>("currentStanding");
+  const mobileTeamRef = useRef<HTMLButtonElement>(null);
+  const desktopTeamRef = useRef<HTMLTableCellElement>(null);
 
   const desktopTableMinWidth = 480 + raceColumns.length * 64;
 
@@ -117,11 +120,31 @@ export function StandingsTable({
   );
   const firstVisible = sortedRows.length === 0 ? 0 : (currentPage - 1) * PAGE_SIZE + 1;
   const lastVisible = Math.min(currentPage * PAGE_SIZE, sortedRows.length);
+  const currentUserIndex = sortedRows.findIndex((row) => row.userId === currentUserId);
+
+  const findMyTeam = () => {
+    const teamPage = Math.floor(currentUserIndex / PAGE_SIZE) + 1;
+    if (teamPage !== currentPage) {
+      // Render the destination page before focusing its team row.
+      flushSync(() => setPage(teamPage));
+    }
+
+    const mobileTeam = mobileTeamRef.current;
+    const team = mobileTeam?.getClientRects().length ? mobileTeam : desktopTeamRef.current;
+    team?.focus({ preventScroll: true });
+    team?.scrollIntoView({ block: "center", inline: "nearest" });
+  };
+
   return (
     <DataSurface
       className="mt-6"
       data-testid="standings-table"
       description={`${firstVisible}-${lastVisible} of ${sortedRows.length} teams`}
+      meta={currentUserIndex >= 0 ? (
+        <ActionButton className="min-h-11" onClick={findMyTeam} variant="secondary">
+          Find my team
+        </ActionButton>
+      ) : undefined}
       title={seasonYear ? `${seasonYear} Standings` : "Season Standings"}
     >
       <p className="border-b border-slate-200 px-3 py-2 text-xs leading-5 text-slate-600">
@@ -174,6 +197,7 @@ export function StandingsTable({
                   aria-label={`${row.displayName}, rank ${row.currentStanding}, ${row.totalPoints} points. ${expanded ? "Hide" : "Show"} race results.`}
                   className="grid w-full grid-cols-[2.25rem_2.75rem_minmax(0,1fr)_4.25rem] items-center gap-1.5 px-3 py-2.5 text-left"
                   onClick={() => setExpandedUserId(expanded ? null : row.userId)}
+                  ref={isCurrentUser ? mobileTeamRef : undefined}
                   type="button"
                 >
                   <span className="flex justify-end">
@@ -290,7 +314,12 @@ export function StandingsTable({
                         rank={row.currentStanding}
                       />
                     </td>
-                    <td className={`sticky left-20 z-10 truncate px-3 py-2 text-left font-medium text-slate-900 ${isCurrentUser ? "bg-cyan-50" : "bg-white"}`} title={row.displayName}>
+                    <td
+                      className={`sticky left-20 z-10 truncate px-3 py-2 text-left font-medium text-slate-900 ${isCurrentUser ? "bg-cyan-50" : "bg-white"}`}
+                      ref={isCurrentUser ? desktopTeamRef : undefined}
+                      tabIndex={isCurrentUser ? -1 : undefined}
+                      title={row.displayName}
+                    >
                       {row.displayName}
                     </td>
                     <td className="px-3 py-2 text-right">

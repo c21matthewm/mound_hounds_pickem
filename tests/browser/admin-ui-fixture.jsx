@@ -2,6 +2,8 @@
 // Names, IDs, scores, documents, and email addresses are fictional.
 import { PushNotificationSettings } from '@/components/push-notification-settings';
 import { createRoot } from 'react-dom/client';
+import { AdminWorkspaceNav } from '@/components/admin-workspace-nav';
+import { AuthenticatedPageShell } from '@/components/authenticated-page-shell';
 import { AdminResultsImportForm } from '@/components/admin-results-import-form';
 import { AdminDriverPhotoFilter } from '@/components/admin-driver-photo-filter';
 import { AdminHistoricalHallOfFameImport } from '@/components/admin-historical-hall-of-fame-import';
@@ -53,4 +55,14 @@ const scenes = {
 };
 window.fixtureScenes=Object.keys(scenes);
 const root = createRoot(document.getElementById('root'));
-window.showScene=(name)=>root.render(<main className="mx-auto min-w-0 max-w-7xl p-4">{scenes[name]}</main>);
+window.showScene = (name) => {
+  if (name === 'navigation') {
+    root.render(
+      <AuthenticatedPageShell eyebrow="League Ops" maxWidth="max-w-7xl" title="Admin Dashboard">
+        <AdminWorkspaceNav activeTab="race-week" />
+      </AuthenticatedPageShell>
+    );
+    return;
+  }
+  root.render(<main className="mx-auto min-w-0 max-w-7xl p-4">{scenes[name]}</main>);
+};

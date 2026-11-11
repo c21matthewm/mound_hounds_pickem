@@ -10,6 +10,7 @@ import { InstallAppControls } from "@/components/install-app-controls";
 import { SubmitButton } from "@/components/submit-button";
 import { ConfirmSubmitButton } from "@/components/confirm-submit-button";
 import { PickemForm } from "@/components/pickem-form";
+import { StandingsTable } from "@/components/standings-table";
 import "@/app/globals.css";
 
 const root = createRoot(document.getElementById("root"));
@@ -22,13 +23,37 @@ window.showPickScene = (name) => {
   }));
   const savedSelection = Object.fromEntries(groups.map(group => [group.groupNumber, name === "first" ? null : group.drivers[0].id]));
   const props = {
-    action: async form => { window.fixtureCalls.push(Object.fromEntries(form)); },
+    action: async form => {
+      window.fixtureCalls.push(Object.fromEntries(form));
+      if (name === "stalled") await new Promise(() => {});
+    },
     canSubmit: name !== "locked", draftOwnerId: "fixture-user",
     existingAverageSpeed: name === "first" ? "" : "135.500",
     existingSavedAt: name === "first" ? null : "2027-05-01T12:00:00Z",
     groups, picksLocked: name === "locked", raceId: 1, savedSelection
   };
   root.render(createElement(PwaProvider, { key: ++sceneVersion }, createElement(AuthenticatedPageShell, { eyebrow: "Race picks", title: "Pick'em Form" }, createElement(PickemForm, props))));
+};
+
+window.showStandingsScene = (hasTeam) => {
+  const rows = Array.from({ length: 55 }, (_, index) => ({
+    change: 0,
+    currentStanding: index === 30 ? 30 : index + 1,
+    displayName: index === 29 ? "Zulu Racing" : `Fixture Team ${index + 1}`,
+    racePointsByRaceId: { 1: 100 - index },
+    totalPoints: 100 - index,
+    userId: `team-${index}`
+  }));
+  root.render(createElement(
+    AuthenticatedPageShell,
+    { eyebrow: "League Data", title: "Leaderboard" },
+    createElement(StandingsTable, {
+      currentUserId: hasTeam ? "team-29" : "unranked-team",
+      raceColumns: [{ raceId: 1, raceName: "Fixture race", roundNumber: 1 }],
+      rows,
+      seasonYear: 2027
+    })
+  ));
 };
 
 window.showPwaScene = () => {

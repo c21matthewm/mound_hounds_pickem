@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation";
 import { saveProfileAction } from "@/app/actions/auth";
-import { AuthFlowShell, AuthFormPanel } from "@/components/auth-flow-shell";
-import { ProfileButton } from "@/components/profile-button";
+import { AuthFormPanel } from "@/components/auth-flow-shell";
+import { AuthenticatedPageShell } from "@/components/authenticated-page-shell";
 import { SubmitButton } from "@/components/submit-button";
 import {
   CompactNotice,
@@ -46,8 +46,7 @@ export default async function OnboardingPage({ searchParams }: PageProps) {
   }
 
   return (
-    <AuthFlowShell
-      action={<ProfileButton />}
+    <AuthenticatedPageShell
       description="Add your name and team once to finish setting up your league account."
       eyebrow="League Setup"
       maxWidth="max-w-2xl"
@@ -99,6 +98,6 @@ export default async function OnboardingPage({ searchParams }: PageProps) {
         </SubmitButton>
         </form>
       </AuthFormPanel>
-    </AuthFlowShell>
+    </AuthenticatedPageShell>
   );
 }

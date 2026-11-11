@@ -92,7 +92,13 @@ try {
       }});
     }, { key, draft });
     await page.addScriptTag({ content: js });
-    await page.evaluate(name => window.showPickScene(name), name);
+    await page.evaluate(name => {
+      if (name === "standings" || name === "standings-unranked") {
+        window.showStandingsScene(name === "standings");
+      } else {
+        window.showPickScene(name);
+      }
+    }, name);
     await page.locator("main").waitFor();
     return page;
   };
@@ -118,6 +124,21 @@ try {
   await page.getByRole("button",{name:"Save Pick'em Form",exact:true}).click();
   await page.waitForFunction(() => window.fixtureCalls.length===1);
   assert.equal((await page.evaluate(() => window.fixtureCalls[0])).average_speed,"136.501"); checks++; await page.close();
+  page = await scene("stalled");
+  await page.clock.install();
+  const speed = page.locator('[name="average_speed"]');
+  await speed.fill("136.501");
+  await page.getByRole("button", { name: "Save Pick'em Form", exact: true }).click();
+  await page.waitForFunction(() => window.fixtureCalls.length === 1);
+  assert.equal(await speed.isDisabled(), true);
+  await page.clock.fastForward(10_000);
+  await page.getByText("Save hasn’t been confirmed.", { exact: false }).waitFor();
+  assert.equal(await speed.isEnabled(), true);
+  assert.equal(await speed.inputValue(), "136.501");
+  assert.equal(await page.getByRole("button", { name: "Reload form", exact: true }).isEnabled(), true);
+  assert.equal(await page.getByRole("button", { name: "Save Pick'em Form", exact: true }).isEnabled(), true);
+  assert.equal(await page.evaluate(() => window.fixtureCalls.length), 1, "Timeout must not retry the save");
+  checks++; await page.close();
   page = await scene("first");
   await page.locator('[name="average_speed"]').fill("140.500");
   for (let group=1;group<=6;group++) await page.locator(`[name="driver_group${group}_id"][value="${group*2-1}"]`).locator("..").click();
@@ -235,6 +256,39 @@ try {
   await page.waitForFunction(() => document.querySelector('[name="year"]')?.disabled === true);
   assert.equal(await page.locator('[name="year"]').isDisabled(), true);
   assert.equal(await page.locator('#leaderboard-race-select').isDisabled(), true); checks++; await page.close();
+  for (const width of [320, 1280]) {
+    const page = await scene("standings", width);
+    const mobile = width < 768;
+    const findTeam = page.getByRole("button", { name: "Find my team", exact: true });
+    const team = mobile
+      ? page.getByRole("button", { name: /^Zulu Racing, rank 30,/ })
+      : page.getByRole("cell", { name: "Zulu Racing", exact: true });
+    const pagination = page.getByRole("navigation", { name: "teams pages" });
+    const jumpToTeam = async (expectedPage) => {
+      await findTeam.focus();
+      await page.keyboard.press("Enter");
+      await pagination.getByText(`Page ${expectedPage} of 3`, { exact: true }).waitFor();
+      const target = await team.elementHandle();
+      await page.waitForFunction((element) => {
+        const rect = element.getBoundingClientRect();
+        return document.activeElement === element && rect.top >= 0 && rect.bottom <= innerHeight;
+      }, target);
+    };
+    assert.equal(await team.count(), 0, "The team starts on a later page");
+    await jumpToTeam(2);
+    const nameSort = mobile
+      ? page.getByRole("button", { name: /^Name / })
+      : page.getByRole("button", { name: /^Participant \/ Team / });
+    await nameSort.click();
+    await jumpToTeam(3);
+    await jumpToTeam(3);
+    checks++;
+    await page.close();
+  }
+  page = await scene("standings-unranked");
+  assert.equal(await page.getByRole("button", { name: "Find my team", exact: true }).count(), 0);
+  checks++;
+  await page.close();
   assert.deepEqual(errors,[],"Browser fixture exceptions"); assert.deepEqual(blocked,[],"No network requests are permitted");
   console.log(`PASS: ${checks} offline pick-save UI checks; no browser requests permitted.`);
 } finally { await browser.close(); }

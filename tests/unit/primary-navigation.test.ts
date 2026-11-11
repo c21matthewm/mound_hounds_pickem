@@ -9,7 +9,7 @@ describe("primary navigation", () => {
     expect(PRIMARY_NAVIGATION_ITEMS).toEqual([
       { href: "/dashboard", label: "Dashboard" },
       { href: "/picks", label: "Pick'em Form" },
-      { href: "/leaderboard", label: "Standings" }
+      { href: "/leaderboard", label: "Leaderboard" }
     ]);
   });
 
