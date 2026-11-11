@@ -1,8 +1,8 @@
 import { SeasonInviteCodeInput } from "@/components/season-invite-code-input";
 import { redirect } from "next/navigation";
 import { setSeasonParticipationAction } from "@/app/actions/auth";
-import { AuthFlowShell, AuthFormPanel } from "@/components/auth-flow-shell";
-import { ProfileButton } from "@/components/profile-button";
+import { AuthFormPanel } from "@/components/auth-flow-shell";
+import { AuthenticatedPageShell } from "@/components/authenticated-page-shell";
 import { SeasonInviteCodeHelp } from "@/components/season-invite-code-help";
 import { SubmitButton } from "@/components/submit-button";
 import {
@@ -63,8 +63,7 @@ export default async function SeasonRegistrationPage({ searchParams }: PageProps
   const adminEmail = leagueAdminEmail();
 
   return (
-    <AuthFlowShell
-      action={<ProfileButton />}
+    <AuthenticatedPageShell
       description={
         <>
           Your account and team stay with you each year. Confirm whether{" "}
@@ -157,6 +156,6 @@ export default async function SeasonRegistrationPage({ searchParams }: PageProps
           </form>
         </AuthFormPanel>
       )}
-    </AuthFlowShell>
+    </AuthenticatedPageShell>
   );
 }

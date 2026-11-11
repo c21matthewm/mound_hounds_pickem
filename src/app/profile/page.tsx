@@ -49,8 +49,6 @@ export default async function ProfilePage() {
       description="Your league identity and account access."
       eyebrow="Account"
       maxWidth="max-w-3xl"
-      showDesktopNavigation={profileComplete}
-      showMobileNavigation={profileComplete}
       title="Profile"
     >
       <ContentPanel className="mt-6">

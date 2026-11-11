@@ -65,7 +65,7 @@ await build({
       if(id === "\0fixture:pwa")return "export const usePwa=()=>window.fixturePwa??{isOffline:false,isStandalone:false,needsHttps:false};";
       if (id === "\0fixture:admin-data") return "export const formatDateTime=value=>value.slice(0,10);";
       if (id === "\0fixture:next/link") return "import {createElement} from 'react';export default function Link({children,href,...props}){return createElement('a',{href,...props},children)}";
-      if (id === "\0fixture:next/navigation") return "export const useRouter=()=>({push:(url)=>window.fixtureNavigation=url,refresh:()=>{}});";
+      if (id === "\0fixture:next/navigation") return "export const useRouter=()=>({push:(url)=>window.fixtureNavigation=url,refresh:()=>{}});export const usePathname=()=>'/admin';";
     },
     transform(code, id) {
       if (normalized(id) === normalized(globalsPath)) {
@@ -124,6 +124,27 @@ try {
   assert.equal(overflow,false,`${name} overflow at ${width}`);checks++;
   if(width===390||width===1280)await page.screenshot({path:`${output}/${name}-${width}.png`,fullPage:true});
   await page.close();
+ }
+ for (const width of [320, 768]) {
+   const page = await scene('navigation', width);
+   const nav = page.getByRole('navigation', {
+     name: width < 768 ? 'Primary mobile navigation' : 'Primary navigation',
+     exact: true
+   });
+   const leaderboard = nav.getByRole('link', { name: 'Leaderboard', exact: true });
+   await leaderboard.waitFor();
+   assert.equal(await leaderboard.getAttribute('href'), '/leaderboard');
+   assert.equal(await nav.getByRole('link').count(), 3);
+   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 1), false);
+   if (width < 768) {
+     await page.getByRole('combobox', { name: /^Admin workspace/ }).selectOption('health');
+     assert.equal(await page.evaluate(() => window.fixtureNavigation), '/admin?tab=health');
+     assert.ok((await leaderboard.boundingBox()).height >= 44);
+   } else {
+     await page.getByRole('navigation', { name: 'Admin workspaces' }).waitFor();
+   }
+   checks++;
+   await page.close();
  }
  let page=await scene('pushInstall');
  await page.getByRole('link',{name:'How to install'}).waitFor();

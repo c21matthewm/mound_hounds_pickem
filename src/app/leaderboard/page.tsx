@@ -96,39 +96,20 @@ export default async function LeaderboardPage({ searchParams }: PageProps) {
   let picksSnapshot: Awaited<ReturnType<typeof buildPicksByRaceSnapshot>> | null = null;
   let analyticsSnapshot: Awaited<ReturnType<typeof buildParticipantAnalyticsSnapshot>> | null = null;
   let hallOfFameSnapshot: HallOfFameSnapshot | null = null;
-  try {
-    if (activeTab === "picks") {
-      picksSnapshot = activeSeason
-        ? await buildPicksByRaceSnapshot(activeSeason.id, selectedRaceId)
-        : { availableRaces: [], resultsPosted: false, rows: [], selectedRace: null };
-    } else if (activeTab === "analytics" && registeredForActiveSeason) {
-      analyticsSnapshot = activeSeason
-        ? await buildParticipantAnalyticsSnapshot(user.id, activeSeason.id)
-        : null;
-    } else if (activeTab === "hall") {
-      hallOfFameSnapshot = await loadHallOfFameSnapshot(supabase);
-    } else {
-      standingsSnapshot = activeSeason
-        ? await buildLeagueScoringSnapshot(activeSeason.id)
-        : { leaderboardRows: [], raceColumns: [] };
-    }
-  } catch (error) {
-    const message = error instanceof Error ? error.message : "Unknown scoring error.";
-
-    return (
-      <AuthenticatedPageShell
-        description={activeTab === "hall"
-          ? "Past champions, season records, and complete final standings."
-          : "Standings, locked picks by race, season analytics, and league history."}
-        eyebrow="League Data"
-        maxWidth="max-w-4xl"
-        title={activeTab === "hall" ? "Hall of Fame" : "Season Leaderboard"}
-      >
-        <CompactNotice className="mt-6" tone="danger">
-          Failed to load leaderboard: {message}
-        </CompactNotice>
-      </AuthenticatedPageShell>
-    );
+  if (activeTab === "picks") {
+    picksSnapshot = activeSeason
+      ? await buildPicksByRaceSnapshot(activeSeason.id, selectedRaceId)
+      : { availableRaces: [], resultsPosted: false, rows: [], selectedRace: null };
+  } else if (activeTab === "analytics" && registeredForActiveSeason) {
+    analyticsSnapshot = activeSeason
+      ? await buildParticipantAnalyticsSnapshot(user.id, activeSeason.id)
+      : null;
+  } else if (activeTab === "hall") {
+    hallOfFameSnapshot = await loadHallOfFameSnapshot(supabase);
+  } else {
+    standingsSnapshot = activeSeason
+      ? await buildLeagueScoringSnapshot(activeSeason.id)
+      : { leaderboardRows: [], raceColumns: [] };
   }
 
   const picksTableRows: PicksByRaceTableRow[] = picksSnapshot
@@ -214,7 +195,7 @@ export default async function LeaderboardPage({ searchParams }: PageProps) {
           : "Standings, locked picks by race, season analytics, and league history."}
       eyebrow="League Data"
       maxWidth="max-w-[1200px]"
-      title={activeTab === "hall" ? "Hall of Fame" : "Season Leaderboard"}
+      title="Leaderboard"
     >
 
       <RouteTabs

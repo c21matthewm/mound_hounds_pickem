@@ -20,19 +20,20 @@ describe("authenticated mobile frame", () => {
     expect(markup).toContain("pb-28");
   });
 
-  it("supports authenticated workspaces that intentionally omit mobile navigation", () => {
+  it("keeps the primary navigation available in admin workspaces", () => {
     const markup = renderToStaticMarkup(
       <AuthenticatedPageShell
         eyebrow="League Ops"
-        showMobileNavigation={false}
         title="Admin Dashboard"
       >
         <p>Admin content</p>
       </AuthenticatedPageShell>
     );
 
-    expect(markup).not.toContain("data-mobile-navigation");
-    expect(markup).toContain("pb-10");
+    expect(markup.match(/data-mobile-navigation/g)).toHaveLength(1);
+    expect(markup).toContain('aria-label="Primary navigation"');
+    expect(markup.match(/href="\/leaderboard">Leaderboard<\/a>/g)).toHaveLength(2);
+    expect(markup).toContain("pb-28");
   });
 
 });

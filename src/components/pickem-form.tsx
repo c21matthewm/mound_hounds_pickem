@@ -10,6 +10,7 @@ import {
 } from "react";
 import { MobileActionDock } from "@/components/mobile-action-dock";
 import { usePwa } from "@/components/pwa-provider";
+import { ActionButton, CompactNotice } from "@/components/ui-primitives";
 import {
   parsePickDraft,
   pickDraftMatchesSavedState,
@@ -19,6 +20,7 @@ import {
 } from "@/lib/pick-draft";
 
 type SelectionMap = Record<number, number | null>;
+const SAVE_CONFIRMATION_TIMEOUT_MS = 10_000;
 const LEAVE_CONFIRM_MESSAGE = "You have unsaved Pick'em changes. Leave this page without saving?";
 
 type GroupSelectionStatus = "changed" | "missing" | "saved";
@@ -89,7 +91,7 @@ export function PickemForm({
   const groupNumbers = useMemo(() => groups.map((group) => group.groupNumber), [groups]);
   const [draftSelection, setDraftSelection] = useState<SelectionMap>(() => ({ ...savedSelection }));
   const [draftAverageSpeed, setDraftAverageSpeed] = useState(existingAverageSpeed);
-  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [saveState, setSaveState] = useState<"idle" | "saving" | "unconfirmed">("idle");
   const [recoveryDraft, setRecoveryDraft] = useState<PickDraft | null>(null);
   const [draftStorageReady, setDraftStorageReady] = useState(false);
   const formRef = useRef<HTMLFormElement | null>(null);
@@ -111,6 +113,7 @@ export function PickemForm({
     [draftAverageSpeed, draftSelection, existingAverageSpeed, existingSavedAt, groupNumbers, savedSelection]
   );
   const isAlreadySaved = existingSavedAt !== null && !hasUnsavedChanges;
+  const isSubmitting = saveState === "saving" && !isAlreadySaved;
   const selectedGroupCount = groupNumbers.filter(
     (groupNumber) => draftSelection[groupNumber] !== null && draftSelection[groupNumber] !== undefined
   ).length;
@@ -135,7 +138,7 @@ export function PickemForm({
 
   const clearSubmitIntent = () => {
     submitInProgressRef.current = false;
-    setIsSubmitting(false);
+    setSaveState("idle");
     if (submitIntentTimeoutRef.current !== null) {
       window.clearTimeout(submitIntentTimeoutRef.current);
       submitIntentTimeoutRef.current = null;
@@ -161,7 +164,7 @@ export function PickemForm({
     if (hasUnsavedChanges) {
       storeCurrentDraft();
     }
-    setIsSubmitting(true);
+    setSaveState("saving");
     submitInProgressRef.current = true;
     allowNextUnloadOnce();
     if (submitIntentTimeoutRef.current !== null) {
@@ -170,7 +173,8 @@ export function PickemForm({
     submitIntentTimeoutRef.current = window.setTimeout(() => {
       submitInProgressRef.current = false;
       submitIntentTimeoutRef.current = null;
-    }, 4000);
+      setSaveState("unconfirmed");
+    }, SAVE_CONFIRMATION_TIMEOUT_MS);
   };
 
   useEffect(
@@ -404,6 +408,22 @@ export function PickemForm({
             </button>
           </div>
         </div>
+      ) : null}
+
+      {saveState === "unconfirmed" && !isAlreadySaved && !picksLocked ? (
+        <CompactNotice className="flex flex-wrap items-center gap-3" tone="warning">
+          <p role="status">Save hasn’t been confirmed. Reload to check your saved picks before trying again.</p>
+          <ActionButton
+            onClick={() => {
+              allowNextUnloadOnce();
+              window.location.reload();
+            }}
+            type="button"
+            variant="secondary"
+          >
+            Reload form
+          </ActionButton>
+        </CompactNotice>
       ) : null}
 
       <fieldset className="min-w-0 space-y-5 disabled:opacity-80" disabled={picksLocked || isSubmitting}>

@@ -208,7 +208,7 @@ export function PushNotificationSettings() {
             <h2 id="push-settings-heading" className="font-semibold">Device notifications</h2>
             <p className="mt-2 text-sm text-slate-600">Get pick reminders on this device.</p>
             {guidance ? (
-                <p className="mt-3 text-sm">{guidance} {!isStandalone ? <Link href="/install" className="underline">How to install</Link> : null}</p>
+                <p className="mt-3 text-sm">{guidance} {!isStandalone ? <Link href="/more/install" className="underline">How to install</Link> : null}</p>
             ) : setupPending ? (
                 <p className="mt-3 text-sm">Device notifications aren’t available right now.</p>
             ) : !enabled && readinessIssue ? (
