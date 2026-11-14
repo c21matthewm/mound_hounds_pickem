@@ -59,6 +59,18 @@ html {
   scroll-padding-top: calc(1rem + var(--safe-area-top));
 }
 
+@media screen and (min-width: 48rem) {
+  .app-page-width {
+    max-width: 80rem;
+  }
+}
+
+@media screen and (min-width: 64rem) {
+  html {
+    font-size: 112.5%;
+  }
+}
+
 body {
   margin: 0;
   max-width: 100%;

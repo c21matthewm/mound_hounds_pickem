@@ -37,12 +37,14 @@ await build({
     name: "offline-pick-fixture-boundaries",
     enforce: "pre",
     resolveId(source) {
+      if (/(?:^|\/)app\/feedback\/actions(?:\.ts)?$/.test(normalized(source))) return "\0fixture:feedback-action";
       if (source === "next/link" || source === "next/navigation") return "\0fixture:" + source;
       if (source === "server-only" || source.startsWith("next/") || source.startsWith("@supabase/") || source.includes("/lib/supabase/")) {
-        throw new Error("The offline pick form fixture reached a server/service import.");
+        throw new Error("The offline fixture reached a server/service import: " + source);
       }
     },
     load(id) {
+      if (id === "\0fixture:feedback-action") return "export const submitFeedbackAction = (form) => new Promise(resolve => {window.fixtureCalls.push(Object.fromEntries(form)); window.finishFeedback = resolve;});";
       if (id === "\0fixture:next/link") return "import {createElement} from 'react';export default function Link({children,href,...props}){return createElement('a',{href,...props},children)}";
       if (id === "\0fixture:next/navigation") return "const router={push:(href,options)=>window.fixtureNavigate(href,options),replace:(href)=>{window.fixtureReplaced=href;},refresh:()=>{window.fixtureRefreshes=(window.fixtureRefreshes||0)+1;}};export const useRouter=()=>router;export const usePathname=()=>'/picks';";
     },
@@ -108,6 +110,60 @@ try {
     const page = await scene(name,width);
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth+1), false, `${name} overflows ${width}`);
     checks++; await page.close();
+  }
+  for (const width of [320, 1280]) {
+    const page = await scene("saved", width);
+    await page.evaluate(() => window.showAnalyticsScene());
+    const history = page.getByRole("region", { name: "Recent results" });
+    const latest = history.locator("summary").first();
+    assert.match(await latest.innerText(), /The long name of the fifth and most recent fixture race/);
+    assert.match(await latest.innerText(), /0\s+Points/i);
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 1), false);
+    await latest.focus();
+    await page.keyboard.press("Enter");
+    await history.getByText("Lowest fallback", { exact: true }).waitFor();
+    assert.equal(await history.getByText("Fixture race 1", { exact: true }).isVisible(), false);
+    await history.getByText("Older results (2)", { exact: true }).click();
+    await history.getByText("Fixture race 1", { exact: true }).waitFor();
+    assert.equal(await history.getByText("Fixture race 1", { exact: true }).count(), 1);
+    checks++;
+    await page.close();
+  }
+
+  {
+    const page = await scene("saved");
+    await page.evaluate(() => window.showFeedbackScene());
+    const type = page.locator('[name="feedback_type"]');
+    const category = page.locator('[name="category"]');
+    const details = page.locator('[name="details"]');
+    const submit = page.getByRole("button", { name: "Submit feedback", exact: true });
+    const draft = "The form lost my edits after switching the race.";
+    await type.selectOption("improvement");
+    await category.selectOption("other");
+    await details.fill(draft);
+
+    for (const result of [
+      { status: "error", field: "details", message: "Please provide more detail." },
+      { status: "error", message: "Could not save. Please retry." },
+      { status: "success", message: "Your submission was recorded." }
+    ]) {
+      await submit.click();
+      await page.getByRole("button", { name: "Submitting...", exact: true }).waitFor();
+      assert.equal(await details.isDisabled(), true);
+      const callCount = await page.evaluate(() => window.fixtureCalls.length);
+      await page.locator("form").evaluate(form => form.requestSubmit());
+      assert.equal(await page.evaluate(() => window.fixtureCalls.length), callCount);
+      await page.evaluate(value => window.finishFeedback(value), result);
+      await page.getByText(result.message, { exact: true }).waitFor();
+      await submit.waitFor();
+      assert.equal(await details.inputValue(), result.status === "error" ? draft : "");
+      assert.equal(await type.inputValue(), result.status === "error" ? "improvement" : "bug");
+      assert.equal(await category.inputValue(), result.status === "error" ? "other" : "weekly_picks");
+      if (result.field) assert.equal(await details.getAttribute("aria-invalid"), "true");
+      checks++;
+    }
+    assert.equal(await page.evaluate(() => window.fixtureCalls.length), 3);
+    await page.close();
   }
   let page = await scene("saved");
   assert.equal(await page.getByRole("button", { name: "Already saved", exact: true }).isDisabled(), true);
@@ -278,6 +334,36 @@ try {
   assert.equal(geometry.overflow, false); assert.ok(geometry.dockBottom <= geometry.navTop, JSON.stringify(geometry));
   assert.ok(geometry.dockLeft>=44 && geometry.dockRight<=700-44); assert.ok(geometry.profileWidth>=44 && geometry.profileHeight>=44); checks++; await page.close();
   page = await scene("saved");
+  for (const width of [390, 820, 1024, 1280, 1600]) {
+    await page.setViewportSize({ width, height: 900 });
+    const dimensions = [];
+    for (const maxWidth of ["max-w-3xl", "max-w-5xl", "max-w-7xl"]) {
+      await page.evaluate(maxWidth => window.showFrameScene(maxWidth), maxWidth);
+      await page.locator("main." + maxWidth).waitFor();
+      dimensions.push(await page.locator("main").evaluate(main => {
+        const header = main.querySelector("header");
+        const profileIcon = header.querySelector('[aria-label="Profile"] svg');
+        return {
+          width: main.getBoundingClientRect().width,
+          heading: getComputedStyle(header.querySelector("h1")).fontSize,
+          icon: profileIcon.getBoundingClientRect().width,
+          rootFont: getComputedStyle(document.documentElement).fontSize,
+          overflow: header.scrollWidth > header.clientWidth + 1
+        };
+      }));
+    }
+    const fontSize = width >= 1024 ? 18 : 16;
+    assert.deepEqual(dimensions, Array(3).fill({
+      width: Math.min(width, 80 * fontSize),
+      heading: (width < 768 ? 1.875 : 2.25) * fontSize + "px",
+      icon: 1.25 * fontSize,
+      rootFont: fontSize + "px",
+      overflow: false
+    }));
+    checks++;
+  }
+  await page.close();
+  page = await scene("saved");
   await page.evaluate(() => { window.fixtureRefreshes = 0; window.showRefreshScene(); });
   await page.getByText("Schedule refresh fixture", { exact: true }).waitFor();
   await page.evaluate(() => { window.fixtureOnline = false; window.dispatchEvent(new Event("offline")); window.dispatchEvent(new Event("focus")); });
@@ -286,6 +372,45 @@ try {
   assert.equal(await page.evaluate(() => window.fixtureRefreshes), 0, "Reconnection must not immediately refresh"); checks++;
   await page.evaluate(() => window.dispatchEvent(new Event("focus")));
   await page.waitForFunction(() => window.fixtureRefreshes === 1); checks++; await page.close();
+  page = await scene("saved");
+  await page.clock.install();
+  await page.evaluate(() => { window.fixtureRefreshes = 0; window.showRefreshScene({ lockAfter: 610_000 }); });
+  await page.getByText("Schedule refresh fixture", { exact: true }).waitFor();
+  await page.clock.fastForward(600_000);
+  assert.equal(await page.evaluate(() => window.fixtureRefreshes), 0, "Editable forms must not poll");
+  await page.clock.fastForward(8_000);
+  await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+  await page.waitForFunction(() => window.fixtureRefreshes === 1);
+  await page.clock.fastForward(4_000);
+  await page.waitForFunction(() => window.fixtureRefreshes === 2);
+  await page.clock.fastForward(60_000);
+  assert.equal(await page.evaluate(() => window.fixtureRefreshes), 2, "Deadline check must run once even after a recent focus check");
+  checks++; await page.close();
+
+  page = await scene("saved");
+  await page.clock.install();
+  await page.evaluate(() => { window.fixtureRefreshes = 0; window.showRefreshScene({ pollWhileBlocked: true }); });
+  await page.getByText("Waiting for results", { exact: true }).waitFor();
+  await page.clock.fastForward(61_000);
+  await page.waitForFunction(() => window.fixtureRefreshes === 1);
+  await page.evaluate(() => window.publishFixtureResults());
+  await page.getByText("Picks open", { exact: true }).waitFor();
+  await page.clock.fastForward(600_000);
+  assert.equal(await page.evaluate(() => window.fixtureRefreshes), 1, "Polling stops when results unblock the form");
+  checks++; await page.close();
+
+  page = await scene("saved");
+  await page.clock.install();
+  await page.evaluate(() => { window.fixtureRefreshes = 0; window.showRefreshScene({ lockAfter: 20_000 }); });
+  await page.getByText("Schedule refresh fixture", { exact: true }).waitFor();
+  await page.evaluate(() => { window.fixtureOnline = false; window.dispatchEvent(new Event("offline")); });
+  await page.clock.fastForward(21_000);
+  assert.equal(await page.evaluate(() => window.fixtureRefreshes), 0);
+  await page.evaluate(() => { window.fixtureOnline = true; window.dispatchEvent(new Event("online")); });
+  await page.clock.fastForward(2_000);
+  await page.waitForFunction(() => window.fixtureRefreshes === 1);
+  checks++; await page.close();
+
   page = await scene("saved");
   await page.clock.install({ time: new Date("2027-05-01T13:59:40Z") });
   await page.evaluate(() => window.showRaceStartScene());

@@ -68,123 +68,105 @@ export default async function DashboardPage({ searchParams }: PageProps) {
         </CompactNotice>
       ) : null}
 
-      <section aria-label="Current race status" className="mt-5">
-        <div className="flex min-w-0 items-start gap-3">
-          <div className="shrink-0 rounded-lg ui-panel border border-slate-200 bg-white p-1 shadow-sm">
-            <div
-              aria-hidden
-              className="h-[88px] w-[88px] rounded-md bg-slate-200 bg-cover bg-center"
-              style={{
-                backgroundImage: `url('${MOUND_HOUND_IMAGE_PATH}')`,
-                backgroundPosition: "50% 38%"
-              }}
-            />
-          </div>
-
-          <div className="min-w-0 flex-1 overflow-hidden rounded-lg ui-panel border border-slate-200 bg-white shadow-sm">
-            <div className="p-3 sm:p-4">
-              <div className="flex min-w-0 flex-wrap items-start justify-between gap-2 sm:gap-3">
-                <div className="flex min-w-0 flex-wrap items-center gap-2">
-                  <h2 className="text-base font-semibold text-slate-950">{action.title}</h2>
-                  <StatusChip tone={statusTone(action.status)}>{action.statusLabel}</StatusChip>
-                </div>
-                <ActionLink className="max-w-full" href={action.href}>
-                  {action.label}
-                </ActionLink>
+      <section aria-labelledby="race-week-title" className="ui-panel mt-5 min-w-0 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+        <div className="grid gap-4 p-4 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center sm:p-5">
+          <div className="min-w-0">
+            <div className="flex items-center gap-3">
+              <div
+                aria-hidden
+                className="size-12 shrink-0 rounded-md bg-slate-200 bg-cover bg-center sm:size-16"
+                style={{
+                  backgroundImage: "url('" + MOUND_HOUND_IMAGE_PATH + "')",
+                  backgroundPosition: "50% 38%"
+                }}
+              />
+              <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+                <h2 className="text-lg font-semibold text-slate-950 sm:text-xl" id="race-week-title">
+                  {action.title}
+                </h2>
+                <StatusChip tone={statusTone(action.status)}>{action.statusLabel}</StatusChip>
               </div>
-              {currentRace && activeSeason ? (
-                <div className="mt-1.5 min-w-0">
-                  <p className="mt-1 text-xs font-semibold uppercase tracking-wide text-slate-500">
-                    {raceWeek.isDoubleheader
-                      ? `${activeSeason.seasonYear} · ${pickWindowRoundLabel(raceWeek.races)} · Doubleheader`
-                      : raceContextLabel({
-                          roundNumber: currentRace.round_number,
-                          seasonYear: activeSeason.seasonYear
-                        })}
-                  </p>
-                  <p className="mt-0.5 text-sm font-medium leading-5 text-slate-800">
-                    {currentRace.race_name}
-                  </p>
-                </div>
-              ) : null}
-              <p className="mt-2 text-sm leading-5 text-slate-600">{action.body}</p>
-
-              {action.status === "form_open" && currentRace && raceWeek.pickLockAt ? (
-                <div className="mt-3 border-t border-slate-100 pt-3">
-                  <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
-                    Pick deadline
-                  </p>
-                  <p className="mt-0.5 text-xs font-semibold leading-5 text-slate-800">
-                    {formatDateTime(raceWeek.pickLockAt)}
-                  </p>
-                </div>
-              ) : null}
-
-              {action.status === "form_pending" && raceWeek.pickOpenAt ? (
-                <div className="mt-3 border-t border-slate-100 pt-3">
-                  <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
-                    Picks open
-                  </p>
-                  <p className="mt-0.5 text-xs font-semibold leading-5 text-slate-800">
-                    {formatDateTime(raceWeek.pickOpenAt)}
-                  </p>
-                </div>
-              ) : null}
             </div>
-
-            {raceWeek.isDoubleheader ? (
-              <div className="border-t border-slate-200 px-3 py-3 sm:px-4">
-                <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
-                  Weekend forms
+            {currentRace && activeSeason ? (
+              <div className="mt-1.5 min-w-0">
+                <p className="mt-1 text-xs font-semibold uppercase tracking-wide text-slate-500">
+                  {raceWeek.isDoubleheader
+                    ? `${activeSeason.seasonYear} · ${pickWindowRoundLabel(raceWeek.races)} · Doubleheader`
+                    : raceContextLabel({
+                        roundNumber: currentRace.round_number,
+                        seasonYear: activeSeason.seasonYear
+                      })}
                 </p>
-                <div className="mt-2 grid gap-2">
-                  {raceWeek.races.map((race) => {
-                    const saved = raceWeek.pickByRaceId.has(race.id);
-                    const label = saved
-                      ? action.status === "locked" ? "Saved & locked" : "Saved"
-                      : action.status === "form_open" ? "Open" : action.statusLabel;
-                    return (
-                      <Link
-                        className="flex min-w-0 items-center justify-between gap-2 rounded-md border border-slate-200 px-3 py-2 hover:bg-slate-50"
-                        href={`/picks?race_id=${race.id}`}
-                        key={race.id}
-                      >
-                        <span className="min-w-0 text-sm font-semibold leading-5 text-slate-900">
-                          R{race.round_number} · {race.race_name}
-                        </span>
-                        <StatusChip className="shrink-0" tone={saved ? "success" : statusTone(action.status)}>
-                          {label}
-                        </StatusChip>
-                      </Link>
-                    );
-                  })}
-                </div>
+                <p className="mt-0.5 text-sm font-medium leading-5 text-slate-800">
+                  {currentRace.race_name}
+                </p>
+              </div>
+            ) : null}
+            <p className="mt-2 text-sm leading-5 text-slate-600">{action.body}</p>
+
+            {(action.status === "form_open" || action.status === "picks_saved") && raceWeek.pickLockAt ? (
+              <div className="mt-3 border-t border-slate-100 pt-3">
+                <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                  {action.status === "picks_saved" ? "Editable until" : "Pick deadline"}
+                </p>
+                <p className="mt-0.5 text-xs font-semibold leading-5 text-slate-800">
+                  {formatDateTime(raceWeek.pickLockAt)}
+                </p>
+              </div>
+            ) : null}
+
+            {action.status === "form_pending" && raceWeek.pickOpenAt ? (
+              <div className="mt-3 border-t border-slate-100 pt-3">
+                <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                  Picks open
+                </p>
+                <p className="mt-0.5 text-xs font-semibold leading-5 text-slate-800">
+                  {formatDateTime(raceWeek.pickOpenAt)}
+                </p>
               </div>
             ) : null}
           </div>
+          <ActionLink className="w-full sm:w-auto" href={action.href}>
+            {action.label}
+          </ActionLink>
         </div>
 
-        <nav aria-label="Primary destinations" className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
-          <ActionLink className="w-full" href="/picks">
-            Pick&apos;em Form
-          </ActionLink>
-          <ActionLink className="w-full" href="/leaderboard">
-            Leaderboard
-          </ActionLink>
-          {profile.role === "admin" ? (
-            <ActionLink className="w-full" href="/admin">
-              Admin
-            </ActionLink>
-          ) : (
-            <ActionLink className="w-full" href="/rules">
-              Rules
-            </ActionLink>
-          )}
-          <ActionLink className="w-full" href="/more">
-            More
-          </ActionLink>
-        </nav>
+        {raceWeek.isDoubleheader ? (
+          <div className="border-t border-slate-200 px-4 py-3 sm:px-5">
+            <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+              Weekend forms
+            </p>
+            <div className="mt-2 grid gap-2 sm:grid-cols-2">
+              {raceWeek.races.map((race) => {
+                const saved = raceWeek.pickByRaceId.has(race.id);
+                const label = saved
+                  ? action.status === "locked" ? "Saved & locked" : "Saved"
+                  : action.status === "form_open" ? "Open" : action.statusLabel;
+                return (
+                  <Link
+                    className="flex min-w-0 items-center justify-between gap-2 rounded-md border border-slate-200 min-h-11 flex-wrap px-3 py-2 hover:bg-slate-50"
+                    href={`/picks?race_id=${race.id}`}
+                    key={race.id}
+                  >
+                    <span className="min-w-0 text-sm font-semibold leading-5 text-slate-900">
+                      R{race.round_number} · {race.race_name}
+                    </span>
+                    <StatusChip className="shrink-0" tone={saved ? "success" : statusTone(action.status)}>
+                      {label}
+                    </StatusChip>
+                  </Link>
+                );
+              })}
+            </div>
+          </div>
+        ) : null}
       </section>
+
+      <nav aria-label="League resources" className="mt-3 flex flex-wrap gap-x-2">
+        <ActionLink href="/rules" variant="quiet">Rules</ActionLink>
+        <ActionLink href="/more" variant="quiet">More</ActionLink>
+        {profile.role === "admin" ? <ActionLink href="/admin" variant="quiet">Admin</ActionLink> : null}
+      </nav>
 
       {raceWeek.adminReadiness && currentRace ? (
         <section className="mt-6 border-t border-slate-300 pt-5">

@@ -9,6 +9,8 @@ import { PwaProvider } from "@/components/pwa-provider";
 import { InstallAppControls } from "@/components/install-app-controls";
 import { SubmitButton } from "@/components/submit-button";
 import { ConfirmSubmitButton } from "@/components/confirm-submit-button";
+import { AnalyticsRaceHistory } from "@/components/analytics-race-history";
+import { FeedbackForm } from "@/components/feedback-form";
 import { PickemForm } from "@/components/pickem-form";
 import { PickSubmissionSnapshot } from "@/components/pick-submission-snapshot";
 import { StandingsTable } from "@/components/standings-table";
@@ -124,20 +126,28 @@ window.showPwaScene = () => {
   ));
 };
 
-window.showFrameScene = () => {
+window.showFrameScene = (maxWidth) => {
   root.render(createElement(PwaProvider, { key: ++sceneVersion },
-    createElement(AuthenticatedPageShell, { eyebrow: "Race picks", title: "Pick'em Form" },
+    createElement(AuthenticatedPageShell, { eyebrow: "Race picks", title: "Pick'em Form", maxWidth },
       createElement("p", null, "Fictional league content"),
       createElement(MobileActionDock, null, createElement("button", { type: "button", className: "min-h-11" }, "Save draft"))
     )
   ));
 };
 
-window.showRefreshScene = () => {
-  root.render(createElement(PwaProvider, { key: ++sceneVersion }, createElement("main", null,
-    createElement("p", null, "Schedule refresh fixture"),
-    createElement(RaceScheduleRefresh, { pickLockAt: new Date(Date.now()+1800000).toISOString(), raceStartAt: new Date(Date.now()+3600000).toISOString() })
-  )));
+window.showRefreshScene = ({ lockAfter = 1_800_000, pollWhileBlocked = false } = {}) => {
+  const pickLockAt = new Date(Date.now() + lockAfter).toISOString();
+  const raceStartAt = new Date(Date.now() + lockAfter + 1_800_000).toISOString();
+  const version = ++sceneVersion;
+  const renderRefreshScene = (blocked) => {
+    root.render(createElement(PwaProvider, { key: version }, createElement("main", null,
+      createElement("p", null, "Schedule refresh fixture"),
+      createElement("p", null, blocked ? "Waiting for results" : "Picks open"),
+      createElement(RaceScheduleRefresh, { pickLockAt, raceStartAt, pollWhileBlocked: blocked })
+    )));
+  };
+  window.publishFixtureResults = () => renderRefreshScene(false);
+  renderRefreshScene(pollWhileBlocked);
 };
 
 window.showReceiptScene = (saved, lockedDraftKey) => {
@@ -165,4 +175,32 @@ window.showRaceStartScene = () => {
     createElement("p", null, "Race start fixture"),
     createElement(RaceScheduleRefresh, { pickLockAt: raceStartAt, raceStartAt, raceId: 1 })
   )));
+};
+
+window.showAnalyticsScene = () => {
+  const rows = Array.from({ length: 5 }, (_, index) => ({
+    averageSpeedGuess: index === 4 ? null : 171.5,
+    cumulativePoints: 50,
+    fieldSize: 15,
+    officialRaceAverageSpeed: 172,
+    pointsVsRaceAverage: -2,
+    raceDate: "2027-05-01T12:00:00Z",
+    raceId: index + 1,
+    raceName: index === 4 ? "The long name of the fifth and most recent fixture race" : "Fixture race " + (index + 1),
+    submittedPick: index !== 4,
+    tiebreakDelta: index === 4 ? null : 0.5,
+    weeklyFinish: index === 4 ? null : 6,
+    weeklyPoints: index === 4 ? 0 : 12
+  }));
+  root.render(createElement(AuthenticatedPageShell, { eyebrow: "League Data", title: "Leaderboard" },
+    createElement(AnalyticsRaceHistory, { rows })
+  ));
+};
+
+window.showFeedbackScene = () => {
+  root.render(createElement(PwaProvider, { key: ++sceneVersion },
+    createElement(AuthenticatedPageShell, { eyebrow: "Feedback", title: "Feedback" },
+      createElement(FeedbackForm)
+    )
+  ));
 };
