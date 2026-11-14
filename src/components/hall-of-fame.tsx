@@ -37,7 +37,7 @@ function ChampionCard({
     <ContentPanel className="flex min-w-0 flex-col">
       <div className="flex items-center gap-3">
         <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-amber-100 text-amber-800">
-          <svg aria-hidden="true" fill="none" height="22" viewBox="0 0 24 24" width="22">
+          <svg aria-hidden="true" className="size-[1.375rem]" fill="none" viewBox="0 0 24 24">
             <path
               d="M8 3h8v5a4 4 0 0 1-8 0V3Zm0 2H4v2a4 4 0 0 0 4 4m8-6h4v2a4 4 0 0 1-4 4m-4 1v5m-4 3h8m-8 0v-1a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v1"
               stroke="currentColor"

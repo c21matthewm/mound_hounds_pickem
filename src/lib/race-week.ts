@@ -93,10 +93,11 @@ const actionForState = ({
   isDoubleheader,
   picksNotOpen,
   picksLocked,
-  previousResultsMessage,
+  previousResults,
   registered,
   seasonRaces,
   savedRaceCount,
+  savedRaceId,
   windowComplete,
   windowLength
 }: {
@@ -106,10 +107,11 @@ const actionForState = ({
   isDoubleheader: boolean;
   picksNotOpen: boolean;
   picksLocked: boolean;
-  previousResultsMessage: string | null;
+  previousResults: { message: string; raceId: number } | null;
   registered: boolean;
   seasonRaces: readonly RaceWeekRace[];
   savedRaceCount: number;
+  savedRaceId: number | undefined;
   windowComplete: boolean;
   windowLength: number;
 }): RaceWeekAction => {
@@ -131,8 +133,8 @@ const actionForState = ({
         body: `The ${activeSeason.seasonYear} standings will be final once all race results are posted. You can view the current standings in the meantime.`,
         href: isAdmin
           ? `/admin?tab=results&result_race_id=${pendingResultRace.id}`
-          : "/leaderboard",
-        label: isAdmin ? "Post race results" : "View Leaderboard",
+          : "/leaderboard?tab=picks&race_id=" + pendingResultRace.id,
+        label: isAdmin ? "Post race results" : "View race picks",
         status: "season_results_pending",
         statusLabel: "Results Pending",
         title: "Awaiting final results"
@@ -182,29 +184,31 @@ const actionForState = ({
     };
   }
 
-  if (previousResultsMessage) {
-    return {
-      body: `${previousResultsMessage} Driver standings and pick groups will refresh before the form opens.`,
-      href: isAdmin ? "/admin?tab=results" : "/leaderboard",
-      label: isAdmin ? "Publish results" : "View Leaderboard",
-      status: "waiting_results",
-      statusLabel: "Results Needed",
-      title: "Waiting on results"
-    };
-  }
-
   if (picksLocked) {
     return {
       body: windowComplete
-        ? `${isDoubleheader ? "Both race picks are" : "Your picks are"} saved and locked.`
-        : "The pick deadline has passed. Results will appear on the leaderboard after publication.",
-      href: windowComplete
-        ? `/leaderboard?tab=picks&race_id=${currentRace.id}`
-        : "/leaderboard",
-      label: windowComplete ? "View locked picks" : "View Leaderboard",
+        ? (isDoubleheader ? "Both race submissions are saved." : "Your submission is saved.")
+        : "The pick deadline has passed. Results will appear after publication.",
+      href: savedRaceId !== undefined
+        ? "/picks?race_id=" + savedRaceId
+        : "/leaderboard?tab=picks&race_id=" + currentRace.id,
+      label: savedRaceId !== undefined ? "Review my picks" : "View race picks",
       status: "locked",
       statusLabel: "Locked",
       title: windowComplete ? "Picks saved and locked" : "Picks are locked"
+    };
+  }
+
+  if (previousResults) {
+    return {
+      body: previousResults.message + " The form opens after results are published and driver groups refresh.",
+      href: isAdmin
+        ? "/admin?tab=results&result_race_id=" + previousResults.raceId
+        : "/leaderboard?tab=picks&race_id=" + previousResults.raceId,
+      label: isAdmin ? "Publish results" : "View race picks",
+      status: "waiting_results",
+      statusLabel: "Results Needed",
+      title: "Waiting on results"
     };
   }
 
@@ -248,10 +252,11 @@ export async function loadRaceWeekState({
         isDoubleheader: false,
         picksNotOpen: false,
         picksLocked: false,
-        previousResultsMessage: null,
+        previousResults: null,
         registered: false,
         seasonRaces: [],
         savedRaceCount: 0,
+        savedRaceId: undefined,
         windowComplete: false,
         windowLength: 0
       }),
@@ -313,8 +318,14 @@ export async function loadRaceWeekState({
         seasonRaces
       })
     : null;
-  const previousResultsMessage =
-    previousResultsGate?.status === "blocked" ? previousResultsGate.shortMessage : null;
+  const previousResults = previousResultsGate?.status === "blocked"
+    ? {
+        message: previousResultsGate.shortMessage,
+        raceId: previousResultsGate.previousRaces.find(({ id }) =>
+          seasonRaces.some((race) => race.id === id && race.results_status !== "published")
+        )?.id ?? previousResultsGate.previousRace.id
+      }
+    : null;
   const registered = isRegisteredForSeason(participation);
 
   let adminReadiness: RaceWeekAdminReadiness | null = null;
@@ -356,10 +367,11 @@ export async function loadRaceWeekState({
       isDoubleheader,
       picksNotOpen,
       picksLocked,
-      previousResultsMessage,
+      previousResults,
       registered,
       seasonRaces,
       savedRaceCount,
+      savedRaceId: races.find((race) => pickByRaceId.has(race.id))?.id,
       windowComplete,
       windowLength: races.length
     }),
@@ -369,7 +381,7 @@ export async function loadRaceWeekState({
     pickByRaceId,
     pickLockAt,
     pickOpenAt,
-    previousResultsBlocked: previousResultsMessage !== null,
+    previousResultsBlocked: previousResults !== null,
     races,
     savedRaceCount,
     windowComplete

@@ -168,8 +168,6 @@ export default async function LeaderboardPage({ searchParams }: PageProps) {
 
     return best === null ? row.weeklyFinish : Math.min(best, row.weeklyFinish);
   }, null);
-  const recentRaceRows = analyticsRaceRows.slice(-3);
-  const maxWeeklyPoints = Math.max(1, ...analyticsRaceRows.map((row) => row.weeklyPoints));
   const strongestVsFieldRace = analyticsRaceRows.reduce<
     (typeof analyticsRaceRows)[number] | null
   >((best, row) => {
@@ -300,8 +298,8 @@ export default async function LeaderboardPage({ searchParams }: PageProps) {
                 <h2 className="mt-2 text-2xl font-semibold tracking-tight">
                   {analyticsSnapshot.teamName}
                 </h2>
-                <div className="mt-5 grid border-t border-white/15 sm:grid-cols-2 lg:grid-cols-4 lg:divide-x lg:divide-white/15">
-                  <div className="border-b border-white/15 py-3 sm:px-3 lg:border-b-0 lg:first:pl-0">
+                <div className="mt-3 grid grid-cols-2 divide-x divide-white/15 border-t border-white/15">
+                  <div className="py-3 pr-3">
                     <p className="text-xs font-semibold uppercase tracking-wide text-slate-300">
                       Current Rank
                     </p>
@@ -314,7 +312,7 @@ export default async function LeaderboardPage({ searchParams }: PageProps) {
                       Field of {analyticsSnapshot.summary.fieldSize}
                     </p>
                   </div>
-                  <div className="border-b border-white/15 py-3 sm:px-3 lg:border-b-0">
+                  <div className="py-3 pl-3">
                     <p className="text-xs font-semibold uppercase tracking-wide text-slate-300">
                       Total Points
                     </p>
@@ -325,78 +323,11 @@ export default async function LeaderboardPage({ searchParams }: PageProps) {
                       {formatOptionalNumber(analyticsSnapshot.summary.averageWeeklyPoints)} per race
                     </p>
                   </div>
-                  <div className="border-b border-white/15 py-3 sm:px-3 lg:border-b-0">
-                    <p className="text-xs font-semibold uppercase tracking-wide text-slate-300">
-                      Vs League Avg
-                    </p>
-                    <p className="mt-1 text-3xl font-semibold tabular-nums">
-                      {formatSignedValue(totalVsLeagueAverage)}
-                    </p>
-                    <p className="text-xs text-slate-300">
-                      {aboveAverageWeekCount}/{analyticsRaceRows.length} weeks above average
-                    </p>
-                  </div>
-                  <div className="py-3 sm:px-3 lg:last:pr-0">
-                    <p className="text-xs font-semibold uppercase tracking-wide text-slate-300">
-                      Best Finish
-                    </p>
-                    <p className="mt-1 text-3xl font-semibold tabular-nums">
-                      {bestFinish !== null ? `#${bestFinish}` : "-"}
-                    </p>
-                    <p className="text-xs text-slate-300">
-                      {analyticsSnapshot.summary.weeklyWins} win(s),{" "}
-                      {analyticsSnapshot.summary.topThreeFinishes} top-3
-                    </p>
-                  </div>
                 </div>
               </div>
-
-              <div className="p-5 sm:p-6">
-                <section>
-                  <div className="flex items-center justify-between gap-3">
-                    <div>
-                      <h3 className="text-sm font-semibold uppercase tracking-wide text-slate-700">
-                        Recent Form
-                      </h3>
-                      <p className="mt-1 text-xs text-slate-500">
-                        Last three completed races compared with your season average.
-                      </p>
-                    </div>
-                    <div className="text-right">
-                      <p className="text-lg font-semibold tabular-nums text-slate-900">
-                        {formatOptionalNumber(analyticsSnapshot.summary.lastThreeRaceAverage)}
-                      </p>
-                      <p className="text-xs text-slate-500">
-                        {analyticsSnapshot.summary.momentumDelta !== null
-                          ? `${formatSignedValue(analyticsSnapshot.summary.momentumDelta)} vs avg`
-                          : "Need more races"}
-                      </p>
-                    </div>
-                  </div>
-
-                  <div className="mt-4 grid gap-3">
-                    {recentRaceRows.map((row) => (
-                      <div key={`recent-${row.raceId}`}>
-                        <div className="mb-1 flex items-center justify-between gap-2 text-xs">
-                          <span className="truncate font-medium text-slate-700">{row.raceName}</span>
-                          <span className="font-semibold text-slate-900">
-                            {row.weeklyPoints} pts, {formatFinish(row.weeklyFinish, row.fieldSize)}
-                          </span>
-                        </div>
-                        <div className="h-2 overflow-hidden rounded-full bg-slate-200">
-                          <div
-                            className="h-full rounded-full bg-cyan-500"
-                            style={{
-                              width: `${Math.max(8, (row.weeklyPoints / maxWeeklyPoints) * 100)}%`
-                            }}
-                          />
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </section>
-              </div>
             </section>
+
+            <AnalyticsRaceHistory rows={analyticsSnapshot.raceRows} />
 
             <Disclosure
               className="mt-4"
@@ -404,6 +335,25 @@ export default async function LeaderboardPage({ searchParams }: PageProps) {
               summary="Season highlights"
             >
               <div className="grid gap-x-6 gap-y-4 sm:grid-cols-2">
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-wide text-slate-600">Vs League Average</p>
+                    <p className="mt-1 text-sm font-medium text-slate-900">{formatSignedValue(totalVsLeagueAverage)} points</p>
+                    <p className="text-xs text-slate-500">{aboveAverageWeekCount}/{analyticsRaceRows.length} races above average</p>
+                  </div>
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-wide text-slate-600">Best Finish</p>
+                    <p className="mt-1 text-sm font-medium text-slate-900">{bestFinish === null ? "—" : "#" + bestFinish}</p>
+                    <p className="text-xs text-slate-500">{analyticsSnapshot.summary.weeklyWins} wins · {analyticsSnapshot.summary.topThreeFinishes} top-3 finishes</p>
+                  </div>
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-wide text-slate-600">Recent Form</p>
+                    <p className="mt-1 text-sm font-medium text-slate-900">
+                      {formatOptionalNumber(analyticsSnapshot.summary.lastThreeRaceAverage)} points per race over the last three races
+                    </p>
+                    {analyticsSnapshot.summary.momentumDelta === null ? null : (
+                      <p className="text-xs text-slate-500">{formatSignedValue(analyticsSnapshot.summary.momentumDelta)} vs season average</p>
+                    )}
+                  </div>
                   <div>
                     <p className="text-xs font-semibold uppercase tracking-wide text-emerald-700">
                       Best Week
@@ -478,7 +428,6 @@ export default async function LeaderboardPage({ searchParams }: PageProps) {
               </div>
             </Disclosure>
 
-            <AnalyticsRaceHistory rows={analyticsSnapshot.raceRows} />
           </>
         )
       ) : null}

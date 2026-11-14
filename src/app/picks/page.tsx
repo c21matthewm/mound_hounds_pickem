@@ -388,6 +388,7 @@ export default async function PicksPage({ searchParams }: PageProps) {
       <RaceScheduleRefresh
         lockedDraftKey={picksLocked ? pickDraftStorageKey(user.id, selectedRace.id) : undefined}
         pickLockAt={pickLockAt}
+        pollWhileBlocked={previousResultsBlocked || missingGroups.length > 0}
         raceId={selectedRace.id}
         raceStartAt={selectedRace.race_date}
       />

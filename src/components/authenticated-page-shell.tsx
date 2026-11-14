@@ -22,7 +22,7 @@ export function AuthenticatedPageShell({
 }: Props) {
   return (
     <main
-      className={`mx-auto flex min-h-svh w-full min-w-0 ${maxWidth} flex-col px-4 py-6 pb-28 sm:px-6 sm:py-8 md:py-10 md:pb-12`}
+      className={`app-page-width mx-auto flex min-h-svh w-full min-w-0 ${maxWidth} flex-col px-4 py-6 pb-28 sm:px-6 sm:py-8 md:py-10 md:pb-12`}
     >
       <header className="border-b border-slate-200 pb-5 md:pb-6">
         <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-start gap-3 sm:gap-4">

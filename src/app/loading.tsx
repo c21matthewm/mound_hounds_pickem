@@ -3,7 +3,7 @@ export default function AppLoading() {
     <main
       aria-busy="true"
       aria-label="Loading page"
-      className="mx-auto min-h-screen max-w-6xl px-5 py-10 sm:px-6"
+      className="app-page-width mx-auto min-h-screen max-w-6xl px-4 py-10 sm:px-6"
     >
       <div className="h-3 w-28 animate-pulse rounded bg-slate-200" />
       <div className="mt-3 h-9 w-64 max-w-full animate-pulse rounded bg-slate-200" />
