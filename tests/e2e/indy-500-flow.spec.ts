@@ -301,7 +301,8 @@ test.describe.serial("Indianapolis 500 Pick'em Flow", () => {
     }
 
     await participantPage.getByRole("button", { name: "Save Pick'em Form" }).click();
-    await expect(participantPage.locator("main")).toContainText("Last Saved Submission");
+    await expect(participantPage.getByRole("heading", { name: "Saved submission" })).toBeVisible();
+    await expect(participantPage.getByRole("button", { name: "Already saved" })).toBeDisabled();
     await expect(participantPage.locator("main")).toContainText("Group 8");
 
     const { data: savedPick, error: savedPickError } = await supabase
@@ -348,6 +349,9 @@ test.describe.serial("Indianapolis 500 Pick'em Flow", () => {
 
     await participantPage.goto("/picks");
     await expect(participantPage.locator("main")).not.toContainText(raceName);
+    await participantPage.goto("/picks?race_id=" + race.id);
+    await expect(participantPage.getByRole("heading", { name: "Picks saved and locked" })).toBeVisible();
+    await expect(participantPage.getByRole("list", { name: "Saved drivers" }).getByRole("listitem")).toHaveCount(8);
 
     await resultsImportForm.getByTestId("admin-results-import-submit").click();
     await expect(adminPage.getByTestId("admin-results-save-alert")).toContainText(

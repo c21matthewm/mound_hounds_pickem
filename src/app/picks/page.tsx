@@ -6,15 +6,18 @@ import { saveWeeklyPickAction } from "@/app/picks/actions";
 import { PickemForm } from "@/components/pickem-form";
 import {
   ActionLink,
-  CompactNotice
+  CompactNotice,
+  StatusChip
 } from "@/components/ui-primitives";
 import { requireAppUser } from "@/lib/authenticated-user";
 import { getPreviousRaceResultsGate } from "@/lib/pickem-results-gate";
 import {
   nextPickWindow,
   pickWindowOpensAt,
-  pickWindowRoundLabel
+  pickWindowRoundLabel,
+  racesInPickWindow
 } from "@/lib/pick-windows";
+import { pickDraftStorageKey } from "@/lib/pick-draft";
 import { queryStringParam } from "@/lib/query";
 import { raceContextLabel } from "@/lib/race-label";
 import {
@@ -141,7 +144,14 @@ export default async function PicksPage({ searchParams }: PageProps) {
     throw new Error(`Failed loading the next race: ${upcomingRaceError.message}`);
   }
 
-  const pickWindow = nextPickWindow(raceRows ?? [], now);
+  const seasonRaces = raceRows ?? [];
+  const requestedRace = seasonRaces.find((race) => race.id === requestedRaceId);
+  const requestedLockedRace = requestedRace && Date.parse(pickLockAtForRace(requestedRace)) <= now.getTime()
+    ? requestedRace
+    : null;
+  const pickWindow = requestedLockedRace
+    ? racesInPickWindow(seasonRaces, requestedLockedRace)
+    : nextPickWindow(seasonRaces, now);
 
   if (pickWindow.length === 0) {
     return (
@@ -163,8 +173,8 @@ export default async function PicksPage({ searchParams }: PageProps) {
     );
   }
 
-  const pickOpenAt = pickWindowOpensAt(raceRows ?? [], pickWindow);
-  if (pickOpenAt && Date.parse(pickOpenAt) > now.getTime()) {
+  const pickOpenAt = pickWindowOpensAt(seasonRaces, pickWindow);
+  if (!requestedLockedRace && pickOpenAt && Date.parse(pickOpenAt) > now.getTime()) {
     const openingRace = pickWindow[0];
     return (
       <AuthenticatedPageShell
@@ -217,47 +227,54 @@ export default async function PicksPage({ searchParams }: PageProps) {
   const pickLockAt = pickLockAtForRace(selectedRace);
   const isIndy500Pickem = racePickFormat === "indy_500";
 
-  const [previousResultsGate, driversResponse, raceDriverGroupsResponse] =
-    await Promise.all([
-      getPreviousRaceResultsGate(supabase, selectedRace, {
-        includeDiagnostics: profile.role === "admin",
-        seasonRaces: raceRows ?? []
-      }),
-      supabase
-        .from("drivers")
-        .select("id,driver_name,image_url,championship_points,current_standing,group_number,is_active")
-        .order("group_number", { ascending: true })
-        .order("current_standing", { ascending: true }),
-      supabase
-        .from("race_driver_groups")
-        .select("race_id,driver_id,group_number,qualifying_position")
-        .eq("race_id", selectedRace.id)
-        .order("group_number", { ascending: true })
-        .order("qualifying_position", { ascending: true })
-    ]);
+  const picksLocked = Date.parse(pickLockAt) <= now.getTime();
+  const selectedMap = selectedByGroup(existingPick, groupNumbers);
+  const selectedDriverIds = Object.values(selectedMap).filter((id) => id !== null);
+  const editableField = picksLocked ? null : await Promise.all([
+    getPreviousRaceResultsGate(supabase, selectedRace, {
+      includeDiagnostics: profile.role === "admin",
+      seasonRaces
+    }),
+    supabase
+      .from("drivers")
+      .select("id,driver_name,image_url,championship_points,current_standing,group_number,is_active")
+      .order("group_number", { ascending: true })
+      .order("current_standing", { ascending: true }),
+    supabase
+      .from("race_driver_groups")
+      .select("race_id,driver_id,group_number,qualifying_position")
+      .eq("race_id", selectedRace.id)
+      .order("group_number", { ascending: true })
+      .order("qualifying_position", { ascending: true })
+  ]);
+  const [previousResultsGate, driversResponse, raceDriverGroupsResponse] = editableField ?? [];
   const blockedPreviousResultsGate =
-    previousResultsGate.status === "blocked" ? previousResultsGate : null;
+    previousResultsGate?.status === "blocked" ? previousResultsGate : null;
   const previousResultsBlocked = Boolean(blockedPreviousResultsGate);
 
-  if (driversResponse.error) {
-    throw new Error(`Failed loading the race driver field: ${driversResponse.error.message}`);
+  if (driversResponse?.error) {
+    throw new Error("Failed loading the race driver field: " + driversResponse.error.message);
   }
 
-  if (raceDriverGroupsResponse.error) {
-    throw new Error(`Failed loading race driver groups: ${raceDriverGroupsResponse.error.message}`);
+  if (raceDriverGroupsResponse?.error) {
+    throw new Error("Failed loading race driver groups: " + raceDriverGroupsResponse.error.message);
   }
-  const raceDriverGroups = (raceDriverGroupsResponse.data ?? []) as RaceDriverGroupRow[];
+  const raceDriverGroups = (raceDriverGroupsResponse?.data ?? []) as RaceDriverGroupRow[];
+  const allDrivers = (driversResponse?.data ?? []) as DriverRow[];
 
-  const allDrivers: DriverRow[] = (driversResponse.data ?? []) as DriverRow[];
-  const activeDrivers = allDrivers.filter((driver) => driver.is_active);
-  const selectedMap = selectedByGroup(existingPick, groupNumbers);
-  const picksLocked = Date.parse(pickLockAt) <= now.getTime();
-  const driverNameById = new Map<number, string>();
-  const driverById = new Map<number, DriverRow>();
-  allDrivers.forEach((driver) => {
-    driverNameById.set(driver.id, driver.driver_name);
-    driverById.set(driver.id, driver);
-  });
+  let receiptDrivers: Pick<DriverRow, "id" | "driver_name">[] = allDrivers;
+  if (picksLocked && selectedDriverIds.length > 0) {
+    const { data, error } = await supabase
+      .from("drivers")
+      .select("id,driver_name")
+      .in("id", selectedDriverIds);
+    if (error) {
+      throw new Error("Failed loading saved driver names: " + error.message);
+    }
+    receiptDrivers = data ?? [];
+  }
+
+  const driverNameById = new Map(receiptDrivers.map((driver) => [driver.id, driver.driver_name]));
   const savedPickSummary = groupNumbers.flatMap((groupNumber) => {
     const driverId = selectedMap[groupNumber];
     if (!driverId) {
@@ -272,6 +289,7 @@ export default async function PicksPage({ searchParams }: PageProps) {
     ];
   });
 
+  const driverById = new Map(allDrivers.map((driver) => [driver.id, driver]));
   const driversByGroup = new Map<number, Array<DriverRow & { qualifyingPosition?: number | null }>>();
   groupNumbers.forEach((groupNumber) => driversByGroup.set(groupNumber, []));
   if (raceDriverGroups.length > 0) {
@@ -289,7 +307,8 @@ export default async function PicksPage({ searchParams }: PageProps) {
       driversByGroup.set(raceGroup.group_number, existing);
     });
   } else {
-    activeDrivers.forEach((driver) => {
+    allDrivers.forEach((driver) => {
+      if (!driver.is_active) return;
       const existing = driversByGroup.get(driver.group_number) ?? [];
       existing.push(driver);
       driversByGroup.set(driver.group_number, existing);
@@ -345,6 +364,10 @@ export default async function PicksPage({ searchParams }: PageProps) {
     : picksLocked
       ? "Locked"
       : "Open";
+  const savedFormLabel = picksLocked ? "Saved & locked" : "Saved";
+  const unsavedFormLabel = picksLocked
+    ? "Locked"
+    : previousResultsBlocked ? "Results Needed" : "Needs picks";
   const raceStatusClass = previousResultsBlocked
     ? "border-cyan-300/60 bg-cyan-300/15 text-cyan-100"
     : picksLocked
@@ -363,7 +386,9 @@ export default async function PicksPage({ searchParams }: PageProps) {
       title="Pick'em Form"
     >
       <RaceScheduleRefresh
+        lockedDraftKey={picksLocked ? pickDraftStorageKey(user.id, selectedRace.id) : undefined}
         pickLockAt={pickLockAt}
+        raceId={selectedRace.id}
         raceStartAt={selectedRace.race_date}
       />
       {pickWindow.length > 1 ? (
@@ -409,15 +434,12 @@ export default async function PicksPage({ searchParams }: PageProps) {
                       {race.race_name}
                     </span>
                   </span>
-                  <span
-                    className={`mt-0.5 shrink-0 rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${
-                      isSaved
-                        ? "ui-status-success border-emerald-200 bg-emerald-50 text-emerald-800"
-                        : "ui-status-warning border-amber-200 bg-amber-50 text-amber-800"
-                    }`}
+                  <StatusChip
+                    className="mt-0.5 shrink-0"
+                    tone={isSaved ? "success" : picksLocked ? "neutral" : "warning"}
                   >
-                    {isSaved ? "Saved" : "Needs picks"}
-                  </span>
+                    {isSaved ? savedFormLabel : unsavedFormLabel}
+                  </StatusChip>
                 </Link>
               );
             })}
@@ -430,7 +452,7 @@ export default async function PicksPage({ searchParams }: PageProps) {
       ) : null}
 
       <section className="mt-6 overflow-hidden rounded-lg ui-panel border border-slate-200 bg-white">
-        {selectedRace.title_image_url ? (
+        {!picksLocked && selectedRace.title_image_url ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img
             alt={`${selectedRace.race_name} banner`}
@@ -456,47 +478,53 @@ export default async function PicksPage({ searchParams }: PageProps) {
               Status: {raceStatusLabel}
             </span>
           </div>
-          <dl className="mt-5 grid border-y border-white/15 text-sm sm:grid-cols-2 lg:grid-cols-4 lg:divide-x lg:divide-white/15">
-            <div className="border-b border-white/15 py-3 sm:px-3 lg:border-b-0 lg:first:pl-0">
-              <dt className="text-xs font-semibold uppercase tracking-wide text-slate-300">
-                {isIndy500Pickem ? "Pick Lock (Race Start)" : "Pick Deadline"}
-              </dt>
-              <dd className="mt-1 font-medium">{formatRaceDate(pickLockAt)}</dd>
-            </div>
-            <div className="border-b border-white/15 py-3 sm:px-3 lg:border-b-0">
-              <dt className="text-xs font-semibold uppercase tracking-wide text-slate-300">Race Start</dt>
-              <dd className="mt-1 font-medium">{formatRaceDate(selectedRace.race_date)}</dd>
-            </div>
-            <div className="border-b border-white/15 py-3 sm:border-b-0 sm:px-3">
-              <dt className="text-xs font-semibold uppercase tracking-wide text-slate-300">Payout</dt>
-              <dd className="mt-1 font-medium">${Number(selectedRace.payout).toFixed(2)}</dd>
-            </div>
-            <div className="py-3 sm:px-3 lg:last:pr-0">
-              <dt className="text-xs font-semibold uppercase tracking-wide text-slate-300">
-                {isIndy500Pickem ? "Pick Format" : "Timezone"}
-              </dt>
-              <dd className="mt-1 font-medium">
-                {isIndy500Pickem ? "Indy 500: 8 picks" : LEAGUE_TIME_ZONE}
-              </dd>
-            </div>
-          </dl>
-          <p className="mt-3 text-xs text-slate-300">
-            Visit the official{" "}
-            <a
-              className="font-semibold text-cyan-200 underline decoration-cyan-300/60 underline-offset-2 hover:text-cyan-100"
-              href="https://www.indycar.com/"
-              rel="noreferrer"
-              target="_blank"
-            >
-              INDYCAR
-            </a>{" "}
-            website for more information.
-          </p>
-          {isIndy500Pickem ? (
-            <p className="mt-4 rounded-md border border-cyan-300/30 bg-cyan-300/10 px-3 py-2 text-xs text-cyan-50">
-              Indianapolis 500 picks use qualifying-order groups and lock when the race starts.
-            </p>
-          ) : null}
+          {picksLocked ? (
+            <p className="mt-3 text-sm text-slate-200">Pick deadline · {formatRaceDate(pickLockAt)}</p>
+          ) : (
+            <>
+              <dl className="mt-5 grid border-y border-white/15 text-sm sm:grid-cols-2 lg:grid-cols-4 lg:divide-x lg:divide-white/15">
+                <div className="border-b border-white/15 py-3 sm:px-3 lg:border-b-0 lg:first:pl-0">
+                  <dt className="text-xs font-semibold uppercase tracking-wide text-slate-300">
+                    {isIndy500Pickem ? "Pick Lock (Race Start)" : "Pick Deadline"}
+                  </dt>
+                  <dd className="mt-1 font-medium">{formatRaceDate(pickLockAt)}</dd>
+                </div>
+                <div className="border-b border-white/15 py-3 sm:px-3 lg:border-b-0">
+                  <dt className="text-xs font-semibold uppercase tracking-wide text-slate-300">Race Start</dt>
+                  <dd className="mt-1 font-medium">{formatRaceDate(selectedRace.race_date)}</dd>
+                </div>
+                <div className="border-b border-white/15 py-3 sm:border-b-0 sm:px-3">
+                  <dt className="text-xs font-semibold uppercase tracking-wide text-slate-300">Payout</dt>
+                  <dd className="mt-1 font-medium">${Number(selectedRace.payout).toFixed(2)}</dd>
+                </div>
+                <div className="py-3 sm:px-3 lg:last:pr-0">
+                  <dt className="text-xs font-semibold uppercase tracking-wide text-slate-300">
+                    {isIndy500Pickem ? "Pick Format" : "Timezone"}
+                  </dt>
+                  <dd className="mt-1 font-medium">
+                    {isIndy500Pickem ? "Indy 500: 8 picks" : LEAGUE_TIME_ZONE}
+                  </dd>
+                </div>
+              </dl>
+              <p className="mt-3 text-xs text-slate-300">
+                Visit the official{" "}
+                <a
+                  className="font-semibold text-cyan-200 underline decoration-cyan-300/60 underline-offset-2 hover:text-cyan-100"
+                  href="https://www.indycar.com/"
+                  rel="noreferrer"
+                  target="_blank"
+                >
+                  INDYCAR
+                </a>{" "}
+                website for more information.
+              </p>
+              {isIndy500Pickem ? (
+                <p className="mt-4 rounded-md border border-cyan-300/30 bg-cyan-300/10 px-3 py-2 text-xs text-cyan-50">
+                  Indianapolis 500 picks use qualifying-order groups and lock when the race starts.
+                </p>
+              ) : null}
+            </>
+          )}
         </div>
       </section>
 
@@ -515,6 +543,7 @@ export default async function PicksPage({ searchParams }: PageProps) {
       {!previousResultsBlocked ? (
         <PickSubmissionSnapshot
           latestSavedAt={existingPick?.updated_at ?? null}
+          lockedRaceId={picksLocked ? selectedRace.id : undefined}
           savedAverageSpeed={existingPick ? String(existingPick.average_speed) : null}
           savedPicks={savedPickSummary}
         />
@@ -540,7 +569,7 @@ export default async function PicksPage({ searchParams }: PageProps) {
         </section>
       ) : null}
 
-      {!previousResultsBlocked && missingGroups.length > 0 ? (
+      {!picksLocked && !previousResultsBlocked && missingGroups.length > 0 ? (
         <CompactNotice className="mt-6" tone="warning">
           {isIndy500Pickem
             ? "Picks are unavailable until admin imports the Indianapolis 500 qualifying order with all 33 drivers."
@@ -550,7 +579,7 @@ export default async function PicksPage({ searchParams }: PageProps) {
             : null}
         </CompactNotice>
       ) : null}
-      {!previousResultsBlocked ? (
+      {!picksLocked && !previousResultsBlocked ? (
         <PickemForm
           action={saveWeeklyPickAction}
           canSubmit={canSubmit}

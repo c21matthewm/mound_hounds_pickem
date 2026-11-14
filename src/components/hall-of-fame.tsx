@@ -224,7 +224,7 @@ export function HallOfFame({ seasons, selectedYear }: Props) {
           <ActionLink href="/leaderboard?tab=hall" variant="secondary">
             <span aria-hidden="true" className="mr-2">←</span> All champions
           </ActionLink>
-          <HallOfFameYearSelect key={selectedSeason.seasonYear} selectedYear={selectedSeason.seasonYear} years={orderedSeasons.map((season) => season.seasonYear)} />
+          <HallOfFameYearSelect selectedYear={selectedSeason.seasonYear} years={orderedSeasons.map((season) => season.seasonYear)} />
         </div>
         <ChampionCard season={selectedSeason} showStandingsLink={false} />
         <SeasonStandings season={selectedSeason} />

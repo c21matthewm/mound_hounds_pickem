@@ -4,7 +4,9 @@ import { useRouter } from "next/navigation";
 import { useEffect, useRef } from "react";
 
 type RaceScheduleRefreshProps = {
+  lockedDraftKey?: string;
   pickLockAt: string;
+  raceId?: number;
   raceStartAt: string;
 };
 
@@ -14,11 +16,23 @@ const NEAR_REFRESH_MS = 60_000;
 const FAR_REFRESH_MS = 5 * 60_000;
 
 export function RaceScheduleRefresh({
+  lockedDraftKey,
   pickLockAt,
+  raceId,
   raceStartAt
 }: RaceScheduleRefreshProps) {
   const router = useRouter();
   const lastRefreshAt = useRef(0);
+
+  useEffect(() => {
+    if (!lockedDraftKey) return;
+
+    try {
+      window.localStorage.removeItem(lockedDraftKey);
+    } catch {
+      // Storage may be unavailable.
+    }
+  }, [lockedDraftKey]);
 
   useEffect(() => {
     let timeoutId: ReturnType<typeof setTimeout> | null = null;
@@ -28,14 +42,22 @@ export function RaceScheduleRefresh({
         return;
       }
       lastRefreshAt.current = Date.now();
-      router.refresh();
+      const params = new URLSearchParams(window.location.search);
+      const locksAtRaceStart = Date.parse(pickLockAt) === Date.parse(raceStartAt);
+      if (raceId !== undefined && locksAtRaceStart && Date.now() >= Date.parse(raceStartAt) && params.get("race_id") !== String(raceId)) {
+        // Keep the race whose form was open as the default pick window advances.
+        params.set("race_id", String(raceId));
+        router.replace("/picks?" + params.toString(), { scroll: false });
+      } else {
+        router.refresh();
+      }
     };
 
     const scheduleRefresh = () => {
       if (timeoutId) {
         clearTimeout(timeoutId);
       }
-      if (document.visibilityState !== "visible" || navigator.onLine === false) {
+      if (lockedDraftKey || document.visibilityState !== "visible" || navigator.onLine === false) {
         timeoutId = null;
         return;
       }
@@ -89,7 +111,7 @@ export function RaceScheduleRefresh({
       window.removeEventListener("focus", handleFocus);
       document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
-  }, [pickLockAt, raceStartAt, router]);
+  }, [lockedDraftKey, pickLockAt, raceId, raceStartAt, router]);
 
   return null;
 }

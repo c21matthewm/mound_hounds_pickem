@@ -14,27 +14,43 @@ const season = {
   finalized_at: "2026-09-30T00:00:00Z"
 };
 
+const previousSeason = { ...season, id: 2, season_year: 2025 };
 const entry = {
   season_id: season.id,
   final_rank: 1,
   team_name: season.champion_team_name,
   total_points: season.champion_total_points,
-  race_breakdown: []
+  race_breakdown: [{ race_id: 1, points: 140 }]
 };
 
 function clientWithArchiveError(
   failingTable?: "hall_of_fame_seasons" | "hall_of_fame_entries",
-  error?: { code: string; message: string }
+  error?: { code: string; message: string },
+  entryColumns = vi.fn(),
+  entrySeasonIds = vi.fn()
 ): AppSupabaseClient {
   return {
     from(table: string) {
+      let seasonIds: number[] = [];
       const query = {
-        select: () => query,
+        select: (columns: string) => {
+          if (table === "hall_of_fame_entries") entryColumns(columns);
+          return query;
+        },
         order: () => query,
-        in: () => query,
+        in: (_column: string, ids: number[]) => {
+          seasonIds = ids;
+          entrySeasonIds(ids);
+          return query;
+        },
         range: async () => table === failingTable
           ? { data: null, error }
-          : { data: table === "hall_of_fame_seasons" ? [season] : [entry], error: null }
+          : {
+              data: table === "hall_of_fame_seasons"
+                ? [season, previousSeason]
+                : [entry, { ...entry, season_id: previousSeason.id }].filter(row => seasonIds.includes(row.season_id)),
+              error: null
+            }
       };
       return query;
     }
@@ -64,10 +80,27 @@ describe("Hall of Fame archive loading", () => {
     });
   });
 
-  it("loads available archive entries", async () => {
-    await expect(loadHallOfFameSnapshot(clientWithArchiveError())).resolves.toMatchObject({
-      migrationReady: true,
-      seasons: [{ seasonYear: 2026, entries: [{ finalRank: 1, teamName: "Fixture team" }] }]
-    });
+  it.each([undefined, 1999])("loads compact summary entries for all seasons for year %s", async (year) => {
+    const columns = vi.fn();
+    const seasonIds = vi.fn();
+    const client = clientWithArchiveError(undefined, undefined, columns, seasonIds);
+    const { migrationReady, seasons } = await loadHallOfFameSnapshot(client, year);
+    expect(migrationReady).toBe(true);
+    expect(columns).toHaveBeenCalledWith("season_id,final_rank,team_name,total_points");
+    expect(seasonIds).toHaveBeenCalledWith([1, 2]);
+    expect(seasons.map(season => season.entries)).toEqual([
+      [{ finalRank: 1, teamName: "Fixture team", totalPoints: 140 }],
+      [{ finalRank: 1, teamName: "Fixture team", totalPoints: 140 }]
+    ]);
+  });
+
+  it("loads only the selected season's entries and keeps all years for navigation", async () => {
+    const seasonIds = vi.fn();
+    const client = clientWithArchiveError(undefined, undefined, vi.fn(), seasonIds);
+    const { seasons } = await loadHallOfFameSnapshot(client, 2025);
+    expect(seasonIds).toHaveBeenCalledWith([2]);
+    expect(seasons.map(season => [season.seasonYear, season.entries.length])).toEqual([
+      [2026, 0], [2025, 1]
+    ]);
   });
 });

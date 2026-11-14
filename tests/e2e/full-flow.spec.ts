@@ -194,7 +194,8 @@ const submitPicks = async (
   }
 
   await page.getByRole("button", { name: "Save Pick'em Form" }).click();
-  await expect(page.locator("main")).toContainText("Last Saved Submission");
+  await expect(page.getByRole("heading", { name: "Saved submission" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Already saved" })).toBeDisabled();
 };
 
 const verifyUnsavedPickGuard = async (page: Page, raceName: string, groupOneDriverId: number) => {
@@ -434,7 +435,10 @@ test.describe.serial("Full App Flow", () => {
     await p1Page.goto("/picks");
     await expect(p1Page.locator("main")).toContainText(raceAName);
     await expect(p1Page.locator("main")).toContainText("Status: Locked");
-    await expect(p1Page.getByRole("button", { name: "Picks are locked" })).toBeDisabled();
+    await expect(p1Page.getByRole("heading", { name: "Picks saved and locked" })).toBeVisible();
+    await expect(p1Page.getByRole("list", { name: "Saved drivers" })).toBeVisible();
+    await expect(p1Page.getByRole("link", { name: "View Picks by Race" })).toHaveAttribute("href", "/leaderboard?tab=picks&race_id=" + raceA.id);
+    await expect(p1Page.locator('input[name="average_speed"]')).toHaveCount(0);
 
     await p1Page.goto(`/leaderboard?tab=picks&race_id=${raceA.id}`);
     await expect(p1Page.locator("main")).toContainText(raceAName);

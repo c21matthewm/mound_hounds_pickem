@@ -154,6 +154,7 @@ export type PicksByRaceParticipantRow = {
   displayName: string;
   driverCells: PicksByRaceDriverCell[];
   rank: number | null;
+  submittedPick: boolean;
   teamName: string;
   totalPoints: number | null;
   userId: string;
@@ -420,6 +421,7 @@ async function buildPicksByRaceSnapshotUncached(
       displayName: participant.displayName,
       driverCells,
       rank: scoredRow?.rank ?? null,
+      submittedPick: scoredRow?.submittedPick ?? (pick !== null),
       teamName: participant.teamName,
       totalPoints: scoredRow?.points ?? null,
       userId: participant.id
@@ -445,7 +447,7 @@ async function buildPicksByRaceSnapshotUncached(
 
 const buildCachedPicksByRaceSnapshot = unstable_cache(
   buildPicksByRaceSnapshotUncached,
-  ["picks-by-race-snapshot-v2"],
+  ["picks-by-race-snapshot-v3"],
   { revalidate: 60, tags: [SCORING_CACHE_TAG] }
 );
 

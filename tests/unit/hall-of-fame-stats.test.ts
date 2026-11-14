@@ -5,8 +5,7 @@ import { getHallOfFameSeasonStats } from "@/lib/hall-of-fame-stats";
 const entry = (finalRank: number, teamName: string, totalPoints: number): HallOfFameEntry => ({
   finalRank,
   teamName,
-  totalPoints,
-  raceBreakdown: []
+  totalPoints
 });
 
 const season = (overrides: Partial<HallOfFameSeason> = {}): HallOfFameSeason => ({

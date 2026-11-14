@@ -105,7 +105,7 @@ export default async function LeaderboardPage({ searchParams }: PageProps) {
       ? await buildParticipantAnalyticsSnapshot(user.id, activeSeason.id)
       : null;
   } else if (activeTab === "hall") {
-    hallOfFameSnapshot = await loadHallOfFameSnapshot(supabase);
+    hallOfFameSnapshot = await loadHallOfFameSnapshot(supabase, selectedHallYear);
   } else {
     standingsSnapshot = activeSeason
       ? await buildLeagueScoringSnapshot(activeSeason.id)
@@ -121,6 +121,7 @@ export default async function LeaderboardPage({ searchParams }: PageProps) {
         points: cell.points
       })),
       rank: row.rank,
+      submittedPick: row.submittedPick,
       teamName: row.teamName,
       totalPoints: row.totalPoints,
       userId: row.userId
@@ -273,6 +274,7 @@ export default async function LeaderboardPage({ searchParams }: PageProps) {
               </div>
             </ContentPanel>
             <PicksByRaceTable
+              key={picksSnapshot.selectedRace?.raceId}
               officialWinningAverageSpeed={picksSnapshot.selectedRace?.officialWinningAverageSpeed ?? null}
               resultsPosted={picksSnapshot.resultsPosted}
               rows={picksTableRows}
