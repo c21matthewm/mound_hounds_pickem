@@ -1,7 +1,4 @@
-"use client";
-
-import { usePwa } from "@/components/pwa-provider";
-
+import { LeaderboardViewSelect } from "@/components/leaderboard-view-select";
 import { raceOptionLabel } from "@/lib/race-label";
 
 type RaceOption = {
@@ -16,24 +13,19 @@ type Props = {
 };
 
 export function PicksRaceSelect({ races, selectedRaceId }: Props) {
-  const { isOffline } = usePwa();
   return (
-    <form action="/leaderboard" method="get">
-      <input name="tab" type="hidden" value="picks" />
-      <select
-        disabled={isOffline}
-        className="w-full rounded-md ui-control-border border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900"
-        defaultValue={selectedRaceId ? String(selectedRaceId) : ""}
-        id="leaderboard-race-select"
-        name="race_id"
-        onChange={(event) => event.currentTarget.form?.requestSubmit()}
-      >
-        {races.map((race) => (
-          <option key={race.raceId} value={race.raceId}>
-            {raceOptionLabel(race)}
-          </option>
-        ))}
-      </select>
-    </form>
+    <LeaderboardViewSelect
+      className="w-full rounded-md ui-control-border border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900"
+      id="leaderboard-race-select"
+      name="race_id"
+      tab="picks"
+      value={selectedRaceId === null ? "" : String(selectedRaceId)}
+    >
+      {races.map((race) => (
+        <option key={race.raceId} value={race.raceId}>
+          {raceOptionLabel(race)}
+        </option>
+      ))}
+    </LeaderboardViewSelect>
   );
 }

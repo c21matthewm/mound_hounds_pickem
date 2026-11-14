@@ -251,5 +251,7 @@ textarea:focus {
 }
 @media (max-width: 767px) {
   html { scroll-padding-bottom: calc(var(--mobile-action-dock-bottom) + 4.5rem); }
+  html:has(.pick-form-with-guidance) { scroll-padding-bottom: calc(var(--mobile-action-dock-bottom) + 7rem); }
   .pick-form-with-dock { padding-bottom: calc(4rem + var(--safe-area-bottom)); }
+  .pick-form-with-guidance { padding-bottom: calc(7rem + var(--safe-area-bottom)); }
 }

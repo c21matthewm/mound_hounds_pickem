@@ -44,7 +44,7 @@ await build({
     },
     load(id) {
       if (id === "\0fixture:next/link") return "import {createElement} from 'react';export default function Link({children,href,...props}){return createElement('a',{href,...props},children)}";
-      if (id === "\0fixture:next/navigation") return "const router={refresh:()=>{window.fixtureRefreshes=(window.fixtureRefreshes||0)+1;}};export const useRouter=()=>router;export const usePathname=()=>'/picks';";
+      if (id === "\0fixture:next/navigation") return "const router={push:(href,options)=>window.fixtureNavigate(href,options),replace:(href)=>{window.fixtureReplaced=href;},refresh:()=>{window.fixtureRefreshes=(window.fixtureRefreshes||0)+1;}};export const useRouter=()=>router;export const usePathname=()=>'/picks';";
     },
     transform(code, id) {
       if (normalized(id) === normalized(globalsPath)) {
@@ -95,6 +95,8 @@ try {
     await page.evaluate(name => {
       if (name === "standings" || name === "standings-unranked") {
         window.showStandingsScene(name === "standings");
+      } else if (name === "race-picks-published" || name === "race-picks-pending") {
+        window.showRacePicksScene(name === "race-picks-published");
       } else {
         window.showPickScene(name);
       }
@@ -139,6 +141,41 @@ try {
   assert.equal(await page.getByRole("button", { name: "Save Pick'em Form", exact: true }).isEnabled(), true);
   assert.equal(await page.evaluate(() => window.fixtureCalls.length), 1, "Timeout must not retry the save");
   checks++; await page.close();
+  for (const [name, groupCount, width] of [["first", 6, 1280], ["indy-first", 8, 320]]) {
+    const page = await scene(name, width);
+    const dock = page.locator("[data-mobile-action-dock]");
+    const controls = width < 768 ? dock : page;
+    const save = controls.getByRole("button", { name: width < 768 ? "Save" : "Save Pick'em Form", exact: true });
+    const desktopSave = page.getByRole("button", { name: "Save Pick'em Form", exact: true });
+    const guidance = label => controls.getByRole("button", { name: label, exact: true });
+    const firstDriver = page.getByRole("radio", { name: /Fixture G1 Driver 1/ });
+    assert.equal(await save.isDisabled(), true);
+    assert.equal(await desktopSave.isDisabled(), true);
+    await guidance("Choose a driver in Group 1").focus();
+    await page.keyboard.press("Enter");
+    assert.equal(await firstDriver.evaluate(el => el === document.activeElement), true);
+    for (let group = 1; group <= groupCount; group++) {
+      await guidance("Choose a driver in Group " + group).waitFor();
+      await page.getByRole("radio", { name: new RegExp("Fixture G" + group + " Driver 1") }).locator("..").click();
+    }
+    const speed = page.locator('[name="average_speed"]');
+    await guidance("Enter an average speed").click();
+    assert.equal(await speed.evaluate(el => el === document.activeElement), true);
+    for (const invalidSpeed of ["0.5", "300.001", "140.5001"]) {
+      await speed.fill(invalidSpeed);
+      await guidance("Use 1–300 MPH, up to 3 decimals").waitFor();
+      assert.equal(await save.isDisabled(), true);
+      assert.equal(await desktopSave.isDisabled(), true);
+    }
+    await speed.fill("140.501");
+    await guidance("Use 1–300 MPH, up to 3 decimals").waitFor({ state: "hidden" });
+    assert.equal(await save.isEnabled(), true);
+    assert.equal(await desktopSave.isEnabled(), true);
+    await save.click();
+    await page.waitForFunction(() => window.fixtureCalls.length === 1);
+    checks++;
+    await page.close();
+  }
   page = await scene("first");
   await page.locator('[name="average_speed"]').fill("140.500");
   for (let group=1;group<=6;group++) await page.locator(`[name="driver_group${group}_id"][value="${group*2-1}"]`).locator("..").click();
@@ -250,12 +287,59 @@ try {
   await page.evaluate(() => window.dispatchEvent(new Event("focus")));
   await page.waitForFunction(() => window.fixtureRefreshes === 1); checks++; await page.close();
   page = await scene("saved");
+  await page.clock.install({ time: new Date("2027-05-01T13:59:40Z") });
+  await page.evaluate(() => window.showRaceStartScene());
+  await page.getByText("Race start fixture", { exact: true }).waitFor();
+  await page.clock.fastForward(21_000);
+  await page.waitForFunction(() => window.fixtureReplaced === "/picks?race_id=1");
+  checks++;
+  await page.close();
+
+  for (const saved of [true, false]) {
+    const page = await scene("saved", 320);
+    await page.evaluate(({ saved, key }) => {
+      localStorage.setItem(key, "unfinished draft");
+      localStorage.setItem(key + "-other-race", "different draft");
+      window.showReceiptScene(saved, key);
+    }, { saved, key });
+    await page.getByRole("heading", { name: saved ? "Picks saved and locked" : "No picks submitted", exact: true }).waitFor();
+    await page.waitForFunction(key => localStorage.getItem(key) === null, key);
+    assert.equal(await page.evaluate(key => localStorage.getItem(key + "-other-race"), key), "different draft");
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 1), false);
+    assert.equal(await page.getByRole("listitem").filter({ hasText: "Fixture driver with a long name" }).count(), saved ? 8 : 0);
+    assert.equal(await page.getByRole("link", { name: "View Picks by Race" }).getAttribute("href"), "/leaderboard?tab=picks&race_id=1");
+    assert.equal(await page.locator('input[name="average_speed"]').count(), 0);
+    checks++;
+    await page.close();
+  }
+  page = await scene("saved");
   await page.evaluate(() => window.showPwaScene());
   await page.getByRole("button", { name: "Save changes", exact: true }).waitFor();
   await page.evaluate(() => { window.fixtureOnline = false; window.dispatchEvent(new Event("offline")); });
   await page.waitForFunction(() => document.querySelector('[name="year"]')?.disabled === true);
   assert.equal(await page.locator('[name="year"]').isDisabled(), true);
   assert.equal(await page.locator('#leaderboard-race-select').isDisabled(), true); checks++; await page.close();
+  page = await scene("saved");
+  await page.evaluate(() => window.showPwaScene());
+  await page.waitForFunction(() => typeof window.fixtureNavigate === "function");
+  for (const [selector, previous, next, pendingLabel, href] of [
+    ['#leaderboard-race-select', "7", "8", "Loading race…", "/leaderboard?tab=picks&race_id=8"],
+    ['[name="year"]', "2026", "2025", "Loading season…", "/leaderboard?tab=hall&year=2025"]
+  ]) {
+    const control = page.locator(selector);
+    await control.selectOption(next);
+    const status = page.getByText(pendingLabel, { exact: true });
+    await status.waitFor();
+    assert.equal(await control.isDisabled(), true);
+    assert.equal(await control.inputValue(), previous);
+    assert.deepEqual(await page.evaluate(() => window.fixtureCalls.at(-1)), { href, options: { scroll: false } });
+    await page.evaluate(() => window.finishFixtureNavigation());
+    await status.waitFor({ state: "hidden" });
+    assert.equal(await control.isEnabled(), true);
+    assert.equal(await control.inputValue(), next);
+    checks++;
+  }
+  await page.close();
   for (const width of [320, 1280]) {
     const page = await scene("standings", width);
     const mobile = width < 768;
@@ -289,6 +373,32 @@ try {
   assert.equal(await page.getByRole("button", { name: "Find my team", exact: true }).count(), 0);
   checks++;
   await page.close();
+  for (const width of [320, 1280]) {
+    for (const resultsPosted of [false, true]) {
+      const page = await scene(resultsPosted ? "race-picks-published" : "race-picks-pending", width);
+      const entry = (name) => page.locator(width < 768 ? "article" : "tbody tr")
+        .filter({ has: page.getByRole("button", { name }) });
+      const submitted = entry(/Submitted Racing/);
+      const missing = entry(/Missing Racing/);
+      assert.equal(await submitted.getByText("Submitted pick", { exact: true }).isVisible(), true);
+      assert.equal(await missing.getByText("No pick submitted", { exact: true }).first().isVisible(), true);
+      assert.equal(await submitted.getByText("Automatic lowest score", { exact: true }).count(), 0);
+      assert.equal(await missing.getByText("Automatic lowest score", { exact: true }).count(), Number(resultsPosted));
+      await missing.getByRole("button", { name: /Missing Racing/ }).click();
+
+      const dialog = page.getByRole("dialog", { name: "Missing Racing" });
+      assert.equal(await dialog.locator("#picks-detail-description").textContent(), "No pick submitted");
+      await dialog.getByRole("cell", { name: "Group 8", exact: true }).waitFor();
+      assert.equal(await dialog.getByText("Automatic lowest score", { exact: true }).count(), Number(resultsPosted));
+      if (resultsPosted) {
+        const score = dialog.getByText("Automatic lowest score", { exact: true }).locator("..");
+        assert.match(await score.textContent(), /^16\s*Automatic lowest score$/);
+        await dialog.getByText(/lowest score from each driver group/).waitFor();
+      }
+      checks++;
+      await page.close();
+    }
+  }
   assert.deepEqual(errors,[],"Browser fixture exceptions"); assert.deepEqual(blocked,[],"No network requests are permitted");
   console.log(`PASS: ${checks} offline pick-save UI checks; no browser requests permitted.`);
 } finally { await browser.close(); }

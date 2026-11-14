@@ -21,18 +21,17 @@ import {
 
 type SelectionMap = Record<number, number | null>;
 const SAVE_CONFIRMATION_TIMEOUT_MS = 10_000;
+const MIN_AVERAGE_SPEED = 1;
+const MAX_AVERAGE_SPEED = 300;
+const AVERAGE_SPEED_DECIMALS = 3;
 const LEAVE_CONFIRM_MESSAGE = "You have unsaved Pick'em changes. Leave this page without saving?";
 
 type GroupSelectionStatus = "changed" | "missing" | "saved";
 
 const groupSelectionStatus = (
-  draftSelection: SelectionMap,
-  savedSelection: SelectionMap,
-  groupNumber: number
+  draftDriverId: number | null,
+  savedDriverId: number | null
 ): GroupSelectionStatus => {
-  const draftDriverId = draftSelection[groupNumber] ?? null;
-  const savedDriverId = savedSelection[groupNumber] ?? null;
-
   if (draftDriverId === null) return "missing";
   return draftDriverId === savedDriverId ? "saved" : "changed";
 };
@@ -114,13 +113,26 @@ export function PickemForm({
   );
   const isAlreadySaved = existingSavedAt !== null && !hasUnsavedChanges;
   const isSubmitting = saveState === "saving" && !isAlreadySaved;
-  const selectedGroupCount = groupNumbers.filter(
-    (groupNumber) => draftSelection[groupNumber] !== null && draftSelection[groupNumber] !== undefined
-  ).length;
-  const missingGroupNumbers = groupNumbers.filter(
-    (groupNumber) => draftSelection[groupNumber] === null || draftSelection[groupNumber] === undefined
-  );
-  const showMobileActionBar = !picksLocked && (hasUnsavedChanges || missingGroupNumbers.length > 0);
+  const missingGroupNumbers = groups
+    .filter((group) => !group.drivers.some((driver) => driver.id === draftSelection[group.groupNumber]))
+    .map((group) => group.groupNumber);
+  const selectedGroupCount = groupNumbers.length - missingGroupNumbers.length;
+  const firstMissingGroup = missingGroupNumbers[0];
+  const averageSpeed = Number(draftAverageSpeed);
+  const speedIssue = !draftAverageSpeed.trim()
+    ? "Enter an average speed"
+    : !Number.isFinite(averageSpeed) ||
+        averageSpeed < MIN_AVERAGE_SPEED ||
+        averageSpeed > MAX_AVERAGE_SPEED ||
+        Number(averageSpeed.toFixed(AVERAGE_SPEED_DECIMALS)) !== averageSpeed
+      ? "Use 1–300 MPH, up to 3 decimals"
+      : null;
+  const saveIssue = firstMissingGroup !== undefined
+    ? { label: "Choose a driver in Group " + firstMissingGroup, name: "driver_group" + firstMissingGroup + "_id" }
+    : speedIssue ? { label: speedIssue, name: "average_speed" } : null;
+  const showSaveGuidance = canSubmit && !picksLocked && !isSubmitting && !isAlreadySaved;
+  const saveDisabled = isOffline || !canSubmit || picksLocked || isSubmitting || isAlreadySaved || saveIssue !== null;
+  const showMobileActionBar = !picksLocked && (hasUnsavedChanges || saveIssue !== null);
 
   const storeCurrentDraft = useCallback(() => {
     try {
@@ -157,7 +169,7 @@ export function PickemForm({
   };
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
-    if (isOffline || navigator.onLine === false || isAlreadySaved || !canSubmit || picksLocked || submitInProgressRef.current) {
+    if (saveDisabled || navigator.onLine === false || submitInProgressRef.current) {
       event.preventDefault();
       return;
     }
@@ -364,9 +376,26 @@ export function PickemForm({
     };
   }, [hasUnsavedChanges, picksLocked]);
 
+  const saveGuidance = showSaveGuidance && saveIssue ? (
+    <button
+      className="min-h-9 rounded-md px-2 text-left text-sm font-semibold text-cyan-800 underline underline-offset-2 hover:bg-cyan-50"
+      onClick={() => {
+        const field = formRef.current?.querySelector<HTMLInputElement>('[name="' + saveIssue.name + '"]');
+        field?.focus({ preventScroll: true });
+        field?.closest("label")?.scrollIntoView({ block: "center" });
+      }}
+      type="button"
+    >
+      {saveIssue.label}
+    </button>
+  ) : null;
+
   return (
-    <form action={action} className={`mt-6 space-y-6 ${showMobileActionBar ? "pick-form-with-dock" : ""}`} onSubmit={handleSubmit} ref={formRef}>
+    <form action={action} className={`mt-6 space-y-6 ${showMobileActionBar ? "pick-form-with-dock" : ""} ${saveGuidance ? "pick-form-with-guidance" : ""}`} onSubmit={handleSubmit} ref={formRef}>
       <input name="race_id" type="hidden" value={String(raceId)} />
+      <p className="sr-only" role="status">
+        {showSaveGuidance ? saveIssue?.label ?? (isOffline ? "" : "Ready to save picks") : ""}
+      </p>
 
       {recoveryDraft ? (
         <div
@@ -438,9 +467,8 @@ export function PickemForm({
             <div className="flex w-max min-w-full gap-1.5 sm:w-full">
               {groupNumbers.map((groupNumber) => {
                 const status = groupSelectionStatus(
-                  draftSelection,
-                  savedSelection,
-                  groupNumber
+                  missingGroupNumbers.includes(groupNumber) ? null : draftSelection[groupNumber] ?? null,
+                  savedSelection[groupNumber] ?? null
                 );
 
                 return (
@@ -471,14 +499,14 @@ export function PickemForm({
             <input
               required
               className="w-full rounded-md ui-control-border border border-slate-300 px-3 py-2.5 text-sm"
-              min={1}
-              max={300}
+              min={MIN_AVERAGE_SPEED}
+              max={MAX_AVERAGE_SPEED}
               name="average_speed"
               onChange={(event) => {
                 clearSubmitIntent();
                 setDraftAverageSpeed(event.target.value);
               }}
-              step="0.001"
+              step={10 ** -AVERAGE_SPEED_DECIMALS}
               type="number"
               value={draftAverageSpeed}
             />
@@ -607,19 +635,22 @@ export function PickemForm({
           </section>
         ))}
 
-        <button
-          className="rounded-md ui-action-primary bg-slate-900 px-5 py-3 text-sm font-semibold text-white hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
-          disabled={isOffline || !canSubmit || isSubmitting || isAlreadySaved}
-          type="submit"
-        >
-          {picksLocked
-            ? "Picks are locked"
-            : isSubmitting
-              ? "Saving picks..."
-              : isAlreadySaved
-                ? "Already saved"
-                : isOffline ? "Reconnect to save" : "Save Pick'em Form"}
-        </button>
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+          <button
+            className="rounded-md ui-action-primary bg-slate-900 px-5 py-3 text-sm font-semibold text-white hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
+            disabled={saveDisabled}
+            type="submit"
+          >
+            {picksLocked
+              ? "Picks are locked"
+              : isSubmitting
+                ? "Saving picks..."
+                : isAlreadySaved
+                  ? "Already saved"
+                  : isOffline ? "Reconnect to save" : "Save Pick'em Form"}
+          </button>
+          {saveGuidance}
+        </div>
 
         {isAlreadySaved && !picksLocked ? (
           <p className="text-sm text-emerald-800" role="status">
@@ -638,9 +669,8 @@ export function PickemForm({
                   <div className="flex w-max gap-1">
                     {groupNumbers.map((groupNumber) => {
                       const status = groupSelectionStatus(
-                        draftSelection,
-                        savedSelection,
-                        groupNumber
+                        missingGroupNumbers.includes(groupNumber) ? null : draftSelection[groupNumber] ?? null,
+                        savedSelection[groupNumber] ?? null
                       );
 
                       return (
@@ -658,12 +688,13 @@ export function PickemForm({
                 </div>
                 <button
                   className="min-h-11 shrink-0 rounded-md ui-action-primary bg-slate-900 px-2.5 py-1.5 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
-                  disabled={isOffline || !canSubmit || isSubmitting || isAlreadySaved}
+                  disabled={saveDisabled}
                   type="submit"
                 >
                   {isSubmitting ? "Saving..." : isAlreadySaved ? "Already saved" : isOffline ? "Offline" : "Save"}
                 </button>
               </div>
+              {saveGuidance}
             </div>
           </MobileActionDock>
         ) : null}

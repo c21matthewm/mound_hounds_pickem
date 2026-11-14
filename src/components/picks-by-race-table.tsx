@@ -31,6 +31,7 @@ export type PicksByRaceTableRow = {
   displayName: string;
   drivers: DriverCell[];
   rank: number | null;
+  submittedPick: boolean;
   teamName: string;
   totalPoints: number | null;
   userId: string;
@@ -67,6 +68,10 @@ const defaultSortDirection = (key: SortKey): SortDirection => {
 const formatAverageSpeed = (value: number | null): string =>
   value !== null ? value.toFixed(3) : "-";
 const PAGE_SIZE = 25;
+const AUTOMATIC_LOWEST_SCORE = "Automatic lowest score";
+
+const submissionLabel = (submittedPick: boolean): string =>
+  submittedPick ? "Submitted pick" : "No pick submitted";
 
 export function PicksByRaceTable({ officialWinningAverageSpeed, resultsPosted, rows }: Props) {
   const groupCount = Math.max(6, ...rows.map((row) => row.drivers.length));
@@ -230,23 +235,24 @@ export function PicksByRaceTable({ officialWinningAverageSpeed, resultsPosted, r
                   >
                     {resultsPosted && row.rank !== null ? (
                       <RankBadge aria-label={`Rank ${row.rank}`} rank={row.rank} />
-                    ) : (
-                      <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                        Submitted Pick
-                      </p>
-                    )}
+                    ) : null}
                     <h3
                       className="mt-0.5 truncate text-sm font-semibold text-slate-900 underline decoration-slate-300 underline-offset-2"
                       title={row.displayName}
                     >
                       {row.displayName}
                     </h3>
+                    <span className="mt-0.5 block text-xs text-slate-600">
+                      {submissionLabel(row.submittedPick)}
+                    </span>
                   </button>
                   <div className="text-right">
                     <p className="text-lg font-semibold tabular-nums text-slate-900">
                       {resultsPosted ? (row.totalPoints ?? 0) : "-"}
                     </p>
-                    <p className="text-xs text-slate-500">score</p>
+                    <p className="text-xs text-slate-600">
+                      {resultsPosted && !row.submittedPick ? AUTOMATIC_LOWEST_SCORE : "Score"}
+                    </p>
                   </div>
                 </div>
                 <div className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1.5">
@@ -369,9 +375,15 @@ export function PicksByRaceTable({ officialWinningAverageSpeed, resultsPosted, r
                     >
                       {row.displayName}
                     </button>
+                    <p className="mt-0.5 text-xs text-slate-600">
+                      {submissionLabel(row.submittedPick)}
+                    </p>
                   </td>
                   <td className="px-3 py-2 font-semibold">
                     {resultsPosted ? (row.totalPoints ?? 0) : "-"}
+                    {resultsPosted && !row.submittedPick ? (
+                      <p className="mt-0.5 text-xs font-normal text-slate-600">{AUTOMATIC_LOWEST_SCORE}</p>
+                    ) : null}
                   </td>
                   {groupNumbers.map((groupNumber) => {
                     const groupCell = row.drivers[groupNumber - 1];
@@ -431,7 +443,7 @@ export function PicksByRaceTable({ officialWinningAverageSpeed, resultsPosted, r
               <div>
                 <h3 className="text-lg font-semibold text-slate-900" id="picks-detail-title">{selectedRow.displayName}</h3>
                 <p className="mt-1 text-sm text-slate-600" id="picks-detail-description">
-                  Picks breakdown and tiebreak context
+                  {submissionLabel(selectedRow.submittedPick)}
                 </p>
               </div>
               <ActionButton
@@ -456,6 +468,9 @@ export function PicksByRaceTable({ officialWinningAverageSpeed, resultsPosted, r
                 </dt>
                 <dd className="mt-0.5 font-medium text-slate-900">
                   {resultsPosted ? (selectedRow.totalPoints ?? 0) : "-"}
+                  {resultsPosted && !selectedRow.submittedPick ? (
+                    <span className="mt-0.5 block text-xs font-normal text-slate-600">{AUTOMATIC_LOWEST_SCORE}</span>
+                  ) : null}
                 </dd>
               </div>
               <div className="rounded-md ui-panel-muted border border-slate-200 bg-slate-50 px-3 py-2">
@@ -469,7 +484,14 @@ export function PicksByRaceTable({ officialWinningAverageSpeed, resultsPosted, r
             </dl>
 
             <section className="mt-4">
-              <h4 className="text-sm font-semibold text-slate-900">Per-Driver Scoring</h4>
+              <h4 className="text-sm font-semibold text-slate-900">
+                {selectedRow.submittedPick ? "Per-Driver Scoring" : "Points by Group"}
+              </h4>
+              {resultsPosted && !selectedRow.submittedPick ? (
+                <p className="mt-1 text-sm text-slate-600">
+                  With no pick submitted, the team receives the lowest score from each driver group.
+                </p>
+              ) : null}
               <div className="mt-2 overflow-x-auto rounded-md border border-slate-200">
                 <table className="min-w-full text-left text-sm">
                   <caption className="sr-only">Selected team driver picks and points</caption>

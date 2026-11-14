@@ -1,6 +1,4 @@
-"use client";
-
-import { usePwa } from "@/components/pwa-provider";
+import { LeaderboardViewSelect } from "@/components/leaderboard-view-select";
 
 type Props = {
   selectedYear: number;
@@ -8,28 +6,27 @@ type Props = {
 };
 
 export function HallOfFameYearSelect({ selectedYear, years }: Props) {
-  const { isOffline } = usePwa();
   return (
-    <form action="/leaderboard" className="min-w-0" method="get">
-      <input name="tab" type="hidden" value="hall" />
-      <label className="block">
-        <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-600">
-          Season
-        </span>
-        <select
-          disabled={isOffline}
-          className="min-h-11 max-w-full rounded-md ui-control-border border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-900"
-          defaultValue={String(selectedYear)}
-          name="year"
-          onChange={(event) => event.currentTarget.form?.requestSubmit()}
-        >
-          {years.map((year) => (
-            <option key={year} value={year}>
-              {year}
-            </option>
-          ))}
-        </select>
+    <div className="min-w-0">
+      <label
+        className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-600"
+        htmlFor="leaderboard-year-select"
+      >
+        Season
       </label>
-    </form>
+      <LeaderboardViewSelect
+        className="min-h-11 max-w-full rounded-md ui-control-border border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-900"
+        id="leaderboard-year-select"
+        name="year"
+        tab="hall"
+        value={String(selectedYear)}
+      >
+        {years.map((year) => (
+          <option key={year} value={year}>
+            {year}
+          </option>
+        ))}
+      </LeaderboardViewSelect>
+    </div>
   );
 }

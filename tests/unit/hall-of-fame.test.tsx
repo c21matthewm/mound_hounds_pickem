@@ -11,9 +11,9 @@ const season: HallOfFameSeason = {
   championTeamName: "Zulu Team",
   championTotalPoints: 2500,
   entries: [
-    { finalRank: 1, teamName: "Zulu Team", totalPoints: 2500, raceBreakdown: [] },
-    { finalRank: 2, teamName: "Alpha Team", totalPoints: 2500, raceBreakdown: [] },
-    { finalRank: 3, teamName: "Third Team", totalPoints: 2400, raceBreakdown: [] }
+    { finalRank: 1, teamName: "Zulu Team", totalPoints: 2500 },
+    { finalRank: 2, teamName: "Alpha Team", totalPoints: 2500 },
+    { finalRank: 3, teamName: "Third Team", totalPoints: 2400 }
   ],
   finalizedAt: "2027-09-12T12:34:56.000Z",
   participantCount: 3,
