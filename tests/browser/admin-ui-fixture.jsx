@@ -1,3 +1,7 @@
+import { AdminAuditLog } from '@/components/admin-audit-log';
+import { AdminFeedbackWorkspace } from '@/components/admin-feedback-workspace';
+import { AdminRaceWeekWorkspace } from '@/components/admin-race-week-workspace';
+import { parseAdminAuditQuery } from '@/lib/admin-audit-log';
 // Local component fixtures only. Server actions are replaced by the runner.
 // Names, IDs, scores, documents, and email addresses are fictional.
 import { PushNotificationSettings } from '@/components/push-notification-settings';
@@ -65,4 +69,25 @@ window.showScene = (name) => {
     return;
   }
   root.render(<main className="mx-auto min-w-0 max-w-7xl p-4">{scenes[name]}</main>);
+};
+
+window.showAdminNavigationScene = ({ raceId = 1, feedbackStatus = "all", auditSearch = "" } = {}) => {
+  const races = [1, 2].map(id => ({
+    id, season_id: 7, round_number: id, race_name: "Fixture Race " + id,
+    pick_format: "standard", pick_window_key: "fixture-" + id,
+    race_date: "2027-05-03T12:00:00Z", qualifying_start_at: "2027-05-02T12:00:00Z",
+    results_status: "draft", field_frozen_at: null
+  }));
+  root.render(<AuthenticatedPageShell eyebrow="Admin" title="Admin Dashboard">
+    <AdminRaceWeekWorkspace
+      race={races[raceId - 1]} races={races} phase="results" drivers={[]} snapshot={[]}
+      currentTime={Date.parse("2027-05-02T16:00:00Z")} participants={[]} teamNameByProfileId={new Map()}
+    />
+    <AdminFeedbackWorkspace feedbackItems={[]} feedbackCount={0} feedbackPage={1} feedbackPageCount={1}
+      teamNameByProfileId={new Map()} feedbackStatus={feedbackStatus} />
+    <AdminAuditLog auditLog={{
+      query: parseAdminAuditQuery({ audit_q: auditSearch }), rows: [], hasOlder: false, hasNewer: false,
+      detail: null, error: null, detailError: null
+    }} />
+  </AuthenticatedPageShell>);
 };

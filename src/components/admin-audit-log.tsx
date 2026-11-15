@@ -1,3 +1,5 @@
+import Link from "next/link";
+import { AdminNavigationForm } from "@/components/admin-navigation-form";
 import { adminAuditHref, type AdminAuditLogData } from "@/lib/admin-audit-log";
 import { CompactNotice, actionControlClassName } from "@/components/ui-primitives";
 import { formatLeagueDateTime } from "@/lib/timezone";
@@ -10,7 +12,12 @@ export function AdminAuditLog({ auditLog }: { auditLog: AdminAuditLogData }) {
     <section aria-labelledby="audit-log-heading" className="mt-5 min-w-0 border-t border-slate-200 pt-5" id="audit-log">
       <h3 className="font-semibold text-slate-900" id="audit-log-heading">Admin audit log</h3>
       <p className="mt-1 text-sm text-slate-600">Search administrative changes and inspect an event’s recorded before and after states.</p>
-      <form action="/admin#audit-log" className="mt-3 grid min-w-0 gap-3 sm:grid-cols-2 lg:grid-cols-4" method="get">
+      <AdminNavigationForm
+        className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-4"
+        fragment="audit-log"
+        key={adminAuditHref(query, { latest: true })}
+        pendingLabel="Searching audit log…"
+      >
         <input name="tab" type="hidden" value="health" />
         <label className="min-w-0 text-xs font-semibold text-slate-700">
           Search event summary
@@ -26,11 +33,11 @@ export function AdminAuditLog({ auditLog }: { auditLog: AdminAuditLogData }) {
         </label>
         <div className="flex flex-wrap items-end gap-2">
           <button className={actionControlClassName("secondary", "min-h-11")} type="submit">Search audit log</button>
-          {filtered ? <a className="py-3 text-sm font-semibold text-blue-700 underline" href="/admin?tab=health#audit-log">Clear filters</a> : null}
+          {filtered ? <Link prefetch={false} className="py-3 text-sm font-semibold text-blue-700 underline" href="/admin?tab=health#audit-log">Clear filters</Link> : null}
         </div>
-      </form>
+      </AdminNavigationForm>
       {query.notice ? <CompactNotice className="mt-3" tone="warning">{query.notice}</CompactNotice> : null}
-      {error ? <CompactNotice className="mt-3" tone="warning">{error} <a className="underline" href={adminAuditHref(query)}>Retry audit log</a></CompactNotice> : null}
+      {error ? <CompactNotice className="mt-3" tone="warning">{error} <Link prefetch={false} className="underline" href={adminAuditHref(query)}>Retry audit log</Link></CompactNotice> : null}
       {detailError ? <CompactNotice className="mt-3" tone="warning">{detailError}</CompactNotice> : null}
       {!error && rows.length === 0 ? (
         <p className="mt-4 text-sm text-slate-600">{query.before || query.after ? "No events remain on this page." : filtered ? "No admin events match these filters." : "No admin events have been recorded yet."}</p>
@@ -47,14 +54,14 @@ export function AdminAuditLog({ auditLog }: { auditLog: AdminAuditLogData }) {
                     <time dateTime={event.created_at}>{formatLeagueDateTime(event.created_at, { dateStyle: "medium", timeStyle: "short" })}</time> · Event {event.id}
                   </p>
                   <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs text-slate-600">
-                    <a className="break-all underline" href={adminAuditHref({...query, action:event.action}, {latest:true})} title={`Filter action: ${event.action}`}>{event.action}</a>
-                    <a className="break-all underline" href={adminAuditHref({...query, entity:event.entity_type}, {latest:true})} title={`Filter entity: ${event.entity_type}`}>{event.entity_type}</a>
+                    <Link prefetch={false} className="break-all underline" href={adminAuditHref({...query, action:event.action}, {latest:true})} title={`Filter action: ${event.action}`}>{event.action}</Link>
+                    <Link prefetch={false} className="break-all underline" href={adminAuditHref({...query, entity:event.entity_type}, {latest:true})} title={`Filter entity: ${event.entity_type}`}>{event.entity_type}</Link>
                     {event.entity_id ? <span className="break-all">Record {event.entity_id}</span> : null}
                   </div>
                 </div>
-                <a aria-controls={expanded ? `audit-state-${event.id}` : undefined} aria-expanded={expanded} className={actionControlClassName("secondary", "min-h-11 text-xs")} href={adminAuditHref(query, {detail: expanded ? null : event.id})}>
+                <Link prefetch={false} aria-controls={expanded ? `audit-state-${event.id}` : undefined} aria-expanded={expanded} className={actionControlClassName("secondary", "min-h-11 text-xs")} href={adminAuditHref(query, {detail: expanded ? null : event.id})}>
                   {expanded ? "Close details" : "View details"}<span className="sr-only"> for event {event.id}</span>
-                </a>
+                </Link>
               </div>
               {expanded ? (
                 <div className="mt-3 min-w-0 rounded-md bg-slate-50 p-3" id={`audit-state-${event.id}`}>
@@ -75,9 +82,9 @@ export function AdminAuditLog({ auditLog }: { auditLog: AdminAuditLogData }) {
         })}
       </ol>
       <nav aria-label="Admin audit history pages" className="mt-3 flex flex-wrap items-center gap-3">
-        {hasNewer && rows[0] ? <a className={actionControlClassName("secondary", "min-h-11")} href={adminAuditHref(query,{after:rows[0].id})}>Newer events</a> : null}
-        {hasOlder && rows.at(-1) ? <a className={actionControlClassName("secondary", "min-h-11")} href={adminAuditHref(query,{before:rows.at(-1)!.id})}>Older events</a> : null}
-        {query.before || query.after ? <a className="py-3 text-sm font-semibold text-blue-700 underline" href={adminAuditHref(query,{latest:true})}>Latest {filtered ? "matching " : ""}events</a> : null}
+        {hasNewer && rows[0] ? <Link prefetch={false} className={actionControlClassName("secondary", "min-h-11")} href={adminAuditHref(query,{after:rows[0].id})}>Newer events</Link> : null}
+        {hasOlder && rows.at(-1) ? <Link prefetch={false} className={actionControlClassName("secondary", "min-h-11")} href={adminAuditHref(query,{before:rows.at(-1)!.id})}>Older events</Link> : null}
+        {query.before || query.after ? <Link prefetch={false} className="py-3 text-sm font-semibold text-blue-700 underline" href={adminAuditHref(query,{latest:true})}>Latest {filtered ? "matching " : ""}events</Link> : null}
         {!error && rows.length > 0 ? <span className="text-xs text-slate-500">Showing {rows.length} event{rows.length === 1 ? "" : "s"}, newest first.</span> : null}
       </nav>
     </section>

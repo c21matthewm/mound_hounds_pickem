@@ -7,6 +7,7 @@ import { AdminWorkspaceHeader, EmptyState, StatusChip, actionControlClassName, f
 import { ConfirmSubmitButton } from "@/components/confirm-submit-button";
 import { AdminIndyQualifying } from "@/components/admin-indy-qualifying";
 import { RacePickDeadline } from "@/components/race-pick-deadline";
+import { AdminNavigationForm } from "@/components/admin-navigation-form";
 import { AdminRaceFieldPreview } from "@/components/admin-race-field-preview";
 import { freezeRaceFieldAction } from "@/app/admin/race-week-actions";
 import { RACE_WEEK_PHASES, raceFieldFreezeState, type RaceWeekPhase } from "@/lib/admin-race-week";
@@ -18,11 +19,12 @@ export function AdminRaceWeekWorkspace({drivers, snapshot, currentTime, race, ra
   return <section className="mt-6 min-w-0">
     <AdminWorkspaceHeader title="Race Week" description="Prepare the field, monitor picks, publish results, and confirm the fantasy winner." />
     {!race ? <EmptyState title="No races scheduled" description="Prepare the season and add the race calendar to start weekly operations." action={<Link className={actionControlClassName("primary")} href="/admin?tab=seasons">Open Seasons & League</Link>} /> : <>
-      <form action="/admin" method="get" className="mt-4 flex min-w-0 flex-wrap items-end gap-2">
+      <AdminNavigationForm className="mt-4 flex flex-wrap items-end gap-2" key={race.id + ":" + phase} pendingLabel="Opening race…">
         <input name="tab" type="hidden" value="race-week" />
+        <input name="phase" type="hidden" value={phase} />
         <label className="min-w-0 flex-1"><span className="mb-1 block text-sm font-semibold">Race</span><select name="result_race_id" defaultValue={race.id} className={fieldControlClassName()}>{races.map(option => <option value={option.id} key={option.id}>R{option.round_number} · {option.race_name} · {option.results_status === "published" ? "Published" : "Awaiting results"}</option>)}</select></label>
         <button type="submit" className={actionControlClassName("secondary")}>Open race</button>
-      </form>
+      </AdminNavigationForm>
       <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2 text-sm text-slate-600"><p>Picks lock {formatDateTime(pickLockAtForRace(race))}</p><RacePickDeadline key={race.id} deadline={pickLockAtForRace(race)} initialTime={currentTime} /><StatusChip tone={race.results_status === "published" ? "success" : "neutral"}>{race.results_status === "published" ? "Results published" : "Results not published"}</StatusChip></div>
       <nav aria-label="Race week stages" className="mt-5"><ol className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">{RACE_WEEK_PHASES.map((stage, index) => <li key={stage}><Link aria-current={phase === stage ? "step" : undefined} className={`flex h-full items-center gap-2 rounded-lg border px-3 py-3 text-sm font-semibold ${phase === stage ? "border-cyan-700 bg-cyan-50 text-cyan-950" : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"}`} href={`/admin?tab=race-week&result_race_id=${race.id}&phase=${stage}`}><span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-current text-xs">{index+1}</span>{labels[stage]}</Link></li>)}</ol></nav>
       <div className="mt-5 min-w-0 rounded-lg border border-slate-200 bg-white p-4 sm:p-6"><h2 className="text-lg font-semibold">{labels[phase]}</h2>

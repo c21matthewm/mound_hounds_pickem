@@ -68,7 +68,7 @@ describe("dashboard doubleheader form badges", () => {
     expect(forms).toContain('href="/picks?race_id=1"');
     expect(forms).toContain('href="/picks?race_id=2"');
     expect(html.includes("Editable until")).toBe(status === "picks_saved");
-    expect(html.includes("Pick deadline")).toBe(status === "form_open");
+    expect(html.includes("Pick deadline")).toBe(status === "form_open" || status === "locked");
     expect(html).toMatch(/aria-label="League resources".*href="\/rules".*href="\/more"/);
   });
 });

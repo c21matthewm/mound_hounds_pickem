@@ -487,13 +487,15 @@ export async function saveProfileAction(formData: FormData) {
   );
 }
 
-export async function setSeasonParticipationAction(formData: FormData) {
+export type SeasonRegistrationError = { message: string; field?: "invite_code" };
+
+export async function setSeasonParticipationAction(formData: FormData): Promise<SeasonRegistrationError> {
   const decision = asText(formData.get("decision"));
   const inviteCode = asText(formData.get("invite_code"));
   const next = sanitizeNextPath(asText(formData.get("next")) || "/dashboard");
 
   if (decision !== "register" && decision !== "decline") {
-    errorRedirect("/season-registration", "Choose whether you are joining this season.");
+    return { message: "Choose whether you are joining this season." };
   }
 
   const supabase = await createServerSupabaseClient();
@@ -502,14 +504,15 @@ export async function setSeasonParticipationAction(formData: FormData) {
   } = await supabase.auth.getUser();
 
   if (!user) {
-    errorRedirect("/login", "Your session expired. Please sign in again.");
+    const registrationPath = "/season-registration?" + new URLSearchParams({ next }).toString();
+    return errorRedirect("/login?" + new URLSearchParams({ next: registrationPath }).toString(), "Your session expired. Please sign in again.");
   }
-  const currentUser = user!;
+  const currentUser = user;
 
   let error: { message: string } | null = null;
   if (decision === "register") {
     if (!inviteCode) {
-      errorRedirect("/season-registration", "Enter the season invite code.");
+      return { field: "invite_code", message: "Enter the season invite code." };
     }
 
     let activeSeason: Awaited<ReturnType<typeof loadActiveLeagueSeason>> = null;
@@ -524,15 +527,12 @@ export async function setSeasonParticipationAction(formData: FormData) {
         route: "/season-registration",
         subsystem: "auth"
       });
-      errorRedirect(
-        "/season-registration",
-        `Season registration could not be opened. Please try again.${errorReference(reported)}`
-      );
+      return { message: "Season registration could not be opened. Please try again." + errorReference(reported) };
     }
     if (!activeSeason) {
-      errorRedirect("/season-registration", "No league season is currently open.");
+      return { message: "No league season is currently open." };
     }
-    const selectedActiveSeason = activeSeason!;
+    const selectedActiveSeason = activeSeason;
 
     const serviceSupabase = createServiceRoleSupabaseClient();
     let registrationAttemptAllowed = false;
@@ -554,16 +554,10 @@ export async function setSeasonParticipationAction(formData: FormData) {
         route: "/season-registration",
         subsystem: "auth"
       });
-      errorRedirect(
-        "/season-registration",
-        `Season registration could not be verified. Please try again shortly.${errorReference(reported)}`
-      );
+      return { message: "Season registration could not be verified. Please try again shortly." + errorReference(reported) };
     }
     if (!registrationAttemptAllowed) {
-      errorRedirect(
-        "/season-registration",
-        "Too many invite-code attempts. Wait 15 minutes and try again."
-      );
+      return { message: "Too many invite-code attempts. Wait 15 minutes and try again." };
     }
     const result = await serviceSupabase.rpc("register_profile_for_season_with_code", {
       p_invite_code: inviteCode,
@@ -593,10 +587,10 @@ export async function setSeasonParticipationAction(formData: FormData) {
           subsystem: "auth"
         })
       : null;
-    errorRedirect(
-      "/season-registration",
-      `${safeMessage}${reported ? errorReference(reported) : ""}`
-    );
+    return {
+      field: safeMessage === "The season invite code is incorrect." ? "invite_code" : undefined,
+      message: safeMessage + (reported ? errorReference(reported) : "")
+    };
   }
 
   invalidateScoringCache();
@@ -604,5 +598,12 @@ export async function setSeasonParticipationAction(formData: FormData) {
     decision === "register"
       ? "Season registration confirmed."
       : "You will not appear in this season's field. You can change this decision before making picks.";
-  messageRedirect(next, message);
+  const destination = decision === "decline" && next.split(/[?#]/, 1)[0] === "/picks" ? "/dashboard" : next;
+  return messageRedirect(destination, message);
+}
+
+export async function submitSeasonRegistrationFormAction(formData: FormData): Promise<void> {
+  const result = await setSeasonParticipationAction(formData);
+  const next = sanitizeNextPath(asText(formData.get("next")) || "/dashboard");
+  errorRedirect("/season-registration?" + new URLSearchParams({ next }).toString(), result.message);
 }

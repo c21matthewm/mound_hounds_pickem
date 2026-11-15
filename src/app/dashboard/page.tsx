@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { RaceWeekSummary } from "@/components/race-week-summary";
 import { AuthenticatedPageShell } from "@/components/authenticated-page-shell";
 import {
   ActionLink,
@@ -14,7 +15,6 @@ import { pickWindowRoundLabel } from "@/lib/pick-windows";
 import { queryStringParam } from "@/lib/query";
 import { raceContextLabel } from "@/lib/race-label";
 import { loadRaceWeekState, type RaceWeekStatus } from "@/lib/race-week";
-import { formatLeagueDateTime } from "@/lib/timezone";
 
 type PageProps = {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
@@ -33,9 +33,6 @@ const statusTone = (status: RaceWeekStatus): StatusTone => {
   return "neutral";
 };
 
-const formatDateTime = (value: string): string =>
-  formatLeagueDateTime(value, { dateStyle: "medium", timeStyle: "short" });
-
 export default async function DashboardPage({ searchParams }: PageProps) {
   const params = await searchParams;
   const message = queryStringParam(params.message);
@@ -50,6 +47,16 @@ export default async function DashboardPage({ searchParams }: PageProps) {
     userId: user.id
   });
   const { action, currentRace } = raceWeek;
+  const context = currentRace && activeSeason
+    ? raceWeek.isDoubleheader
+      ? activeSeason.seasonYear + " · " + pickWindowRoundLabel(raceWeek.races) + " · Doubleheader"
+      : raceContextLabel({ roundNumber: currentRace.round_number, seasonYear: activeSeason.seasonYear })
+    : undefined;
+  const timing = action.status === "form_pending" && raceWeek.pickOpenAt
+    ? { label: "Picks open", dateTime: raceWeek.pickOpenAt }
+    : (action.status === "form_open" || action.status === "picks_saved" || action.status === "locked") && raceWeek.pickLockAt
+      ? { label: action.status === "picks_saved" ? "Editable until" : "Pick deadline", dateTime: raceWeek.pickLockAt }
+      : undefined;
 
   return (
     <AuthenticatedPageShell
@@ -58,7 +65,6 @@ export default async function DashboardPage({ searchParams }: PageProps) {
           Signed in as <span className="font-semibold text-slate-900">{profile.team_name}</span>.
         </>
       }
-      eyebrow="Team Hub"
       maxWidth="max-w-5xl"
       title="Dashboard"
     >
@@ -68,71 +74,18 @@ export default async function DashboardPage({ searchParams }: PageProps) {
         </CompactNotice>
       ) : null}
 
-      <section aria-labelledby="race-week-title" className="ui-panel mt-5 min-w-0 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
-        <div className="grid gap-4 p-4 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center sm:p-5">
-          <div className="min-w-0">
-            <div className="flex items-center gap-3">
-              <div
-                aria-hidden
-                className="size-12 shrink-0 rounded-md bg-slate-200 bg-cover bg-center sm:size-16"
-                style={{
-                  backgroundImage: "url('" + MOUND_HOUND_IMAGE_PATH + "')",
-                  backgroundPosition: "50% 38%"
-                }}
-              />
-              <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
-                <h2 className="text-lg font-semibold text-slate-950 sm:text-xl" id="race-week-title">
-                  {action.title}
-                </h2>
-                <StatusChip tone={statusTone(action.status)}>{action.statusLabel}</StatusChip>
-              </div>
-            </div>
-            {currentRace && activeSeason ? (
-              <div className="mt-1.5 min-w-0">
-                <p className="mt-1 text-xs font-semibold uppercase tracking-wide text-slate-500">
-                  {raceWeek.isDoubleheader
-                    ? `${activeSeason.seasonYear} · ${pickWindowRoundLabel(raceWeek.races)} · Doubleheader`
-                    : raceContextLabel({
-                        roundNumber: currentRace.round_number,
-                        seasonYear: activeSeason.seasonYear
-                      })}
-                </p>
-                <p className="mt-0.5 text-sm font-medium leading-5 text-slate-800">
-                  {currentRace.race_name}
-                </p>
-              </div>
-            ) : null}
-            <p className="mt-2 text-sm leading-5 text-slate-600">{action.body}</p>
-
-            {(action.status === "form_open" || action.status === "picks_saved") && raceWeek.pickLockAt ? (
-              <div className="mt-3 border-t border-slate-100 pt-3">
-                <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
-                  {action.status === "picks_saved" ? "Editable until" : "Pick deadline"}
-                </p>
-                <p className="mt-0.5 text-xs font-semibold leading-5 text-slate-800">
-                  {formatDateTime(raceWeek.pickLockAt)}
-                </p>
-              </div>
-            ) : null}
-
-            {action.status === "form_pending" && raceWeek.pickOpenAt ? (
-              <div className="mt-3 border-t border-slate-100 pt-3">
-                <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
-                  Picks open
-                </p>
-                <p className="mt-0.5 text-xs font-semibold leading-5 text-slate-800">
-                  {formatDateTime(raceWeek.pickOpenAt)}
-                </p>
-              </div>
-            ) : null}
-          </div>
-          <ActionLink className="w-full sm:w-auto" href={action.href}>
-            {action.label}
-          </ActionLink>
-        </div>
-
+      <RaceWeekSummary
+        action={<ActionLink className="w-full sm:w-auto" href={action.href}>{action.label}</ActionLink>}
+        mascot={MOUND_HOUND_IMAGE_PATH}
+        context={context}
+        description={action.body}
+        status={action.statusLabel}
+        timing={timing}
+        title={currentRace?.race_name ?? action.title}
+        tone={statusTone(action.status)}
+      >
         {raceWeek.isDoubleheader ? (
-          <div className="border-t border-slate-200 px-4 py-3 sm:px-5">
+          <div>
             <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
               Weekend forms
             </p>
@@ -160,7 +113,7 @@ export default async function DashboardPage({ searchParams }: PageProps) {
             </div>
           </div>
         ) : null}
-      </section>
+      </RaceWeekSummary>
 
       <nav aria-label="League resources" className="mt-3 flex flex-wrap gap-x-2">
         <ActionLink href="/rules" variant="quiet">Rules</ActionLink>

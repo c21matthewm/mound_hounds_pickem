@@ -3,6 +3,7 @@
 import {
   useCallback,
   useEffect,
+  useId,
   useMemo,
   useRef,
   useState,
@@ -10,7 +11,7 @@ import {
 } from "react";
 import { MobileActionDock } from "@/components/mobile-action-dock";
 import { usePwa } from "@/components/pwa-provider";
-import { ActionButton, CompactNotice } from "@/components/ui-primitives";
+import { ActionButton, CompactNotice, StatusChip } from "@/components/ui-primitives";
 import {
   parsePickDraft,
   pickDraftMatchesSavedState,
@@ -56,6 +57,35 @@ type DriverOption = {
   imageUrl: string | null;
 };
 
+function DriverPortrait({ driverName, imageUrl }: Pick<DriverOption, "driverName" | "imageUrl">) {
+  const [failedUrl, setFailedUrl] = useState<string | null>(null);
+  const portraitClass = "size-12 shrink-0 rounded-md border border-slate-200 sm:size-14";
+
+  if (imageUrl && imageUrl !== failedUrl) {
+    return (
+      // eslint-disable-next-line @next/next/no-img-element
+      <img
+        alt=""
+        className={portraitClass + " bg-slate-100 object-cover"}
+        decoding="async"
+        height={56}
+        loading="lazy"
+        onError={() => setFailedUrl(imageUrl)}
+        src={imageUrl}
+        width={56}
+      />
+    );
+  }
+
+  const words = driverName.trim().split(/\s+/);
+  const initials = words.length > 1 ? words[0][0] + words[words.length - 1][0] : words[0].slice(0, 1);
+  return (
+    <span aria-hidden="true" className={portraitClass + " grid place-items-center bg-slate-100 text-sm font-semibold uppercase text-slate-600"}>
+      {initials}
+    </span>
+  );
+}
+
 type DriverGroup = {
   drivers: DriverOption[];
   groupNumber: number;
@@ -87,6 +117,7 @@ export function PickemForm({
   savedSelection
 }: Props) {
   const { isOffline } = usePwa();
+  const driverCardId = useId();
   const groupNumbers = useMemo(() => groups.map((group) => group.groupNumber), [groups]);
   const [draftSelection, setDraftSelection] = useState<SelectionMap>(() => ({ ...savedSelection }));
   const [draftAverageSpeed, setDraftAverageSpeed] = useState(existingAverageSpeed);
@@ -543,6 +574,14 @@ export function PickemForm({
                   const isSelected = selectedDriverId === driver.id;
                   const isSaved = savedDriverId === driver.id;
                   const isSavedAndSelected = isSaved && isSelected;
+                  const nameId = driverCardId + "-" + group.groupNumber + "-" + driver.id;
+                  const detailId = nameId + "-detail";
+                  const status = isSavedAndSelected
+                    ? { label: "Saved", tone: "success" as const }
+                    : isSelected
+                      ? { label: "Selected · unsaved", tone: "info" as const }
+                      : isSaved ? { label: "Previously saved", tone: "warning" as const } : null;
+
 
                   const cardClassName = isSavedAndSelected
                     ? "border-emerald-500 bg-emerald-50 ring-2 ring-emerald-200"
@@ -555,11 +594,13 @@ export function PickemForm({
                   return (
                     <label
                       key={driver.id}
-                      className={`relative flex min-h-20 cursor-pointer items-center gap-2.5 rounded-md border px-3 py-2.5 shadow-sm transition hover:-translate-y-0.5 focus-within:outline focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-blue-600 ${cardClassName}`}
+                      className={`flex min-w-0 min-h-20 cursor-pointer items-center gap-2.5 rounded-md border px-3 py-2.5 shadow-sm transition hover:-translate-y-0.5 focus-within:outline focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-blue-600 ${cardClassName}`}
                     >
                       <input
                         required
                         className="sr-only"
+                        aria-labelledby={nameId}
+                        aria-describedby={status ? detailId + " " + nameId + "-status" : detailId}
                         checked={isSelected}
                         name={`driver_group${group.groupNumber}_id`}
                         onChange={() => {
@@ -584,49 +625,21 @@ export function PickemForm({
                         {isSelected ? <span className="h-1.5 w-1.5 rounded-full bg-white" /> : null}
                       </span>
 
-                      {driver.imageUrl ? (
-                        // eslint-disable-next-line @next/next/no-img-element
-                        <img
-                          alt={driver.driverName}
-                          className="h-14 w-14 rounded-md ui-control-border border border-slate-300 object-cover"
-                          decoding="async"
-                          height={56}
-                          loading="lazy"
-                          src={driver.imageUrl}
-                          width={56}
-                        />
-                      ) : (
-                        <div className="flex h-14 w-14 items-center justify-center rounded-md border border-dashed border-slate-400 text-[10px] font-semibold text-slate-500">
-                          NO IMG
-                        </div>
-                      )}
+                      <DriverPortrait driverName={driver.driverName} imageUrl={driver.imageUrl} />
 
-                      <div>
-                        <p className="pr-20 text-sm font-semibold text-slate-900">
+                      <span className="min-w-0 flex-1">
+                        <span className="block text-sm font-semibold text-slate-900 [overflow-wrap:anywhere]" id={nameId}>
                           {driver.driverName}
-                        </p>
-                        <p className="text-xs text-slate-600">
-                          {driver.detailText ?? `Championship Pts: ${driver.championshipPoints}`}
-                        </p>
-                      </div>
-
-                      {isSavedAndSelected ? (
-                        <span className="absolute right-2 top-2 rounded-full bg-emerald-600 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-white">
-                          Saved
                         </span>
-                      ) : null}
-
-                      {!isSaved && isSelected ? (
-                        <span className="absolute right-2 top-2 rounded-full bg-cyan-700 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-white">
-                          Selected
+                        <span className="block text-xs text-slate-600" id={detailId}>
+                          {driver.detailText ?? "Championship Pts: " + driver.championshipPoints}
                         </span>
-                      ) : null}
-
-                      {isSaved && !isSelected ? (
-                        <span className="absolute right-2 top-2 rounded-full bg-amber-500 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-white">
-                          Saved (old)
-                        </span>
-                      ) : null}
+                        {status ? (
+                          <StatusChip className="mt-1" id={nameId + "-status"} tone={status.tone}>
+                            {status.label}
+                          </StatusChip>
+                        ) : null}
+                      </span>
                     </label>
                   );
                 })}

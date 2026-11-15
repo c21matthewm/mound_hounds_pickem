@@ -10,6 +10,7 @@ import { createServerSupabaseClient } from "@/lib/supabase/server";
 type AppUserOptions = {
   requireRegistration?: boolean;
   requireSeasonDecision?: boolean;
+  seasonRegistrationNext?: string;
 };
 
 export async function requireAppUser(options: AppUserOptions = {}) {
@@ -41,15 +42,13 @@ export async function requireAppUser(options: AppUserOptions = {}) {
     ? await loadSeasonParticipation(supabase, activeSeason.id, user.id)
     : null;
 
-  if (activeSeason && profile.is_active && options.requireSeasonDecision && !participation) {
-    redirect("/season-registration");
+  if (activeSeason && profile.is_active && !participation && (options.requireSeasonDecision || options.requireRegistration)) {
+    redirect(options.seasonRegistrationNext
+      ? "/season-registration?" + new URLSearchParams({ next: options.seasonRegistrationNext }).toString()
+      : "/season-registration");
   }
 
   if (activeSeason && options.requireRegistration && !isRegisteredForSeason(participation)) {
-    if (activeSeason && profile.is_active && !participation) {
-      redirect("/season-registration");
-    }
-
     redirect(
       "/dashboard?message=Register%20for%20the%20active%20season%20before%20making%20picks."
     );

@@ -63,9 +63,9 @@ await build({
         }`).join("\n");
       }
       if(id === "\0fixture:pwa")return "export const usePwa=()=>window.fixturePwa??{isOffline:false,isStandalone:false,needsHttps:false};";
-      if (id === "\0fixture:admin-data") return "export const formatDateTime=value=>value.slice(0,10);";
+      if (id === "\0fixture:admin-data") return "export const formatDateTime=value=>value.slice(0,10);export const formatDateTimeLocalInput=value=>value.slice(0,16);";
       if (id === "\0fixture:next/link") return "import {createElement} from 'react';export default function Link({children,href,...props}){return createElement('a',{href,...props},children)}";
-      if (id === "\0fixture:next/navigation") return "export const useRouter=()=>({push:(url)=>window.fixtureNavigation=url,refresh:()=>{}});export const usePathname=()=>'/admin';";
+      if (id === "\0fixture:next/navigation") return "export const useRouter=()=>({push:(url,options)=>{window.fixtureNavigation=url;return window.fixturePushRoute?.(url,options)},refresh:()=>{}});export const usePathname=()=>'/admin';";
     },
     transform(code, id) {
       if (normalized(id) === normalized(globalsPath)) {
@@ -117,6 +117,39 @@ try {
   await page.evaluate(name=>window.showScene(name),name);
   await page.locator('main').waitFor();
   return page;
+ }
+ for (const width of [390, 1280]) {
+  const page = await scene("drivers", width);
+  await page.evaluate(() => {
+    window.fixturePushRoute = () => new Promise(resolve => { window.finishAdminNavigation = resolve; });
+    window.showAdminNavigationScene();
+  });
+  const race = page.locator('select[name="result_race_id"]');
+  const feedback = page.locator('select[name="feedback_status"]');
+  const audit = page.locator('input[name="audit_q"]');
+  for (const entry of [
+    { control: race, select: "2", button: "Open race", pending: "Opening race…", href: "/admin?tab=race-week&phase=results&result_race_id=2", next: { raceId: 2 }, value: "2", previous: "1" },
+    { control: feedback, select: "new", button: "Apply", pending: "Updating feedback…", href: "/admin?tab=feedback&feedback_status=new", next: { feedbackStatus: "new" }, value: "new", previous: "all" },
+    { control: audit, fill: " Long Beach ", button: "Search audit log", pending: "Searching audit log…", href: "/admin?tab=health&audit_q=Long+Beach#audit-log", next: { auditSearch: "Long Beach" }, value: "Long Beach", previous: "" }
+  ]) {
+    if (entry.select) await entry.control.selectOption(entry.select);
+    else await entry.control.fill(entry.fill);
+    const button = page.getByRole("button", { name: entry.button, exact: true });
+    await button.click();
+    await page.getByText(entry.pending, { exact: true }).waitFor();
+    assert.equal(await button.isDisabled(), true);
+    assert.equal(await page.evaluate(() => window.fixtureNavigation), entry.href);
+    await page.evaluate(next => { window.showAdminNavigationScene(next); window.finishAdminNavigation(); }, entry.next);
+    await page.getByText(entry.pending, { exact: true }).waitFor({ state: "hidden" });
+    assert.equal(await entry.control.inputValue(), entry.value);
+    await page.evaluate(() => window.showAdminNavigationScene());
+    await page.waitForFunction(({ name, value }) => document.querySelector('[name="' + name + '"]').value === value, {
+      name: await entry.control.getAttribute("name"), value: entry.previous
+    });
+    checks++;
+  }
+  assert.equal(await page.getByRole("link", { name: /Results & audit/ }).getAttribute("aria-current"), "step");
+  await page.close();
  }
  for(const name of ['results','drivers','historical','invite','participants','bulk','rules','closeout','offseason','recoveryOffseason','recoveryPast','recoveryActive','recoveryRetention','recoveryRetentionPast','recoveryRetentionMissing'])for(const width of [320,375,390,768,1280]){
   const page=await scene(name,width);

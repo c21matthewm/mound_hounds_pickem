@@ -192,7 +192,6 @@ export default async function LeaderboardPage({ searchParams }: PageProps) {
       description={activeTab === "hall"
           ? "Past champions, season records, and complete final standings."
           : "Standings, locked picks by race, season analytics, and league history."}
-      eyebrow="League Data"
       maxWidth="max-w-[1200px]"
       title="Leaderboard"
     >
