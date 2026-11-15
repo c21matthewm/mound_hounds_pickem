@@ -628,7 +628,6 @@ export default async function AdminPage({ searchParams }: PageProps) {
           Signed in as <span className="font-semibold text-slate-900">{profile.team_name}</span>.
         </>
       }
-      eyebrow="League Ops"
       maxWidth="max-w-7xl"
       title="Admin Dashboard"
     >

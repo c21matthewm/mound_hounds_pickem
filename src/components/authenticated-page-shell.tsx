@@ -7,7 +7,7 @@ type Props = {
   actions?: ReactNode;
   children: ReactNode;
   description?: ReactNode;
-  eyebrow: string;
+  eyebrow?: string;
   maxWidth?: string;
   title: string;
 };
@@ -27,10 +27,10 @@ export function AuthenticatedPageShell({
       <header className="border-b border-slate-200 pb-5 md:pb-6">
         <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-start gap-3 sm:gap-4">
           <div className="min-w-0 max-w-3xl">
-            <p className="inline-flex rounded-full border border-blue-200 bg-blue-50 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-blue-700">
-              {eyebrow}
-            </p>
-            <h1 className="mt-3 break-words text-3xl font-semibold tracking-tight text-slate-950 md:text-4xl">
+            {eyebrow ? (
+              <p className="mb-1 text-xs font-semibold tracking-wide text-slate-600">{eyebrow}</p>
+            ) : null}
+            <h1 className="break-words text-3xl font-semibold tracking-tight text-slate-950 md:text-4xl">
               {title}
             </h1>
             {description ? (

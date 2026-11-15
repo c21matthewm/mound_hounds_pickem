@@ -18,3 +18,5 @@ describe("Admin capability and off-season diagnostics",()=>{
  it("shows each missing capability even when the base schema is healthy",()=>{const capabilities=parseAdminCapabilities({items:[{name:"Season completion",installed:false}]},false);const html=renderToStaticMarkup(<AdminSystemHealth {...base} capabilities={capabilities} activeSeasonYear={null}/>);expect(html).toContain("Action needed");expect(html).toContain("Missing");expect(html).toContain("Season completion");});
  it("does not demand a race-job heartbeat between seasons",()=>{const capabilities=parseAdminCapabilities({items:[{name:"Season completion",installed:true},...newCapabilities]},false);const html=renderToStaticMarkup(<AdminSystemHealth {...base} capabilities={capabilities} activeSeasonYear={null}/>);expect(html).toContain("System ready");expect(html).toContain("between seasons");const active=renderToStaticMarkup(<AdminSystemHealth {...base} capabilities={capabilities} activeSeasonYear={2027}/>);expect(active).toContain("Action needed");});
 });
+
+vi.mock("next/navigation", () => ({ useRouter: () => ({ push: vi.fn() }) }));

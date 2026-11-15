@@ -1,3 +1,4 @@
+import { AdminNavigationForm } from "@/components/admin-navigation-form";
 import Link from "next/link";
 import type { FeedbackItemRow } from "@/app/admin/admin-types";
 import { updateFeedbackStatusAction } from "@/app/admin/maintenance-actions";
@@ -48,10 +49,10 @@ export function AdminFeedbackWorkspace({
             title="Participant Feedback"
           />
 
-          <form
-            action="/admin"
+          <AdminNavigationForm
             className="mt-4 flex flex-col gap-2 border-y border-slate-200 py-3 sm:flex-row sm:items-end"
-            method="get"
+            key={feedbackStatus}
+            pendingLabel="Updating feedback…"
           >
             <input name="tab" type="hidden" value="feedback" />
             <label className="block sm:max-w-56">
@@ -75,7 +76,7 @@ export function AdminFeedbackWorkspace({
             >
               Apply
             </button>
-          </form>
+          </AdminNavigationForm>
 
           <div className="mt-5 grid gap-3">
             {feedbackItems.length === 0 ? (

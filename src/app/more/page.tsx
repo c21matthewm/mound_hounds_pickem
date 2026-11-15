@@ -34,7 +34,6 @@ export default async function MorePage() {
   return (
     <AuthenticatedPageShell
       description="League information and support."
-      eyebrow="More"
       maxWidth="max-w-3xl"
       title="League Menu"
     >

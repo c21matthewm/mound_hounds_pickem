@@ -141,3 +141,5 @@ describe("audit previews and rendering",()=>{
     const html=renderToStaticMarkup(<AdminAuditLog auditLog={data({error:"Audit unavailable"})}/>);expect(html).toContain("Retry audit log");expect(html).not.toContain("No admin events");
   });
 });
+
+vi.mock("next/navigation", () => ({ useRouter: () => ({ push: vi.fn() }) }));

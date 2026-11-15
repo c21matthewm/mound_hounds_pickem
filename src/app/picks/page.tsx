@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { AuthenticatedPageShell } from "@/components/authenticated-page-shell";
 import { PickSubmissionSnapshot } from "@/components/pick-submission-snapshot";
+import { RaceWeekSummary } from "@/components/race-week-summary";
 import { RaceScheduleRefresh } from "@/components/race-schedule-refresh";
 import { saveWeeklyPickAction } from "@/app/picks/actions";
 import { PickemForm } from "@/components/pickem-form";
@@ -110,7 +111,8 @@ export default async function PicksPage({ searchParams }: PageProps) {
 
   const { activeSeason, profile, supabase, user } = await requireAppUser({
     requireRegistration: true,
-    requireSeasonDecision: true
+    requireSeasonDecision: true,
+    seasonRegistrationNext: requestedRaceId ? "/picks?race_id=" + requestedRaceId : "/picks"
   });
 
   const now = new Date();
@@ -118,7 +120,6 @@ export default async function PicksPage({ searchParams }: PageProps) {
   if (!activeSeason) {
     return (
       <AuthenticatedPageShell
-        eyebrow="Race Picks"
         maxWidth="max-w-4xl"
         title="Pick'em Form"
       >
@@ -156,7 +157,6 @@ export default async function PicksPage({ searchParams }: PageProps) {
   if (pickWindow.length === 0) {
     return (
       <AuthenticatedPageShell
-        eyebrow="Race Picks"
         maxWidth="max-w-4xl"
         title="Pick'em Form"
       >
@@ -182,7 +182,6 @@ export default async function PicksPage({ searchParams }: PageProps) {
           roundNumber: openingRace.round_number,
           seasonYear: activeSeason.seasonYear
         })} · ${openingRace.race_name}`}
-        eyebrow="Race Picks"
         maxWidth="max-w-4xl"
         title="Pick'em Form"
       >
@@ -368,11 +367,6 @@ export default async function PicksPage({ searchParams }: PageProps) {
   const unsavedFormLabel = picksLocked
     ? "Locked"
     : previousResultsBlocked ? "Results Needed" : "Needs picks";
-  const raceStatusClass = previousResultsBlocked
-    ? "border-cyan-300/60 bg-cyan-300/15 text-cyan-100"
-    : picksLocked
-      ? "border-amber-300/60 bg-amber-300/15 text-amber-100"
-      : "border-emerald-300/60 bg-emerald-300/15 text-emerald-100";
 
   return (
     <AuthenticatedPageShell
@@ -381,7 +375,6 @@ export default async function PicksPage({ searchParams }: PageProps) {
           Team <span className="font-semibold text-slate-900">{profile.team_name}</span>
         </>
       }
-      eyebrow="Race Picks"
       maxWidth="max-w-6xl"
       title="Pick'em Form"
     >
@@ -392,142 +385,91 @@ export default async function PicksPage({ searchParams }: PageProps) {
         raceId={selectedRace.id}
         raceStartAt={selectedRace.race_date}
       />
-      {pickWindow.length > 1 ? (
-        <section className="ui-panel mt-6 rounded-lg border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
-          <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2">
-            <div className="min-w-0">
-              <p className="text-xs font-semibold uppercase tracking-wide text-cyan-700">
-                {pickWindowRoundLabel(pickWindow)} · Doubleheader
-              </p>
-              <h2 className="mt-1 text-lg font-semibold text-slate-950">
-                Two separate race submissions
-              </h2>
-            </div>
-            <span className="shrink-0 rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-semibold text-slate-700">
-              {savedRaceCount}/{pickWindow.length} saved
-            </span>
-          </div>
-          <nav
-            aria-label="Doubleheader race forms"
-            className="mt-4 grid gap-3 sm:grid-cols-2"
-          >
-            {pickWindow.map((race) => {
-              const isSelected = race.id === selectedRace.id;
-              const isSaved = pickByRaceId.has(race.id);
-
-              return (
-                <Link
-                  aria-current={isSelected ? "page" : undefined}
-                  className={`grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-start gap-3 rounded-md border p-3.5 text-left transition sm:p-4 ${
-                    isSelected
-                      ? "border-cyan-700 bg-cyan-50 shadow-sm"
-                      : "border-slate-200 bg-white hover:border-slate-400 hover:bg-slate-50"
-                  }`}
-                  href={`/picks?race_id=${race.id}`}
-                  key={race.id}
-                >
-                  <span className="min-w-0">
-                    <span className="block text-[11px] font-semibold uppercase tracking-wide text-slate-500">
-                      R{race.round_number} ·{" "}
-                      {formatLeagueDateTime(race.race_date, { weekday: "long" })}
-                    </span>
-                    <span className="mt-1 block text-sm font-semibold leading-5 text-slate-950">
-                      {race.race_name}
-                    </span>
-                  </span>
-                  <StatusChip
-                    className="mt-0.5 shrink-0"
-                    tone={isSaved ? "success" : picksLocked ? "neutral" : "warning"}
-                  >
-                    {isSaved ? savedFormLabel : unsavedFormLabel}
-                  </StatusChip>
-                </Link>
-              );
-            })}
-          </nav>
-          <p className="mt-3 text-xs leading-5 text-slate-500">
-            Each race has its own drivers and speed tie-breaker. Both forms lock at{" "}
-            {formatRaceDate(pickLockAt)}.
-          </p>
-        </section>
-      ) : null}
-
-      <section className="mt-6 overflow-hidden rounded-lg ui-panel border border-slate-200 bg-white">
-        {!picksLocked && selectedRace.title_image_url ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img
-            alt={`${selectedRace.race_name} banner`}
-            className="h-44 w-full object-cover md:h-64"
-            src={selectedRace.title_image_url}
-          />
-        ) : null}
-
-        <div className="bg-[radial-gradient(circle_at_top_left,_#0ea5e9,_transparent_28%),linear-gradient(135deg,_#0f172a,_#1e293b)] p-6 text-white md:p-7">
-          <div className="flex flex-wrap items-start justify-between gap-4">
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-cyan-200">
-                {raceContextLabel({
-                  roundNumber: selectedRace.round_number,
-                  seasonYear: activeSeason.seasonYear
-                })}
-              </p>
-              <h2 className="mt-2 text-3xl font-semibold tracking-tight">{selectedRace.race_name}</h2>
-            </div>
-            <span
-              className={`rounded-full border px-3 py-1 text-xs font-semibold uppercase tracking-wide ${raceStatusClass}`}
-            >
-              Status: {raceStatusLabel}
-            </span>
-          </div>
-          {picksLocked ? (
-            <p className="mt-3 text-sm text-slate-200">Pick deadline · {formatRaceDate(pickLockAt)}</p>
-          ) : (
-            <>
-              <dl className="mt-5 grid border-y border-white/15 text-sm sm:grid-cols-2 lg:grid-cols-4 lg:divide-x lg:divide-white/15">
-                <div className="border-b border-white/15 py-3 sm:px-3 lg:border-b-0 lg:first:pl-0">
-                  <dt className="text-xs font-semibold uppercase tracking-wide text-slate-300">
-                    {isIndy500Pickem ? "Pick Lock (Race Start)" : "Pick Deadline"}
-                  </dt>
-                  <dd className="mt-1 font-medium">{formatRaceDate(pickLockAt)}</dd>
-                </div>
-                <div className="border-b border-white/15 py-3 sm:px-3 lg:border-b-0">
-                  <dt className="text-xs font-semibold uppercase tracking-wide text-slate-300">Race Start</dt>
-                  <dd className="mt-1 font-medium">{formatRaceDate(selectedRace.race_date)}</dd>
-                </div>
-                <div className="border-b border-white/15 py-3 sm:border-b-0 sm:px-3">
-                  <dt className="text-xs font-semibold uppercase tracking-wide text-slate-300">Payout</dt>
-                  <dd className="mt-1 font-medium">${Number(selectedRace.payout).toFixed(2)}</dd>
-                </div>
-                <div className="py-3 sm:px-3 lg:last:pr-0">
-                  <dt className="text-xs font-semibold uppercase tracking-wide text-slate-300">
-                    {isIndy500Pickem ? "Pick Format" : "Timezone"}
-                  </dt>
-                  <dd className="mt-1 font-medium">
-                    {isIndy500Pickem ? "Indy 500: 8 picks" : LEAGUE_TIME_ZONE}
-                  </dd>
-                </div>
-              </dl>
-              <p className="mt-3 text-xs text-slate-300">
-                Visit the official{" "}
-                <a
-                  className="font-semibold text-cyan-200 underline decoration-cyan-300/60 underline-offset-2 hover:text-cyan-100"
-                  href="https://www.indycar.com/"
-                  rel="noreferrer"
-                  target="_blank"
-                >
-                  INDYCAR
-                </a>{" "}
-                website for more information.
-              </p>
-              {isIndy500Pickem ? (
-                <p className="mt-4 rounded-md border border-cyan-300/30 bg-cyan-300/10 px-3 py-2 text-xs text-cyan-50">
-                  Indianapolis 500 picks use qualifying-order groups and lock when the race starts.
+      <RaceWeekSummary
+        banner={picksLocked ? null : selectedRace.title_image_url}
+        context={raceContextLabel({ roundNumber: selectedRace.round_number, seasonYear: activeSeason.seasonYear })}
+        status={raceStatusLabel}
+        timing={{ label: isIndy500Pickem ? "Pick Lock (Race Start)" : "Pick deadline", dateTime: pickLockAt }}
+        title={selectedRace.race_name}
+        tone={previousResultsBlocked ? "warning" : picksLocked ? "neutral" : "info"}
+      >
+        {pickWindow.length > 1 || !picksLocked ? (
+          <>
+            {pickWindow.length > 1 ? (
+              <>
+                <p className="text-xs font-semibold text-slate-700">
+                  {pickWindowRoundLabel(pickWindow)} · Doubleheader · {savedRaceCount}/{pickWindow.length} saved
                 </p>
-              ) : null}
-            </>
-          )}
-        </div>
-      </section>
+                <nav
+                  aria-label="Doubleheader race forms"
+                  className="mt-2 grid gap-2 sm:grid-cols-2"
+                >
+                  {pickWindow.map((race) => {
+                    const isSelected = race.id === selectedRace.id;
+                    const isSaved = pickByRaceId.has(race.id);
+
+                    return (
+                      <Link
+                        aria-current={isSelected ? "page" : undefined}
+                        className={`grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-2 rounded-md border px-3 py-2 text-left transition ${
+                          isSelected
+                            ? "border-cyan-700 bg-cyan-50 shadow-sm"
+                            : "border-slate-200 bg-white hover:border-slate-400 hover:bg-slate-50"
+                        }`}
+                        href={`/picks?race_id=${race.id}`}
+                        key={race.id}
+                      >
+                        <span className="min-w-0">
+                          <span className="block text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                            R{race.round_number} ·{" "}
+                            {formatLeagueDateTime(race.race_date, { weekday: "long" })}
+                          </span>
+                          <span className="mt-1 block text-sm font-semibold leading-5 text-slate-950">
+                            {race.race_name}
+                          </span>
+                        </span>
+                        <StatusChip
+                          className="mt-0.5 shrink-0"
+                          tone={isSaved ? "success" : picksLocked ? "neutral" : "warning"}
+                        >
+                          {isSaved ? savedFormLabel : unsavedFormLabel}
+                        </StatusChip>
+                      </Link>
+                    );
+                  })}
+                </nav>
+              </>
+            ) : null}
+            {!picksLocked ? (
+              <details className="mt-2">
+                <summary className="min-h-11 w-fit cursor-pointer py-2.5 text-sm font-semibold text-blue-800">Race details</summary>
+                <div className="border-t border-slate-200 py-3 text-sm text-slate-700">
+                  <dl className="flex flex-wrap gap-x-6 gap-y-3">
+                    <div>
+                      <dt className="text-xs font-semibold text-slate-600">Race start</dt>
+                      <dd>{formatRaceDate(selectedRace.race_date)}</dd>
+                    </div>
+                    <div>
+                      <dt className="text-xs font-semibold text-slate-600">Payout</dt>
+                      <dd>${Number(selectedRace.payout).toFixed(2)}</dd>
+                    </div>
+                    <div>
+                      <dt className="text-xs font-semibold text-slate-600">Timezone</dt>
+                      <dd>{LEAGUE_TIME_ZONE}</dd>
+                    </div>
+                  </dl>
+                  {isIndy500Pickem ? (
+                    <p className="mt-3">Indianapolis 500 picks use qualifying-order groups and lock when the race starts.</p>
+                  ) : null}
+                  <a className="mt-3 inline-block font-semibold text-blue-800 underline" href="https://www.indycar.com/" rel="noreferrer" target="_blank">
+                    Official INDYCAR website
+                  </a>
+                </div>
+              </details>
+            ) : null}
+          </>
+        ) : null}
+      </RaceWeekSummary>
 
       {message ? (
         <CompactNotice className="mt-6" tone="success">

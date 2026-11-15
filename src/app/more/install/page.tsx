@@ -17,7 +17,6 @@ export default async function LeagueInstallPage() {
   return (
     <AuthenticatedPageShell
       description={INSTALL_GUIDE_DESCRIPTION}
-      eyebrow="More"
       maxWidth="max-w-3xl"
       title="Install the app"
     >

@@ -54,7 +54,6 @@ export default async function FeedbackPage({ searchParams }: PageProps) {
   return (
     <AuthenticatedPageShell
       description="Report bugs or suggest improvements for league admins to review."
-      eyebrow="Feedback"
       maxWidth="max-w-4xl"
       title="Bug Reports & Improvements"
     >

@@ -1,5 +1,7 @@
+import { SeasonRegistrationForm } from "@/components/season-registration-form";
 import { createElement, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
+import { RaceWeekSummary } from "@/components/race-week-summary";
 import { RaceScheduleRefresh } from "@/components/race-schedule-refresh";
 import { HallOfFameYearSelect } from "@/components/hall-of-fame-year-select";
 import { PicksRaceSelect } from "@/components/picks-race-select";
@@ -19,13 +21,38 @@ import "@/app/globals.css";
 
 const root = createRoot(document.getElementById("root"));
 let sceneVersion = 0;
-window.showPickScene = (name) => {
+const fixtureArtwork = "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7";
+window.showPickScene = (name, preview) => {
   const count = name.startsWith("indy") ? 8 : 6;
-  const firstSubmission = name === "first" || name === "indy-first";
+  const presentation = name.endsWith("-presentation");
+  const firstSubmission = name === "first" || name === "indy-first" || Boolean(preview);
   const groups = Array.from({ length: count }, (_, index) => ({
     groupNumber: index + 1, isTopGroup: index < 5,
     drivers: [1, 2].map(offset => ({ id: index * 2 + offset, driverName: `Fixture G${index + 1} Driver ${offset}`, imageUrl: null, championshipPoints: 0 }))
   }));
+  if (preview) {
+    const names = [
+      ["Alex Morgan", "Jordan Reyes", "Sofia Bennett", "Connor Lee"],
+      ["Maya Chen", "Elliot Hayes", "Camila Torres", "Liam Brooks"],
+      ["Noah Walker", "Avery James", "Riley Foster", "Daniel Ortiz"],
+      ["Logan Mills", "Sienna Cole", "Robin Grant", "Casey Reed"],
+      ["Eva Moreno", "Nico Shaw", "Isaac Pike", "Drew Young"],
+      ["Finley Cruz", "Blake Evans", "Emery Davis", "Jules Ross"]
+    ];
+    groups.forEach((group, index) => {
+      group.drivers = names[index].map((driverName, driver) => ({
+        id: index * 4 + driver + 1,
+        driverName,
+        imageUrl: null,
+        championshipPoints: 154 - index * 19 - driver * 3
+      }));
+    });
+  } else if (presentation) {
+    groups[0].drivers[0].driverName = "Alexandra Montgomery-Worthington the Third";
+    groups[0].drivers[1].driverName = "Morgan Reyes";
+    groups[0].drivers[1].imageUrl = "data:image/gif;base64,broken";
+    groups[1].drivers[0].imageUrl = fixtureArtwork;
+  }
   const savedSelection = Object.fromEntries(groups.map(group => [group.groupNumber, firstSubmission ? null : group.drivers[0].id]));
   const props = {
     action: async form => {
@@ -37,7 +64,25 @@ window.showPickScene = (name) => {
     existingSavedAt: firstSubmission ? null : "2027-05-01T12:00:00Z",
     groups, picksLocked: name === "locked", raceId: 1, savedSelection
   };
-  root.render(createElement(PwaProvider, { key: ++sceneVersion }, createElement(AuthenticatedPageShell, { eyebrow: "Race picks", title: "Pick'em Form" }, createElement(PickemForm, props))));
+  root.render(createElement(PwaProvider, { key: ++sceneVersion },
+    createElement(
+      AuthenticatedPageShell,
+      { title: "Pick'em Form", description: preview ? "Team Pacific Apex Racing" : undefined },
+      presentation ? createElement(RaceWeekSummary, {
+        banner: preview?.raceImage ?? "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAQAAAABCAYAAAD5PA/NAAAACklEQVR4nGNgQAMAABEAAZHC/fQAAAAASUVORK5CYII=",
+        context: "2027 · R7",
+        status: "Open",
+        timing: { label: "Pick deadline", dateTime: "2027-05-01T14:00:00Z" },
+        title: "Long Beach Weekend Grand Prix",
+        tone: "info"
+      }, preview ? createElement("details", { className: "mt-2" },
+          createElement("summary", { className: "min-h-11 w-fit cursor-pointer py-2.5 text-sm font-semibold text-blue-800" }, "Race details"),
+          createElement("p", { className: "py-2 text-sm text-slate-700" }, "May 2, 2027 at 3:00 PM · League time")
+        ) : null) : null,
+      preview ? createElement(PickSubmissionSnapshot, { latestSavedAt: null, savedAverageSpeed: null, savedPicks: [] }) : null,
+      createElement(PickemForm, props)
+    )
+  ));
 };
 
 window.showStandingsScene = (hasTeam) => {
@@ -202,5 +247,29 @@ window.showFeedbackScene = () => {
     createElement(AuthenticatedPageShell, { eyebrow: "Feedback", title: "Feedback" },
       createElement(FeedbackForm)
     )
+  ));
+};
+
+window.showRegistrationScene = () => {
+  root.render(createElement(PwaProvider, { key: ++sceneVersion },
+    createElement(AuthenticatedPageShell, { eyebrow: "2027 League", title: "Season registration" },
+      createElement(SeasonRegistrationForm, {
+        adminEmail: "admin@example.test", canJoin: true, canSkip: true, next: "/picks?race_id=7", seasonYear: 2027
+      })
+    )
+  ));
+};
+
+window.showDashboardArtworkScene = mascot => {
+  root.render(createElement(AuthenticatedPageShell, { title: "Dashboard" },
+    createElement(RaceWeekSummary, {
+      action: createElement("a", { href: "/picks" }, "Make picks"),
+      context: "2027 · R7",
+      mascot,
+      status: "Open",
+      timing: { label: "Pick deadline", dateTime: "2027-05-01T14:00:00Z" },
+      title: "Long Beach Weekend Grand Prix",
+      tone: "info"
+    })
   ));
 };

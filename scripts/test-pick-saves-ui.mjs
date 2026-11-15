@@ -38,6 +38,7 @@ await build({
     enforce: "pre",
     resolveId(source) {
       if (/(?:^|\/)app\/feedback\/actions(?:\.ts)?$/.test(normalized(source))) return "\0fixture:feedback-action";
+      if (/(?:^|\/)app\/actions\/auth(?:\.ts)?$/.test(normalized(source))) return "\0fixture:registration-action";
       if (source === "next/link" || source === "next/navigation") return "\0fixture:" + source;
       if (source === "server-only" || source.startsWith("next/") || source.startsWith("@supabase/") || source.includes("/lib/supabase/")) {
         throw new Error("The offline fixture reached a server/service import: " + source);
@@ -45,6 +46,7 @@ await build({
     },
     load(id) {
       if (id === "\0fixture:feedback-action") return "export const submitFeedbackAction = (form) => new Promise(resolve => {window.fixtureCalls.push(Object.fromEntries(form)); window.finishFeedback = resolve;});";
+      if (id === "\0fixture:registration-action") return "export const submitSeasonRegistrationFormAction = () => { throw new Error('Unexpected native submission'); }; export const setSeasonParticipationAction = form => new Promise(resolve => {window.fixtureCalls.push(Object.fromEntries(form)); window.finishRegistration = resolve;});";
       if (id === "\0fixture:next/link") return "import {createElement} from 'react';export default function Link({children,href,...props}){return createElement('a',{href,...props},children)}";
       if (id === "\0fixture:next/navigation") return "const router={push:(href,options)=>window.fixtureNavigate(href,options),replace:(href)=>{window.fixtureReplaced=href;},refresh:()=>{window.fixtureRefreshes=(window.fixtureRefreshes||0)+1;}};export const useRouter=()=>router;export const usePathname=()=>'/picks';";
     },
@@ -165,6 +167,88 @@ try {
     assert.equal(await page.evaluate(() => window.fixtureCalls.length), 3);
     await page.close();
   }
+  {
+    const page = await scene("saved");
+    await page.evaluate(() => window.showRegistrationScene());
+    const code = page.getByLabel("Season invite code");
+    const join = page.getByRole("button", { name: "Join 2027 season", exact: true });
+    const skip = page.getByRole("button", { name: "Skip this season", exact: true });
+    await code.fill("Fixture-Code-7");
+    for (const failure of [
+      { field: "invite_code", message: "The season invite code is incorrect." },
+      { message: "Season registration could not be opened. Please try again." }
+    ]) {
+      await join.click();
+      await page.getByRole("button", { name: "Joining season...", exact: true }).waitFor();
+      assert.equal(await skip.isDisabled(), true);
+      assert.deepEqual(await page.evaluate(() => window.fixtureCalls.at(-1)), {
+        next: "/picks?race_id=7", invite_code: "Fixture-Code-7", decision: "register"
+      });
+      await page.evaluate(value => window.finishRegistration(value), failure);
+      await page.getByRole("alert").filter({ hasText: failure.message }).waitFor();
+      assert.equal(await code.inputValue(), "Fixture-Code-7");
+      assert.equal(await code.getAttribute("aria-invalid"), failure.field ? "true" : null);
+      checks++;
+    }
+    await skip.click();
+    await page.getByRole("button", { name: "Saving decision...", exact: true }).waitFor();
+    assert.equal(await join.isDisabled(), true);
+    assert.deepEqual(await page.evaluate(() => window.fixtureCalls.at(-1)), {
+      next: "/picks?race_id=7", decision: "decline"
+    });
+    assert.equal(new URL(page.url()).searchParams.has("invite_code"), false);
+    checks++;
+    await page.close();
+  }
+
+  for (const [name, width] of [["saved-presentation", 320], ["indy-presentation", 1280]]) {
+    const page = await scene(name, width);
+    const summary = page.getByRole("region", { name: "Long Beach Weekend Grand Prix" });
+    assert.equal(await summary.getByText("Pick deadline", { exact: true }).isVisible(), true);
+    const banner = await summary.locator("img").evaluate(image => ({
+      width: image.getBoundingClientRect().width,
+      panelWidth: image.closest("section").clientWidth,
+      fit: getComputedStyle(image).objectFit
+    }));
+    assert.ok(Math.abs(banner.width - banner.panelWidth) < 2, "Race artwork fills the top of the summary");
+    assert.equal(banner.fit, "contain", "Race artwork keeps the full image");
+    const saved = page.getByRole("radio", { name: "Alexandra Montgomery-Worthington the Third", exact: true });
+    const alternative = page.getByRole("radio", { name: "Morgan Reyes", exact: true });
+    const savedCard = saved.locator("xpath=ancestor::label");
+    const alternativeCard = alternative.locator("xpath=ancestor::label");
+    assert.equal(await saved.isChecked(), true);
+    await savedCard.getByText("Saved", { exact: true }).waitFor();
+    await alternativeCard.getByText("MR", { exact: true }).waitFor();
+    assert.equal(await alternativeCard.locator("img").count(), 0);
+    const driverImage = page.locator("#driver-group-2 img");
+    await driverImage.waitFor();
+    assert.equal(await driverImage.getAttribute("alt"), "");
+    if (width <= 320) await alternativeCard.click();
+    else {
+      await saved.focus();
+      await page.keyboard.press("ArrowRight");
+    }
+    assert.equal(await alternative.isChecked(), true);
+    await savedCard.getByText("Previously saved", { exact: true }).waitFor();
+    await alternativeCard.getByText("Selected · unsaved", { exact: true }).waitFor();
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 1), false);
+    checks++;
+    await page.close();
+  }
+
+  for (const width of [320, 1280]) {
+    const page = await scene("saved", width);
+    const mascot = readFileSync(path.join(root, "public/images/branding/mound-hound.webp")).toString("base64");
+    await page.evaluate(mascot => window.showDashboardArtworkScene("data:image/webp;base64," + mascot), mascot);
+    const portrait = page.getByRole("region", { name: "Long Beach Weekend Grand Prix" }).locator("img");
+    assert.equal(await portrait.evaluate(image => getComputedStyle(image).objectFit), "contain");
+    const size = await portrait.boundingBox();
+    assert.ok(size.height >= (width === 320 ? 80 : 112), "Mascot has a taller frame");
+    assert.equal(size.height, size.width);
+    checks++;
+    await page.close();
+  }
+
   let page = await scene("saved");
   assert.equal(await page.getByRole("button", { name: "Already saved", exact: true }).isDisabled(), true);
   assert.equal(await page.locator('[name="average_speed"]').isEnabled(), true);

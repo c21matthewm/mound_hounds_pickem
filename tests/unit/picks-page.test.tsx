@@ -102,6 +102,16 @@ describe("pick form doubleheader badges", () => {
     expect(selector).toContain('href="/picks?race_id=2"');
   });
 
+  it("keeps the selected race and its deadline before the editor, with secondary details folded", async () => {
+    withSavedPicks(0);
+    vi.setSystemTime(new Date("2027-05-31T12:00:00Z"));
+    const html = await renderPicks("2");
+    expect(html).toMatch(/id="race-week-title"[^>]*>Weekend race 2<\/h2>/);
+    expect(html.indexOf('id="race-week-title"')).toBeLessThan(html.indexOf('aria-label="Doubleheader race forms"'));
+    expect(html.indexOf("Pick deadline")).toBeLessThan(html.indexOf('name="average_speed"'));
+    expect(html).toMatch(/<details class="mt-2"><summary[^>]*>Race details<\/summary>/);
+  });
+
   it("shows the scheduled opening before the selector can invite picks", async () => {
     withSavedPicks(0);
     vi.setSystemTime(new Date("2027-05-24T12:00:00Z"));

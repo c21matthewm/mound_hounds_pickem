@@ -1,16 +1,8 @@
-import { SeasonInviteCodeInput } from "@/components/season-invite-code-input";
 import { redirect } from "next/navigation";
-import { setSeasonParticipationAction } from "@/app/actions/auth";
 import { AuthFormPanel } from "@/components/auth-flow-shell";
 import { AuthenticatedPageShell } from "@/components/authenticated-page-shell";
-import { SeasonInviteCodeHelp } from "@/components/season-invite-code-help";
-import { SubmitButton } from "@/components/submit-button";
-import {
-  CompactNotice,
-  FormField,
-  actionControlClassName,
-  fieldControlClassName
-} from "@/components/ui-primitives";
+import { SeasonRegistrationForm } from "@/components/season-registration-form";
+import { CompactNotice } from "@/components/ui-primitives";
 import { isProfileComplete, type ProfileRow } from "@/lib/profile";
 import { leagueAdminEmail } from "@/lib/league-contact";
 import { queryStringParam, sanitizeNextPath } from "@/lib/query";
@@ -102,58 +94,13 @@ export default async function SeasonRegistrationPage({ searchParams }: PageProps
               You previously skipped this season. You can still join before submitting picks.
             </p>
           ) : null}
-          <form action={setSeasonParticipationAction} className="grid gap-3 sm:grid-cols-2">
-            <input name="next" type="hidden" value={next} />
-            <FormField
-              className="sm:col-span-2"
-              description="The code confirms that this permanent account belongs in the private league."
-              label="Season invite code"
-            >
-              <SeasonInviteCodeInput
-                required
-                autoCapitalize="none"
-                autoComplete="off"
-                className={fieldControlClassName()}
-                disabled={!activeSeason.registrationCodeConfiguredAt}
-                maxLength={64}
-                minLength={8}
-                name="invite_code"
-                type="text"
-              />
-            </FormField>
-            <div className="sm:col-span-2">
-              <SeasonInviteCodeHelp
-                adminEmail={adminEmail}
-                seasonYear={activeSeason.seasonYear}
-              />
-            </div>
-            {!activeSeason.registrationCodeConfiguredAt ? (
-              <CompactNotice className="sm:col-span-2" tone="warning">
-                Registration is waiting for the league administrator to configure this season&apos;s
-                invite code.
-              </CompactNotice>
-            ) : null}
-            <SubmitButton
-              className={actionControlClassName("primary")}
-              disabled={!activeSeason.registrationCodeConfiguredAt}
-              name="decision"
-              pendingLabel="Joining season..."
-              value="register"
-            >
-              Join {activeSeason.seasonYear} season
-            </SubmitButton>
-            {!participation ? (
-              <SubmitButton
-                className={actionControlClassName("secondary")}
-                formNoValidate
-                name="decision"
-                pendingLabel="Saving decision..."
-                value="decline"
-              >
-                Skip this season
-              </SubmitButton>
-            ) : null}
-          </form>
+          <SeasonRegistrationForm
+            adminEmail={adminEmail}
+            canJoin={Boolean(activeSeason.registrationCodeConfiguredAt)}
+            canSkip={!participation}
+            next={next}
+            seasonYear={activeSeason.seasonYear}
+          />
         </AuthFormPanel>
       )}
     </AuthenticatedPageShell>
